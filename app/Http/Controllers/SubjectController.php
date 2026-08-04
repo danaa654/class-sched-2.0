@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreSubjectRequest;
+use App\Http\Requests\UpdateSubjectRequest;
 use App\Models\Major;
 use App\Models\Subject;
 use Illuminate\Http\RedirectResponse;
@@ -60,5 +61,39 @@ class SubjectController extends Controller
         Subject::create($data);
 
         return redirect()->route('subjects')->with('success', 'Subject created successfully.');
+    }
+
+    /**
+     * Update an existing subject in the Subject Library.
+     */
+    public function update(UpdateSubjectRequest $request, Subject $subject): RedirectResponse
+    {
+        $data = $request->validated();
+        $data['is_active'] = $data['is_active'] ?? true;
+
+        $subject->update($data);
+
+        return redirect()->route('subjects')->with('success', 'Subject updated successfully.');
+    }
+
+    /**
+     * Delete a subject from the Subject Library.
+     *
+     * Blocked if the subject is already mapped into any Curriculum —
+     * the Curriculum only ever references the master Subject, so
+     * deleting it here would silently break that Curriculum's structure.
+     */
+    public function destroy(Subject $subject): RedirectResponse
+    {
+        if ($subject->curriculumItems()->exists()) {
+            return redirect()->route('subjects')->with(
+                'error',
+                'This subject is used in one or more curriculums and cannot be deleted. Remove it from those curriculums first.',
+            );
+        }
+
+        $subject->delete();
+
+        return redirect()->route('subjects')->with('success', 'Subject deleted successfully.');
     }
 }

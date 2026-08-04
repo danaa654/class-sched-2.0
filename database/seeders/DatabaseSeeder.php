@@ -18,6 +18,8 @@ class DatabaseSeeder extends Seeder
             AdminSeeder::class,
             CollegeSeeder::class,
             DepartmentSeeder::class,
+            SubjectSeeder::class,
+            MajorSeeder::class,
         ]);
     }
 }

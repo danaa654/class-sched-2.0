@@ -369,10 +369,18 @@ const onRestore = (curriculum) => {
                                 />
                             </template>
                         </Column>
-                        <Column header="Actions" style="width: 9rem">
+                        <Column header="Actions" style="width: 16rem">
                             <template #body="{ data }">
                                 <div class="flex gap-1">
                                     <template v-if="!data.deleted_at">
+                                        <Button
+                                            icon="pi pi-list"
+                                            label="Manage Subjects"
+                                            text
+                                            severity="info"
+                                            size="small"
+                                            @click="router.visit(route('curriculums.subjects', data.id))"
+                                        />
                                         <Button
                                             icon="pi pi-pencil"
                                             text

@@ -99,6 +99,7 @@ const statusOptions = [
 ];
 
 const addSubjectVisible = ref(false);
+const editingSubject = ref(null); // null => Add mode, otherwise the Subject being edited
 
 const subjectForm = useForm({
     subject_code: '',
@@ -123,25 +124,45 @@ watch(
 );
 
 const openAdd = () => {
+    editingSubject.value = null;
     subjectForm.reset();
     subjectForm.clearErrors();
     addSubjectVisible.value = true;
 };
 
+const openEdit = (subject) => {
+    editingSubject.value = subject;
+    subjectForm.clearErrors();
+    subjectForm.subject_code = subject.subject_code;
+    subjectForm.subject_title = subject.subject_title;
+    subjectForm.major_id = subject.major_id;
+    subjectForm.category = subject.category;
+    subjectForm.units = subject.units;
+    subjectForm.lecture_hours = subject.lecture_hours;
+    subjectForm.laboratory_hours = subject.laboratory_hours;
+    subjectForm.is_active = subject.is_active;
+    subjectForm.description = subject.description ?? '';
+    addSubjectVisible.value = true;
+};
+
 const closeAddSubject = () => {
     addSubjectVisible.value = false;
+    editingSubject.value = null;
     subjectForm.reset();
     subjectForm.clearErrors();
 };
 
 const onSaveSubject = () => {
-    subjectForm.post(route('subjects.store'), {
+    const options = {
         preserveScroll: true,
         onSuccess: () => {
+            const wasEditing = !!editingSubject.value;
             closeAddSubject();
             Swal.fire({
-                title: 'Subject saved',
-                text: 'The subject was created successfully.',
+                title: wasEditing ? 'Subject updated' : 'Subject saved',
+                text: wasEditing
+                    ? 'The subject was updated successfully.'
+                    : 'The subject was created successfully.',
                 icon: 'success',
                 confirmButtonColor: '#16A34A',
             });
@@ -155,6 +176,31 @@ const onSaveSubject = () => {
                 life: 3000,
             });
         },
+    };
+
+    if (editingSubject.value) {
+        subjectForm.put(route('subjects.update', editingSubject.value.id), options);
+    } else {
+        subjectForm.post(route('subjects.store'), options);
+    }
+};
+
+const onDeleteSubject = (subject) => {
+    Swal.fire({
+        title: 'Delete this subject?',
+        text: `${subject.subject_code} — ${subject.subject_title} will be permanently deleted.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete it',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('subjects.destroy', subject.id), {
+                preserveScroll: true,
+                onSuccess: () => onRefresh(),
+            });
+        }
     });
 };
 </script>
@@ -283,7 +329,7 @@ const onSaveSubject = () => {
                                         severity="secondary"
                                         size="small"
                                         aria-label="Edit"
-                                        @click="openAdd"
+                                        @click="openEdit(data)"
                                     />
                                     <Button
                                         icon="pi pi-trash"
@@ -292,7 +338,7 @@ const onSaveSubject = () => {
                                         severity="danger"
                                         size="small"
                                         aria-label="Delete"
-                                        @click="openAdd"
+                                        @click="onDeleteSubject(data)"
                                     />
                                 </div>
                             </template>
@@ -306,7 +352,7 @@ const onSaveSubject = () => {
         <Dialog
             v-model:visible="addSubjectVisible"
             modal
-            header="Add Subject"
+            :header="editingSubject ? 'Edit Subject' : 'Add Subject'"
             :style="{ width: '700px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
@@ -492,7 +538,7 @@ const onSaveSubject = () => {
             <template #footer>
                 <Button label="Cancel" severity="secondary" outlined @click="closeAddSubject" />
                 <Button
-                    label="Save Subject"
+                    :label="editingSubject ? 'Update Subject' : 'Save Subject'"
                     icon="pi pi-check"
                     severity="success"
                     :loading="subjectForm.processing"

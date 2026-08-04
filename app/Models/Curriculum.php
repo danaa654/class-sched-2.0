@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Curriculum extends Model
@@ -55,5 +56,17 @@ class Curriculum extends Model
     public function major(): BelongsTo
     {
         return $this->belongsTo(Major::class);
+    }
+
+    /**
+     * The Subjects mapped into this Curriculum, by Year Level / Semester.
+     * This is the Curriculum's structure — it never duplicates a Subject
+     * record, only references it via CurriculumItem.
+     *
+     * @return HasMany<CurriculumItem>
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(CurriculumItem::class);
     }
 }

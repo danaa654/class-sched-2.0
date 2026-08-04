@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Subject extends Model
 {
@@ -24,6 +25,7 @@ class Subject extends Model
         'lecture_hours',
         'laboratory_hours',
         'is_active',
+        'description',
     ];
 
     /**
@@ -48,5 +50,17 @@ class Subject extends Model
     public function major(): BelongsTo
     {
         return $this->belongsTo(Major::class);
+    }
+
+    /**
+     * Curriculum placements that reference this Subject as the subject
+     * itself (not as a prerequisite). Used to block deletion of a
+     * Subject that's already mapped into a Curriculum.
+     *
+     * @return HasMany<CurriculumItem>
+     */
+    public function curriculumItems(): HasMany
+    {
+        return $this->hasMany(CurriculumItem::class);
     }
 }
