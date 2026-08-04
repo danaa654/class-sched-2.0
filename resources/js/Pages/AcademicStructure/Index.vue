@@ -1,0 +1,1256 @@
+<script setup>
+import { Head, useForm, usePage, router } from '@inertiajs/vue3';
+import { ref, computed, watch } from 'vue';
+import Swal from 'sweetalert2';
+import { useToast } from 'primevue/usetoast';
+import AppLayout from '@/Layouts/AppLayout.vue';
+import Card from 'primevue/card';
+import Tabs from 'primevue/tabs';
+import TabList from 'primevue/tablist';
+import Tab from 'primevue/tab';
+import TabPanels from 'primevue/tabpanels';
+import TabPanel from 'primevue/tabpanel';
+import Toolbar from 'primevue/toolbar';
+import InputText from 'primevue/inputtext';
+import Textarea from 'primevue/textarea';
+import Button from 'primevue/button';
+import DataTable from 'primevue/datatable';
+import Column from 'primevue/column';
+import Tag from 'primevue/tag';
+import Dialog from 'primevue/dialog';
+import Select from 'primevue/select';
+import FloatLabel from 'primevue/floatlabel';
+import Toast from 'primevue/toast';
+
+const props = defineProps({
+    colleges: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
+    departments: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
+    majors: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
+    activeColleges: { type: Array, default: () => [] },
+    activeDepartments: { type: Array, default: () => [] },
+    filters: {
+        type: Object,
+        default: () => ({ college_search: '', department_search: '', major_search: '' }),
+    },
+});
+
+const toast = useToast();
+const page = usePage();
+
+// Show a toast whenever the backend flashes a success/error message.
+watch(
+    () => page.props.flash?.success,
+    (message) => {
+        if (message) {
+            toast.add({ severity: 'success', summary: 'Success', detail: message, life: 4000 });
+        }
+    },
+);
+watch(
+    () => page.props.flash?.error,
+    (message) => {
+        if (message) {
+            toast.add({ severity: 'error', summary: 'Error', detail: message, life: 4000 });
+        }
+    },
+);
+
+const statusOptions = [
+    { label: 'Active', value: 'Active' },
+    { label: 'Inactive', value: 'Inactive' },
+];
+
+/* ------------------------------------------------------------------ */
+/* Colleges tab                                                        */
+/* ------------------------------------------------------------------ */
+
+const collegeSearch = ref(props.filters.college_search ?? '');
+const collegeLoading = ref(false);
+let collegeSearchDebounce = null;
+
+const reloadColleges = (extra = {}) => {
+    collegeLoading.value = true;
+
+    router.get(
+        route('academic-structure'),
+        { college_search: collegeSearch.value, ...extra },
+        {
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+            only: ['colleges'],
+            onFinish: () => {
+                collegeLoading.value = false;
+            },
+        },
+    );
+};
+
+watch(collegeSearch, () => {
+    clearTimeout(collegeSearchDebounce);
+    collegeSearchDebounce = setTimeout(() => {
+        reloadColleges({ college_page: 1 });
+    }, 350);
+});
+
+const onCollegePage = (event) => {
+    reloadColleges({ college_page: event.page + 1 });
+};
+
+const onRefreshColleges = () => {
+    reloadColleges({ college_page: props.colleges.current_page });
+};
+
+const collegeDialogVisible = ref(false);
+const collegeDialogMode = ref('add'); // 'add' | 'edit'
+const editingCollege = ref(null);
+
+const collegeForm = useForm({
+    code: '',
+    name: '',
+    short_name: '',
+    description: '',
+    status: 'Active',
+});
+
+const openAddCollege = () => {
+    collegeDialogMode.value = 'add';
+    editingCollege.value = null;
+    collegeForm.reset();
+    collegeForm.clearErrors();
+    collegeDialogVisible.value = true;
+};
+
+const openEditCollege = (college) => {
+    collegeDialogMode.value = 'edit';
+    editingCollege.value = college;
+    collegeForm.clearErrors();
+    collegeForm.code = college.code;
+    collegeForm.name = college.name;
+    collegeForm.short_name = college.short_name ?? '';
+    collegeForm.description = college.description ?? '';
+    collegeForm.status = college.status;
+    collegeDialogVisible.value = true;
+};
+
+const closeCollegeDialog = () => {
+    collegeDialogVisible.value = false;
+    collegeForm.reset();
+    collegeForm.clearErrors();
+    editingCollege.value = null;
+};
+
+const onSaveCollege = () => {
+    const onError = () => {
+        toast.add({
+            severity: 'warn',
+            summary: 'Missing information',
+            detail: 'Please check the highlighted fields and try again.',
+            life: 3000,
+        });
+    };
+
+    if (collegeDialogMode.value === 'add') {
+        collegeForm.post(route('colleges.store'), {
+            preserveScroll: true,
+            onSuccess: () => closeCollegeDialog(),
+            onError,
+        });
+    } else {
+        collegeForm.put(route('colleges.update', editingCollege.value.id), {
+            preserveScroll: true,
+            onSuccess: () => closeCollegeDialog(),
+            onError,
+        });
+    }
+};
+
+const onDeleteCollege = (college) => {
+    Swal.fire({
+        title: 'Are you sure you want to delete this college?',
+        text: college.name,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete it',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('colleges.destroy', college.id), {
+                preserveScroll: true,
+                preserveState: true,
+            });
+        }
+    });
+};
+
+const onRestoreCollege = (college) => {
+    router.put(route('colleges.restore', college.id), {}, {
+        preserveScroll: true,
+        preserveState: true,
+    });
+};
+
+/* ------------------------------------------------------------------ */
+/* Departments tab                                                     */
+/* ------------------------------------------------------------------ */
+
+const departmentSearch = ref(props.filters.department_search ?? '');
+const departmentLoading = ref(false);
+let departmentSearchDebounce = null;
+
+const reloadDepartments = (extra = {}) => {
+    departmentLoading.value = true;
+
+    router.get(
+        route('academic-structure'),
+        { department_search: departmentSearch.value, ...extra },
+        {
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+            only: ['departments'],
+            onFinish: () => {
+                departmentLoading.value = false;
+            },
+        },
+    );
+};
+
+watch(departmentSearch, () => {
+    clearTimeout(departmentSearchDebounce);
+    departmentSearchDebounce = setTimeout(() => {
+        reloadDepartments({ department_page: 1 });
+    }, 350);
+});
+
+const onDepartmentPage = (event) => {
+    reloadDepartments({ department_page: event.page + 1 });
+};
+
+const onRefreshDepartments = () => {
+    reloadDepartments({ department_page: props.departments.current_page });
+};
+
+// Active colleges only, sorted alphabetically, for the dropdown.
+const collegeOptions = computed(() =>
+    [...props.activeColleges]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((college) => ({ label: college.name, value: college.id })),
+);
+
+const departmentDialogVisible = ref(false);
+const departmentDialogMode = ref('add'); // 'add' | 'edit'
+const editingDepartment = ref(null);
+
+const departmentForm = useForm({
+    college_id: null,
+    code: '',
+    name: '',
+    short_name: '',
+    description: '',
+    status: 'Active',
+});
+
+const openAddDepartment = () => {
+    departmentDialogMode.value = 'add';
+    editingDepartment.value = null;
+    departmentForm.reset();
+    departmentForm.clearErrors();
+    departmentDialogVisible.value = true;
+};
+
+const openEditDepartment = (department) => {
+    departmentDialogMode.value = 'edit';
+    editingDepartment.value = department;
+    departmentForm.clearErrors();
+    departmentForm.college_id = department.college_id;
+    departmentForm.code = department.code;
+    departmentForm.name = department.name;
+    departmentForm.short_name = department.short_name ?? '';
+    departmentForm.description = department.description ?? '';
+    departmentForm.status = department.status;
+    departmentDialogVisible.value = true;
+};
+
+const closeDepartmentDialog = () => {
+    departmentDialogVisible.value = false;
+    departmentForm.reset();
+    departmentForm.clearErrors();
+    editingDepartment.value = null;
+};
+
+const onSaveDepartment = () => {
+    const onError = () => {
+        toast.add({
+            severity: 'warn',
+            summary: 'Missing information',
+            detail: 'Please check the highlighted fields and try again.',
+            life: 3000,
+        });
+    };
+
+    if (departmentDialogMode.value === 'add') {
+        departmentForm.post(route('departments.store'), {
+            preserveScroll: true,
+            onSuccess: () => closeDepartmentDialog(),
+            onError,
+        });
+    } else {
+        departmentForm.put(route('departments.update', editingDepartment.value.id), {
+            preserveScroll: true,
+            onSuccess: () => closeDepartmentDialog(),
+            onError,
+        });
+    }
+};
+
+const onDeleteDepartment = (department) => {
+    Swal.fire({
+        title: 'Are you sure you want to delete this department?',
+        text: department.name,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete it',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('departments.destroy', department.id), {
+                preserveScroll: true,
+                preserveState: true,
+            });
+        }
+    });
+};
+
+const onRestoreDepartment = (department) => {
+    router.put(route('departments.restore', department.id), {}, {
+        preserveScroll: true,
+        preserveState: true,
+    });
+};
+
+/* ------------------------------------------------------------------ */
+/* Majors tab                                                          */
+/* ------------------------------------------------------------------ */
+
+const majorSearch = ref(props.filters.major_search ?? '');
+const majorLoading = ref(false);
+let majorSearchDebounce = null;
+
+const reloadMajors = (extra = {}) => {
+    majorLoading.value = true;
+
+    router.get(
+        route('academic-structure'),
+        { major_search: majorSearch.value, ...extra },
+        {
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+            only: ['majors'],
+            onFinish: () => {
+                majorLoading.value = false;
+            },
+        },
+    );
+};
+
+watch(majorSearch, () => {
+    clearTimeout(majorSearchDebounce);
+    majorSearchDebounce = setTimeout(() => {
+        reloadMajors({ major_page: 1 });
+    }, 350);
+});
+
+const onMajorPage = (event) => {
+    reloadMajors({ major_page: event.page + 1 });
+};
+
+const onRefreshMajors = () => {
+    reloadMajors({ major_page: props.majors.current_page });
+};
+
+// Departments dropdown for the Major dialog is filtered by the selected
+// College, so it's scoped to whichever college the form currently holds.
+const majorDepartmentOptions = computed(() => {
+    if (!majorForm.college_id) {
+        return [];
+    }
+
+    return [...props.activeDepartments]
+        .filter((department) => department.college_id === majorForm.college_id)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((department) => ({ label: department.name, value: department.id }));
+});
+
+const majorDialogVisible = ref(false);
+const majorDialogMode = ref('add'); // 'add' | 'edit'
+const editingMajor = ref(null);
+
+const majorForm = useForm({
+    college_id: null,
+    department_id: null,
+    code: '',
+    name: '',
+    short_name: '',
+    years: 4,
+    description: '',
+    status: 'Active',
+});
+
+// Clearing the College resets the Department, and switching College also
+// clears whichever Department no longer belongs to it.
+watch(
+    () => majorForm.college_id,
+    (newCollegeId, oldCollegeId) => {
+        if (newCollegeId !== oldCollegeId) {
+            majorForm.department_id = null;
+        }
+    },
+);
+
+const openAddMajor = () => {
+    majorDialogMode.value = 'add';
+    editingMajor.value = null;
+    majorForm.reset();
+    majorForm.clearErrors();
+    majorDialogVisible.value = true;
+};
+
+const openEditMajor = (major) => {
+    majorDialogMode.value = 'edit';
+    editingMajor.value = major;
+    majorForm.clearErrors();
+    majorForm.college_id = major.department?.college_id ?? null;
+    majorForm.department_id = major.department_id;
+    majorForm.code = major.code;
+    majorForm.name = major.name;
+    majorForm.short_name = major.short_name ?? '';
+    majorForm.years = major.years;
+    majorForm.description = major.description ?? '';
+    majorForm.status = major.status;
+    majorDialogVisible.value = true;
+};
+
+const closeMajorDialog = () => {
+    majorDialogVisible.value = false;
+    majorForm.reset();
+    majorForm.clearErrors();
+    editingMajor.value = null;
+};
+
+const onSaveMajor = () => {
+    const onError = () => {
+        toast.add({
+            severity: 'warn',
+            summary: 'Missing information',
+            detail: 'Please check the highlighted fields and try again.',
+            life: 3000,
+        });
+    };
+
+    // college_id only drives the cascading dropdown on the frontend;
+    // the backend only needs department_id.
+    const payload = {
+        department_id: majorForm.department_id,
+        code: majorForm.code,
+        name: majorForm.name,
+        short_name: majorForm.short_name,
+        years: majorForm.years,
+        description: majorForm.description,
+        status: majorForm.status,
+    };
+
+    if (majorDialogMode.value === 'add') {
+        majorForm.transform(() => payload).post(route('majors.store'), {
+            preserveScroll: true,
+            onSuccess: () => closeMajorDialog(),
+            onError,
+        });
+    } else {
+        majorForm.transform(() => payload).put(route('majors.update', editingMajor.value.id), {
+            preserveScroll: true,
+            onSuccess: () => closeMajorDialog(),
+            onError,
+        });
+    }
+};
+
+const onDeleteMajor = (major) => {
+    Swal.fire({
+        title: 'Are you sure you want to delete this major?',
+        text: major.name,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete it',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('majors.destroy', major.id), {
+                preserveScroll: true,
+                preserveState: true,
+            });
+        }
+    });
+};
+
+const onRestoreMajor = (major) => {
+    router.put(route('majors.restore', major.id), {}, {
+        preserveScroll: true,
+        preserveState: true,
+    });
+};
+</script>
+
+<template>
+    <Head title="Academic Structure" />
+
+    <AppLayout>
+        <Toast />
+
+        <template #header>
+            <span class="text-lg font-semibold text-[#1E293B]">Academic Structure</span>
+        </template>
+
+        <div class="max-w-7xl mx-auto w-full">
+            <!-- Page Title -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Academic Structure</h1>
+                <p class="mt-1 text-slate-500">
+                    Manage colleges, departments, and majors.
+                </p>
+            </div>
+
+            <!-- Tabs -->
+            <Tabs value="colleges">
+                <TabList>
+                    <Tab value="colleges">Colleges</Tab>
+                    <Tab value="departments">Departments</Tab>
+                    <Tab value="majors">Majors</Tab>
+                </TabList>
+
+                <TabPanels>
+                    <!-- Colleges -->
+                    <TabPanel value="colleges">
+                        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-4">
+                            <template #content>
+                                <!-- Top Toolbar -->
+                                <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
+                                    <template #start>
+                                        <span class="relative w-full sm:w-80">
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <InputText
+                                                v-model="collegeSearch"
+                                                placeholder="Search by code, name or short name"
+                                                class="w-full !pl-9"
+                                            />
+                                        </span>
+                                    </template>
+                                    <template #end>
+                                        <div class="flex items-center gap-2">
+                                            <Button
+                                                icon="pi pi-refresh"
+                                                severity="secondary"
+                                                outlined
+                                                :loading="collegeLoading"
+                                                @click="onRefreshColleges"
+                                                aria-label="Refresh"
+                                            />
+                                            <Button label="Add College" icon="pi pi-plus" @click="openAddCollege" />
+                                        </div>
+                                    </template>
+                                </Toolbar>
+
+                                <!-- Colleges Table -->
+                                <DataTable
+                                    :value="colleges.data"
+                                    :loading="collegeLoading"
+                                    dataKey="id"
+                                    class="rounded-xl overflow-hidden"
+                                    stripedRows
+                                    responsiveLayout="scroll"
+                                    lazy
+                                    paginator
+                                    :rows="colleges.per_page"
+                                    :totalRecords="colleges.total"
+                                    :first="(colleges.current_page - 1) * colleges.per_page"
+                                    @page="onCollegePage"
+                                >
+                                    <template #empty>
+                                        <div class="text-center py-10">
+                                            <p class="text-slate-500 font-medium">No colleges found.</p>
+                                            <Button
+                                                label="Add College"
+                                                icon="pi pi-plus"
+                                                class="mt-3"
+                                                @click="openAddCollege"
+                                            />
+                                        </div>
+                                    </template>
+
+                                    <Column field="code" header="Code" style="width: 10rem" />
+                                    <Column field="name" header="College Name" />
+                                    <Column field="short_name" header="Short Name" style="width: 12rem">
+                                        <template #body="{ data }">
+                                            {{ data.short_name || '—' }}
+                                        </template>
+                                    </Column>
+                                    <Column field="status" header="Status" style="width: 10rem">
+                                        <template #body="{ data }">
+                                            <Tag v-if="data.deleted_at" value="Deleted" severity="danger" />
+                                            <Tag
+                                                v-else
+                                                :value="data.status"
+                                                :severity="data.status === 'Active' ? 'success' : 'secondary'"
+                                            />
+                                        </template>
+                                    </Column>
+                                    <Column header="Actions" style="width: 9rem">
+                                        <template #body="{ data }">
+                                            <div class="flex gap-1">
+                                                <template v-if="!data.deleted_at">
+                                                    <Button
+                                                        icon="pi pi-pencil"
+                                                        text
+                                                        rounded
+                                                        severity="secondary"
+                                                        size="small"
+                                                        aria-label="Edit"
+                                                        @click="openEditCollege(data)"
+                                                    />
+                                                    <Button
+                                                        icon="pi pi-trash"
+                                                        text
+                                                        rounded
+                                                        severity="danger"
+                                                        size="small"
+                                                        aria-label="Delete"
+                                                        @click="onDeleteCollege(data)"
+                                                    />
+                                                </template>
+                                                <Button
+                                                    v-else
+                                                    icon="pi pi-refresh"
+                                                    text
+                                                    rounded
+                                                    severity="success"
+                                                    size="small"
+                                                    label="Restore"
+                                                    @click="onRestoreCollege(data)"
+                                                />
+                                            </div>
+                                        </template>
+                                    </Column>
+                                </DataTable>
+                            </template>
+                        </Card>
+                    </TabPanel>
+
+                    <!-- Departments -->
+                    <TabPanel value="departments">
+                        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-4">
+                            <template #content>
+                                <!-- Top Toolbar -->
+                                <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
+                                    <template #start>
+                                        <span class="relative w-full sm:w-80">
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <InputText
+                                                v-model="departmentSearch"
+                                                placeholder="Search by code, name, short name or college"
+                                                class="w-full !pl-9"
+                                            />
+                                        </span>
+                                    </template>
+                                    <template #end>
+                                        <div class="flex items-center gap-2">
+                                            <Button
+                                                icon="pi pi-refresh"
+                                                severity="secondary"
+                                                outlined
+                                                :loading="departmentLoading"
+                                                @click="onRefreshDepartments"
+                                                aria-label="Refresh"
+                                            />
+                                            <Button label="Add Department" icon="pi pi-plus" @click="openAddDepartment" />
+                                        </div>
+                                    </template>
+                                </Toolbar>
+
+                                <!-- Departments Table -->
+                                <DataTable
+                                    :value="departments.data"
+                                    :loading="departmentLoading"
+                                    dataKey="id"
+                                    class="rounded-xl overflow-hidden"
+                                    stripedRows
+                                    responsiveLayout="scroll"
+                                    lazy
+                                    paginator
+                                    :rows="departments.per_page"
+                                    :totalRecords="departments.total"
+                                    :first="(departments.current_page - 1) * departments.per_page"
+                                    @page="onDepartmentPage"
+                                >
+                                    <template #empty>
+                                        <div class="text-center py-10">
+                                            <p class="text-slate-500 font-medium">No departments found.</p>
+                                            <Button
+                                                label="Add Department"
+                                                icon="pi pi-plus"
+                                                class="mt-3"
+                                                @click="openAddDepartment"
+                                            />
+                                        </div>
+                                    </template>
+
+                                    <Column field="code" header="Department Code" style="width: 10rem" />
+                                    <Column field="name" header="Department Name" />
+                                    <Column header="College" style="width: 14rem">
+                                        <template #body="{ data }">
+                                            {{ data.college?.name || '—' }}
+                                        </template>
+                                    </Column>
+                                    <Column field="short_name" header="Short Name" style="width: 12rem">
+                                        <template #body="{ data }">
+                                            {{ data.short_name || '—' }}
+                                        </template>
+                                    </Column>
+                                    <Column field="status" header="Status" style="width: 10rem">
+                                        <template #body="{ data }">
+                                            <Tag v-if="data.deleted_at" value="Deleted" severity="danger" />
+                                            <Tag
+                                                v-else
+                                                :value="data.status"
+                                                :severity="data.status === 'Active' ? 'success' : 'secondary'"
+                                            />
+                                        </template>
+                                    </Column>
+                                    <Column header="Actions" style="width: 9rem">
+                                        <template #body="{ data }">
+                                            <div class="flex gap-1">
+                                                <template v-if="!data.deleted_at">
+                                                    <Button
+                                                        icon="pi pi-pencil"
+                                                        text
+                                                        rounded
+                                                        severity="secondary"
+                                                        size="small"
+                                                        aria-label="Edit"
+                                                        @click="openEditDepartment(data)"
+                                                    />
+                                                    <Button
+                                                        icon="pi pi-trash"
+                                                        text
+                                                        rounded
+                                                        severity="danger"
+                                                        size="small"
+                                                        aria-label="Delete"
+                                                        @click="onDeleteDepartment(data)"
+                                                    />
+                                                </template>
+                                                <Button
+                                                    v-else
+                                                    icon="pi pi-refresh"
+                                                    text
+                                                    rounded
+                                                    severity="success"
+                                                    size="small"
+                                                    label="Restore"
+                                                    @click="onRestoreDepartment(data)"
+                                                />
+                                            </div>
+                                        </template>
+                                    </Column>
+                                </DataTable>
+                            </template>
+                        </Card>
+                    </TabPanel>
+
+                    <!-- Majors -->
+                    <TabPanel value="majors">
+                        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-4">
+                            <template #content>
+                                <!-- Top Toolbar -->
+                                <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
+                                    <template #start>
+                                        <span class="relative w-full sm:w-80">
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <InputText
+                                                v-model="majorSearch"
+                                                placeholder="Search by code, name, department or college"
+                                                class="w-full !pl-9"
+                                            />
+                                        </span>
+                                    </template>
+                                    <template #end>
+                                        <div class="flex items-center gap-2">
+                                            <Button
+                                                icon="pi pi-refresh"
+                                                severity="secondary"
+                                                outlined
+                                                :loading="majorLoading"
+                                                @click="onRefreshMajors"
+                                                aria-label="Refresh"
+                                            />
+                                            <Button label="Add Major" icon="pi pi-plus" @click="openAddMajor" />
+                                        </div>
+                                    </template>
+                                </Toolbar>
+
+                                <!-- Majors Table -->
+                                <DataTable
+                                    :value="majors.data"
+                                    :loading="majorLoading"
+                                    dataKey="id"
+                                    class="rounded-xl overflow-hidden"
+                                    stripedRows
+                                    responsiveLayout="scroll"
+                                    lazy
+                                    paginator
+                                    :rows="majors.per_page"
+                                    :totalRecords="majors.total"
+                                    :first="(majors.current_page - 1) * majors.per_page"
+                                    @page="onMajorPage"
+                                >
+                                    <template #empty>
+                                        <div class="text-center py-10">
+                                            <p class="text-slate-500 font-medium">No majors found.</p>
+                                            <Button
+                                                label="Add Major"
+                                                icon="pi pi-plus"
+                                                class="mt-3"
+                                                @click="openAddMajor"
+                                            />
+                                        </div>
+                                    </template>
+
+                                    <Column field="code" header="Major Code" style="width: 10rem" />
+                                    <Column field="name" header="Major Name" />
+                                    <Column header="College" style="width: 12rem">
+                                        <template #body="{ data }">
+                                            {{ data.department?.college?.name || '—' }}
+                                        </template>
+                                    </Column>
+                                    <Column header="Department" style="width: 14rem">
+                                        <template #body="{ data }">
+                                            {{ data.department?.name || '—' }}
+                                        </template>
+                                    </Column>
+                                    <Column field="years" header="Years" style="width: 7rem" />
+                                    <Column field="status" header="Status" style="width: 10rem">
+                                        <template #body="{ data }">
+                                            <Tag v-if="data.deleted_at" value="Deleted" severity="danger" />
+                                            <Tag
+                                                v-else
+                                                :value="data.status"
+                                                :severity="data.status === 'Active' ? 'success' : 'secondary'"
+                                            />
+                                        </template>
+                                    </Column>
+                                    <Column header="Actions" style="width: 9rem">
+                                        <template #body="{ data }">
+                                            <div class="flex gap-1">
+                                                <template v-if="!data.deleted_at">
+                                                    <Button
+                                                        icon="pi pi-pencil"
+                                                        text
+                                                        rounded
+                                                        severity="secondary"
+                                                        size="small"
+                                                        aria-label="Edit"
+                                                        @click="openEditMajor(data)"
+                                                    />
+                                                    <Button
+                                                        icon="pi pi-trash"
+                                                        text
+                                                        rounded
+                                                        severity="danger"
+                                                        size="small"
+                                                        aria-label="Delete"
+                                                        @click="onDeleteMajor(data)"
+                                                    />
+                                                </template>
+                                                <Button
+                                                    v-else
+                                                    icon="pi pi-refresh"
+                                                    text
+                                                    rounded
+                                                    severity="success"
+                                                    size="small"
+                                                    label="Restore"
+                                                    @click="onRestoreMajor(data)"
+                                                />
+                                            </div>
+                                        </template>
+                                    </Column>
+                                </DataTable>
+                            </template>
+                        </Card>
+                    </TabPanel>
+                </TabPanels>
+            </Tabs>
+        </div>
+
+        <!-- Add / Edit College Modal -->
+        <Dialog
+            v-model:visible="collegeDialogVisible"
+            modal
+            :style="{ width: '600px' }"
+            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :draggable="false"
+        >
+            <template #header>
+                <span class="text-lg font-bold text-[#1E293B]">
+                    {{ collegeDialogMode === 'add' ? 'Add College' : 'Edit College' }}
+                </span>
+            </template>
+
+            <form class="pt-2" autocomplete="off" @submit.prevent="onSaveCollege">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="collegeCode"
+                            v-model="collegeForm.code"
+                            class="w-full"
+                            maxlength="20"
+                            autocomplete="off"
+                            :invalid="!!collegeForm.errors.code"
+                        />
+                        <label for="collegeCode">College Code *</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <Select
+                            id="collegeStatus"
+                            v-model="collegeForm.status"
+                            :options="statusOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="w-full"
+                            :invalid="!!collegeForm.errors.status"
+                        />
+                        <label for="collegeStatus">Status *</label>
+                    </FloatLabel>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1">
+                    <small v-if="collegeForm.errors.code" class="text-red-500">{{ collegeForm.errors.code }}</small>
+                    <small v-if="collegeForm.errors.status" class="text-red-500">{{ collegeForm.errors.status }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="collegeName"
+                            v-model="collegeForm.name"
+                            class="w-full"
+                            maxlength="255"
+                            autocomplete="off"
+                            :invalid="!!collegeForm.errors.name"
+                        />
+                        <label for="collegeName">College Name *</label>
+                    </FloatLabel>
+                    <small v-if="collegeForm.errors.name" class="text-red-500 -mt-4">{{ collegeForm.errors.name }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="collegeShortName"
+                            v-model="collegeForm.short_name"
+                            class="w-full"
+                            maxlength="100"
+                            autocomplete="off"
+                            :invalid="!!collegeForm.errors.short_name"
+                        />
+                        <label for="collegeShortName">Short Name</label>
+                    </FloatLabel>
+                    <small v-if="collegeForm.errors.short_name" class="text-red-500 -mt-4">{{ collegeForm.errors.short_name }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <Textarea
+                            id="collegeDescription"
+                            v-model="collegeForm.description"
+                            class="w-full"
+                            rows="3"
+                            autoResize
+                            :invalid="!!collegeForm.errors.description"
+                        />
+                        <label for="collegeDescription">Description</label>
+                    </FloatLabel>
+                    <small v-if="collegeForm.errors.description" class="text-red-500 -mt-4">{{ collegeForm.errors.description }}</small>
+                </div>
+            </form>
+
+            <template #footer>
+                <Button label="Cancel" text severity="secondary" :disabled="collegeForm.processing" @click="closeCollegeDialog" />
+                <Button label="Save" icon="pi pi-check" :loading="collegeForm.processing" @click="onSaveCollege" />
+            </template>
+        </Dialog>
+
+        <!-- Add / Edit Department Modal -->
+        <Dialog
+            v-model:visible="departmentDialogVisible"
+            modal
+            :style="{ width: '600px' }"
+            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :draggable="false"
+        >
+            <template #header>
+                <span class="text-lg font-bold text-[#1E293B]">
+                    {{ departmentDialogMode === 'add' ? 'Add Department' : 'Edit Department' }}
+                </span>
+            </template>
+
+            <form class="pt-2" autocomplete="off" @submit.prevent="onSaveDepartment">
+                <div class="grid grid-cols-1 gap-5">
+                    <FloatLabel variant="on">
+                        <Select
+                            id="departmentCollege"
+                            v-model="departmentForm.college_id"
+                            :options="collegeOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            class="w-full"
+                            :invalid="!!departmentForm.errors.college_id"
+                        />
+                        <label for="departmentCollege">College *</label>
+                    </FloatLabel>
+                    <small v-if="departmentForm.errors.college_id" class="text-red-500 -mt-4">{{ departmentForm.errors.college_id }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="departmentCode"
+                            v-model="departmentForm.code"
+                            class="w-full"
+                            maxlength="20"
+                            autocomplete="off"
+                            :invalid="!!departmentForm.errors.code"
+                        />
+                        <label for="departmentCode">Department Code *</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <Select
+                            id="departmentStatus"
+                            v-model="departmentForm.status"
+                            :options="statusOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="w-full"
+                            :invalid="!!departmentForm.errors.status"
+                        />
+                        <label for="departmentStatus">Status *</label>
+                    </FloatLabel>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1">
+                    <small v-if="departmentForm.errors.code" class="text-red-500">{{ departmentForm.errors.code }}</small>
+                    <small v-if="departmentForm.errors.status" class="text-red-500">{{ departmentForm.errors.status }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="departmentName"
+                            v-model="departmentForm.name"
+                            class="w-full"
+                            maxlength="255"
+                            autocomplete="off"
+                            :invalid="!!departmentForm.errors.name"
+                        />
+                        <label for="departmentName">Department Name *</label>
+                    </FloatLabel>
+                    <small v-if="departmentForm.errors.name" class="text-red-500 -mt-4">{{ departmentForm.errors.name }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="departmentShortName"
+                            v-model="departmentForm.short_name"
+                            class="w-full"
+                            maxlength="100"
+                            autocomplete="off"
+                            :invalid="!!departmentForm.errors.short_name"
+                        />
+                        <label for="departmentShortName">Short Name</label>
+                    </FloatLabel>
+                    <small v-if="departmentForm.errors.short_name" class="text-red-500 -mt-4">{{ departmentForm.errors.short_name }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <Textarea
+                            id="departmentDescription"
+                            v-model="departmentForm.description"
+                            class="w-full"
+                            rows="3"
+                            autoResize
+                            :invalid="!!departmentForm.errors.description"
+                        />
+                        <label for="departmentDescription">Description</label>
+                    </FloatLabel>
+                    <small v-if="departmentForm.errors.description" class="text-red-500 -mt-4">{{ departmentForm.errors.description }}</small>
+                </div>
+            </form>
+
+            <template #footer>
+                <Button label="Cancel" text severity="secondary" :disabled="departmentForm.processing" @click="closeDepartmentDialog" />
+                <Button label="Save" icon="pi pi-check" :loading="departmentForm.processing" @click="onSaveDepartment" />
+            </template>
+        </Dialog>
+
+        <!-- Add / Edit Major Modal -->
+        <Dialog
+            v-model:visible="majorDialogVisible"
+            modal
+            :style="{ width: '600px' }"
+            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :draggable="false"
+        >
+            <template #header>
+                <span class="text-lg font-bold text-[#1E293B]">
+                    {{ majorDialogMode === 'add' ? 'Add Major' : 'Edit Major' }}
+                </span>
+            </template>
+
+            <form class="pt-2" autocomplete="off" @submit.prevent="onSaveMajor">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <FloatLabel variant="on">
+                        <Select
+                            id="majorCollege"
+                            v-model="majorForm.college_id"
+                            :options="collegeOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            class="w-full"
+                        />
+                        <label for="majorCollege">College *</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <Select
+                            id="majorDepartment"
+                            v-model="majorForm.department_id"
+                            :options="majorDepartmentOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            :disabled="!majorForm.college_id"
+                            class="w-full"
+                            :invalid="!!majorForm.errors.department_id"
+                        />
+                        <label for="majorDepartment">Department *</label>
+                    </FloatLabel>
+                </div>
+                <small v-if="majorForm.errors.department_id" class="text-red-500 block mt-1">{{ majorForm.errors.department_id }}</small>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="majorCode"
+                            v-model="majorForm.code"
+                            class="w-full"
+                            maxlength="20"
+                            autocomplete="off"
+                            :invalid="!!majorForm.errors.code"
+                        />
+                        <label for="majorCode">Major Code *</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <Select
+                            id="majorStatus"
+                            v-model="majorForm.status"
+                            :options="statusOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="w-full"
+                            :invalid="!!majorForm.errors.status"
+                        />
+                        <label for="majorStatus">Status *</label>
+                    </FloatLabel>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1">
+                    <small v-if="majorForm.errors.code" class="text-red-500">{{ majorForm.errors.code }}</small>
+                    <small v-if="majorForm.errors.status" class="text-red-500">{{ majorForm.errors.status }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="majorName"
+                            v-model="majorForm.name"
+                            class="w-full"
+                            maxlength="255"
+                            autocomplete="off"
+                            :invalid="!!majorForm.errors.name"
+                        />
+                        <label for="majorName">Major Name *</label>
+                    </FloatLabel>
+                    <small v-if="majorForm.errors.name" class="text-red-500 -mt-4">{{ majorForm.errors.name }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="majorShortName"
+                            v-model="majorForm.short_name"
+                            class="w-full"
+                            maxlength="100"
+                            autocomplete="off"
+                            :invalid="!!majorForm.errors.short_name"
+                        />
+                        <label for="majorShortName">Short Name</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="majorYears"
+                            v-model.number="majorForm.years"
+                            type="number"
+                            :min="1"
+                            :max="6"
+                            class="w-full"
+                            :invalid="!!majorForm.errors.years"
+                        />
+                        <label for="majorYears">Years *</label>
+                    </FloatLabel>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1">
+                    <small v-if="majorForm.errors.short_name" class="text-red-500">{{ majorForm.errors.short_name }}</small>
+                    <small v-if="majorForm.errors.years" class="text-red-500">{{ majorForm.errors.years }}</small>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <Textarea
+                            id="majorDescription"
+                            v-model="majorForm.description"
+                            class="w-full"
+                            rows="3"
+                            autoResize
+                            :invalid="!!majorForm.errors.description"
+                        />
+                        <label for="majorDescription">Description</label>
+                    </FloatLabel>
+                    <small v-if="majorForm.errors.description" class="text-red-500 -mt-4">{{ majorForm.errors.description }}</small>
+                </div>
+            </form>
+
+            <template #footer>
+                <Button label="Cancel" text severity="secondary" :disabled="majorForm.processing" @click="closeMajorDialog" />
+                <Button label="Save" icon="pi pi-check" :loading="majorForm.processing" @click="onSaveMajor" />
+            </template>
+        </Dialog>
+    </AppLayout>
+</template>

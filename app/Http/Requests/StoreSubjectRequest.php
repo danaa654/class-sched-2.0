@@ -1,0 +1,51 @@
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class StoreSubjectRequest extends FormRequest
+{
+    /**
+     * Determine if the user is authorized to make this request.
+     */
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'subject_code' => ['required', 'string', 'max:20', 'unique:subjects,subject_code'],
+            'subject_title' => ['required', 'string', 'max:255'],
+            'major_id' => ['nullable', 'required_if:category,Major', 'exists:majors,id'],
+            'category' => ['required', Rule::in(['Major', 'General Education'])],
+            'units' => ['required', 'integer', 'min:0'],
+            'lecture_hours' => ['required', 'integer', 'min:0'],
+            'laboratory_hours' => ['required', 'integer', 'min:0'],
+            'is_active' => ['sometimes', 'boolean'],
+            'description' => ['nullable', 'string'],
+        ];
+    }
+
+    /**
+     * Prepare the data for validation.
+     *
+     * General Education subjects are shared across all majors and are
+     * never tied to one — force major_id to null regardless of what the
+     * client sends when that category is selected.
+     */
+    protected function prepareForValidation(): void
+    {
+        if ($this->input('category') === 'General Education') {
+            $this->merge(['major_id' => null]);
+        }
+    }
+}
