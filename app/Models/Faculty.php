@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -61,6 +62,22 @@ class Faculty extends Model
     public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class);
+    }
+
+    /**
+     * Subjects this faculty member is qualified to teach.
+     *
+     * Teaching qualification is a pure many-to-many link (via
+     * `faculty_subject`) — it carries no extra data of its own. The
+     * scheduling engine's Genetic Algorithm reads this relationship to
+     * ensure it never assigns a faculty member to a subject they are
+     * not qualified for.
+     *
+     * @return BelongsToMany<Subject>
+     */
+    public function subjects(): BelongsToMany
+    {
+        return $this->belongsToMany(Subject::class, 'faculty_subject')->withTimestamps();
     }
 
     /**

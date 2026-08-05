@@ -17,6 +17,7 @@ use App\Http\Controllers\SchoolYearController;
 use App\Http\Controllers\SemesterController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SubjectController;
+use App\Http\Controllers\TeachingQualificationController;
 use App\Http\Controllers\UsersController;
 use App\Http\Controllers\WelcomeController;
 use Illuminate\Support\Facades\Route;
@@ -80,6 +81,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/faculty', [FacultyController::class, 'store'])->name('scheduling.faculty.store');
     Route::put('/scheduling/faculty/{faculty}', [FacultyController::class, 'update'])->name('scheduling.faculty.update');
     Route::delete('/scheduling/faculty/{faculty}', [FacultyController::class, 'destroy'])->name('scheduling.faculty.destroy');
+    Route::get('/scheduling/teaching-qualifications', [TeachingQualificationController::class, 'index'])->name('scheduling.teaching-qualifications');
+    Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
 
