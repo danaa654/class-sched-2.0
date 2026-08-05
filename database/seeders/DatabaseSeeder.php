@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             DepartmentSeeder::class,
             SubjectSeeder::class,
             MajorSeeder::class,
+            RoomSeeder::class,
         ]);
     }
 }

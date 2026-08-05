@@ -12,6 +12,7 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\MajorController;
 use App\Http\Controllers\ReportsController;
+use App\Http\Controllers\RoomController;
 use App\Http\Controllers\SchedulingController;
 use App\Http\Controllers\SchoolYearController;
 use App\Http\Controllers\SemesterController;
@@ -83,6 +84,10 @@ Route::middleware('auth')->group(function () {
     Route::delete('/scheduling/faculty/{faculty}', [FacultyController::class, 'destroy'])->name('scheduling.faculty.destroy');
     Route::get('/scheduling/teaching-qualifications', [TeachingQualificationController::class, 'index'])->name('scheduling.teaching-qualifications');
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
+    Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');
+    Route::post('/scheduling/rooms', [RoomController::class, 'store'])->name('scheduling.rooms.store');
+    Route::put('/scheduling/rooms/{room}', [RoomController::class, 'update'])->name('scheduling.rooms.update');
+    Route::delete('/scheduling/rooms/{room}', [RoomController::class, 'destroy'])->name('scheduling.rooms.destroy');
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
 
