@@ -28,6 +28,7 @@ const schedulingItems = [
     { label: 'Faculty', route: 'scheduling.faculty' },
     { label: 'Teaching Qualifications', route: 'scheduling.teaching-qualifications' },
     { label: 'Rooms', route: 'scheduling.rooms' },
+    { label: 'Sections', route: 'scheduling.sections' },
 ];
 
 const restMenuItems = [

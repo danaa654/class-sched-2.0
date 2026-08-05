@@ -15,6 +15,8 @@ use App\Http\Controllers\ReportsController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\SchedulingController;
 use App\Http\Controllers\SchoolYearController;
+use App\Http\Controllers\SectionController;
+use App\Http\Controllers\SectionSubjectController;
 use App\Http\Controllers\SemesterController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SubjectController;
@@ -88,6 +90,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/rooms', [RoomController::class, 'store'])->name('scheduling.rooms.store');
     Route::put('/scheduling/rooms/{room}', [RoomController::class, 'update'])->name('scheduling.rooms.update');
     Route::delete('/scheduling/rooms/{room}', [RoomController::class, 'destroy'])->name('scheduling.rooms.destroy');
+    Route::get('/scheduling/sections', [SectionController::class, 'index'])->name('scheduling.sections');
+    Route::post('/scheduling/sections', [SectionController::class, 'store'])->name('scheduling.sections.store');
+    Route::put('/scheduling/sections/{section}', [SectionController::class, 'update'])->name('scheduling.sections.update');
+    Route::delete('/scheduling/sections/{section}', [SectionController::class, 'destroy'])->name('scheduling.sections.destroy');
+    Route::get('/scheduling/section-subjects', [SectionSubjectController::class, 'index'])->name('scheduling.section-subjects');
+    Route::get('/scheduling/section-subjects/{section}', [SectionSubjectController::class, 'show'])->name('scheduling.section-subjects.show');
+    Route::get('/scheduling/section-subjects/{section}/curriculum-preview', [SectionSubjectController::class, 'curriculumPreview'])->name('scheduling.section-subjects.curriculum-preview');
+    Route::post('/scheduling/section-subjects/{section}', [SectionSubjectController::class, 'store'])->name('scheduling.section-subjects.store');
+    Route::delete('/scheduling/section-subjects/{section}/{subject}', [SectionSubjectController::class, 'destroy'])->name('scheduling.section-subjects.destroy');
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
 
