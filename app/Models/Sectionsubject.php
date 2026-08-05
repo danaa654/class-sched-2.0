@@ -38,6 +38,7 @@ class SectionSubject extends Model
         'end_time',
         'status',
         'remarks',
+        'edp_code',
     ];
 
     /**

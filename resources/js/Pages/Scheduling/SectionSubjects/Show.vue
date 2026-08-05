@@ -21,6 +21,7 @@ import Tab from 'primevue/tab';
 import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Toast from 'primevue/toast';
+import Popover from 'primevue/popover';
 
 const props = defineProps({
     section: { type: Object, required: true },
@@ -111,7 +112,7 @@ watch(
 const rowState = reactive({});
 const stateFor = (rowId) => {
     if (!rowState[rowId]) {
-        rowState[rowId] = { errors: {} };
+        rowState[rowId] = { errors: {}, capacityConfirmed: false };
     }
     return rowState[rowId];
 };
@@ -166,10 +167,21 @@ const isQualifiedFor = (faculty, subject) => {
 
 const facultyGroupsFor = (row) => {
     const subject = row.subject;
+    const recs = recommendations[row.id]?.faculty?.recommendations ?? [];
+    const recommendedIds = new Set(recs.map((r) => r.id));
+
+    // Built from the ranked recommendation list itself (not
+    // props.activeFaculty) so the order matches the engine's ranking,
+    // not the alphabetical roster order.
+    const recommended = recs
+        .filter((r) => props.activeFaculty.some((f) => f.id === r.id))
+        .map((r) => ({ label: r.name, value: r.id, confidence: r.confidence }));
+
     const qualified = [];
     const others = [];
 
     props.activeFaculty.forEach((faculty) => {
+        if (recommendedIds.has(faculty.id)) return;
         const option = { label: faculty.full_name, value: faculty.id };
         if (isQualifiedFor(faculty, subject)) {
             qualified.push(option);
@@ -179,6 +191,7 @@ const facultyGroupsFor = (row) => {
     });
 
     const groups = [];
+    if (recommended.length) groups.push({ label: 'Recommended', items: recommended, isRecommended: true });
     if (qualified.length) groups.push({ label: 'Qualified for This Subject', items: qualified });
     if (others.length) groups.push({ label: 'Other Active Faculty (Manual Override)', items: others });
     return groups;
@@ -192,26 +205,32 @@ const facultyGroupsFor = (row) => {
 const roomGroupsFor = (row) => {
     const subject = row.subject;
     const wantsLaboratory = Number(subject?.laboratory_hours ?? 0) > 0;
-    const recommendedType = wantsLaboratory ? 'Laboratory' : 'Lecture';
+    const typeMatch = wantsLaboratory ? 'Laboratory' : 'Lecture';
 
-    const recommended = [];
+    const recs = recommendations[row.id]?.room?.recommendations ?? [];
+    const recommendedIds = new Set(recs.map((r) => r.id));
+
+    const recommended = recs
+        .filter((r) => props.activeRooms.some((room) => room.id === r.id))
+        .map((r) => ({ label: `${r.name} (${r.capacity})`, value: r.id, confidence: r.confidence }));
+
+    const typeMatched = [];
     const others = [];
 
     props.activeRooms.forEach((room) => {
+        if (recommendedIds.has(room.id)) return;
         const option = { label: `${room.room_code} — ${room.room_name} (${room.capacity})`, value: room.id };
-        if (room.room_type === recommendedType) {
-            recommended.push(option);
+        if (room.room_type === typeMatch) {
+            typeMatched.push(option);
         } else {
             others.push(option);
         }
     });
 
     const groups = [];
-    if (recommended.length) {
-        groups.push({
-            label: wantsLaboratory ? 'Laboratory Rooms (Recommended)' : 'Lecture Rooms (Recommended)',
-            items: recommended,
-        });
+    if (recommended.length) groups.push({ label: 'Recommended', items: recommended, isRecommended: true });
+    if (typeMatched.length) {
+        groups.push({ label: wantsLaboratory ? 'Laboratory Rooms' : 'Lecture Rooms', items: typeMatched });
     }
     if (others.length) groups.push({ label: 'Other Rooms', items: others });
     return groups;
@@ -237,6 +256,43 @@ const dateToTimeString = (date) => {
 const startTimeModel = (row) => timeStringToDate(row.start_time);
 const endTimeModel = (row) => timeStringToDate(row.end_time);
 
+/* --- Auto End Time — a Subject's weekly contact hours (Lecture +        */
+/* Laboratory) are split evenly across however many Days are selected,   */
+/* then added to Start Time. E.g. a 5-hour subject on 1 day runs 5       */
+/* hours; on 2 days (M&Th) each session runs 2h30m. Recomputed whenever  */
+/* Start Time or Days changes — the Registrar can still overwrite End    */
+/* Time by hand afterward.                                               */
+
+const weeklyContactHours = (row) => {
+    const lecture = Number(row.subject?.lecture_hours ?? 0);
+    const laboratory = Number(row.subject?.laboratory_hours ?? 0);
+    return lecture + laboratory;
+};
+
+const computeAutoEndTime = (row) => {
+    const totalHours = weeklyContactHours(row);
+    const dayCount = row.days?.length ?? 0;
+
+    if (!row.start_time || !totalHours || !dayCount) return null;
+
+    const [startHours, startMinutes] = row.start_time.split(':').map(Number);
+    const sessionMinutes = Math.round((totalHours / dayCount) * 60);
+    const endTotalMinutes = startHours * 60 + startMinutes + sessionMinutes;
+
+    const endHours = String(Math.floor(endTotalMinutes / 60) % 24).padStart(2, '0');
+    const endMinutes = String(endTotalMinutes % 60).padStart(2, '0');
+
+    return `${endHours}:${endMinutes}`;
+};
+
+const autoFillEndTime = (row) => {
+    const computed = computeAutoEndTime(row);
+    if (computed) {
+        row.end_time = computed;
+        markDirty(row, 'end_time');
+    }
+};
+
 /* --- Status / conflict badge --- */
 
 const statusSeverity = (status) => {
@@ -257,12 +313,233 @@ const hasActiveConflict = (row) => {
     return Boolean(errors.faculty_id || errors.room_id || errors.days || errors.start_time || errors.end_time);
 };
 
+/* ------------------------------------------------------------------ */
+/* Real-time conflict detection (Prompt 8.5)                           */
+/*                                                                       */
+/* Recomputed on every keystroke/selection from the local `rows` copy — */
+/* no server round trip — so the Conflict Panel, row highlighting, and  */
+/* Status badges update immediately as the Registrar edits a cell.      */
+/* This covers Faculty/Room/Section conflicts *within this section's    */
+/* own table* (everything the Registrar can see and cause here); a      */
+/* Faculty or Room clash against a *different* section is still caught  */
+/* by the existing server-side check when "Save Schedule" is clicked,   */
+/* since this workspace doesn't load every other section's schedule.    */
+/* ------------------------------------------------------------------ */
+
+const roomsById = computed(() => Object.fromEntries(props.activeRooms.map((room) => [room.id, room])));
+const facultyById = computed(() => Object.fromEntries(props.activeFaculty.map((f) => [f.id, f])));
+
+const daysOverlap = (a, b) => (a ?? []).some((day) => (b ?? []).includes(day));
+const timeOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
+
+const rowIsSchedulable = (row) => row.days?.length > 0 && row.start_time && row.end_time;
+
+// { faculty: Map<rowId, [{type, message, otherRowId}]>, ... } — built as
+// a flat list of conflict entries, each naming the row(s) it applies to.
+const tableConflicts = computed(() => {
+    const list = [];
+    const data = rows.value;
+
+    for (let i = 0; i < data.length; i++) {
+        const a = data[i];
+
+        // Room Capacity Warning — independent of other rows.
+        if (a.room_id && a.capacity) {
+            const room = roomsById.value[a.room_id];
+            if (room && Number(a.capacity) > Number(room.capacity)) {
+                list.push({
+                    type: 'capacity',
+                    rowIds: [a.id],
+                    label: 'Capacity Warning',
+                    detail: `${a.subject?.subject_code ?? 'Subject'} — Section Capacity ${a.capacity}, Room Capacity ${room.capacity} (${room.room_code})`,
+                });
+            }
+        }
+
+        if (!rowIsSchedulable(a)) continue;
+
+        for (let j = i + 1; j < data.length; j++) {
+            const b = data[j];
+            if (!rowIsSchedulable(b)) continue;
+            if (!daysOverlap(a.days, b.days)) continue;
+            if (!timeOverlap(a.start_time, a.end_time, b.start_time, b.end_time)) continue;
+
+            // Section Conflict — this section can't be in two places at once,
+            // regardless of Faculty/Room, any time two of its own rows overlap.
+            list.push({
+                type: 'section',
+                rowIds: [a.id, b.id],
+                label: 'Section Conflict',
+                detail: `${a.subject?.subject_code ?? 'Subject'} overlaps ${b.subject?.subject_code ?? 'Subject'} — ${formatDays(a.days.filter((d) => b.days.includes(d)))} ${formatTimeRange(a.start_time, a.end_time)}`,
+            });
+
+            if (a.faculty_id && a.faculty_id === b.faculty_id) {
+                const facultyName = facultyById.value[a.faculty_id]?.full_name ?? 'Faculty';
+                list.push({
+                    type: 'faculty',
+                    rowIds: [a.id, b.id],
+                    label: 'Faculty Conflict',
+                    detail: `${facultyName} — ${formatDays(a.days.filter((d) => b.days.includes(d)))} ${formatTimeRange(a.start_time, a.end_time)}`,
+                });
+            }
+
+            if (a.room_id && a.room_id === b.room_id) {
+                const room = roomsById.value[a.room_id];
+                list.push({
+                    type: 'room',
+                    rowIds: [a.id, b.id],
+                    label: 'Room Conflict',
+                    detail: `${room ? `${room.room_code} — ${room.room_name}` : 'Room'} — ${formatDays(a.days.filter((d) => b.days.includes(d)))} ${formatTimeRange(a.start_time, a.end_time)}`,
+                });
+            }
+        }
+    }
+
+    return list;
+});
+
+const formatTimeRange = (start, end) => {
+    const fmt = (value) => {
+        if (!value) return '';
+        const [h, m] = value.split(':').map(Number);
+        const period = h >= 12 ? 'PM' : 'AM';
+        const hour12 = h % 12 === 0 ? 12 : h % 12;
+        return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+    };
+    return `${fmt(start)} - ${fmt(end)}`;
+};
+
+// Rows with an unconfirmed Capacity Warning — these are the only
+// conflict type that can be overridden by the Registrar.
+const unconfirmedCapacityRowIds = computed(() =>
+    tableConflicts.value.filter((c) => c.type === 'capacity').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).capacityConfirmed),
+);
+
+// A row is "blocking" (true Conflict — Faculty/Room/Section) if it
+// appears in any non-capacity conflict entry.
+const blockingConflictRowIds = computed(
+    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity').flatMap((c) => c.rowIds)),
+);
+
+const rowHasBlockingConflict = (rowId) => blockingConflictRowIds.value.has(rowId);
+const facultyConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'faculty').flatMap((c) => c.rowIds)));
+const roomConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'room').flatMap((c) => c.rowIds)));
+const sectionConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'section').flatMap((c) => c.rowIds)));
+const rowHasCapacityWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'capacity' && c.rowIds.includes(rowId));
+
+const conflictTooltip = (rowId) =>
+    tableConflicts.value
+        .filter((c) => c.rowIds.includes(rowId))
+        .map((c) => `${c.label}: ${c.detail}`)
+        .join('\n');
+
+// Real-time display status — overrides the last-saved `status` value so
+// the badge reflects the *current* (unsaved) local edit immediately.
+const displayStatus = (row) => {
+    if (rowHasBlockingConflict(row.id)) return 'Conflict';
+    return row.status;
+};
+
+/* ------------------------------------------------------------------ */
+/* Smart Assignment Recommendation Engine (Prompt 8.6)                 */
+/*                                                                       */
+/* Ranked Faculty/Room/Time suggestions per row, fetched from           */
+/* RecommendationService via the server. Purely advisory — nothing      */
+/* here ever writes to row.faculty_id / room_id / days / times on its   */
+/* own; the Registrar must explicitly click "Use This" for each field.  */
+/* ------------------------------------------------------------------ */
+
+const recommendations = reactive({});
+
+const recommendationStateFor = (rowId) => recommendations[rowId] ?? { loading: false, error: null, faculty: null, room: null, time: null };
+
+const fetchRecommendations = async (row, force = false) => {
+    const existing = recommendations[row.id];
+    if (!force && (existing?.loading || existing?.faculty)) return;
+
+    recommendations[row.id] = { ...(existing ?? {}), loading: true, error: null };
+
+    try {
+        const response = await fetch(route('scheduling.section-subjects.recommend', [props.section.id, row.id]), {
+            headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) throw new Error('Request failed');
+        const data = await response.json();
+        recommendations[row.id] = { loading: false, error: null, ...data };
+    } catch (e) {
+        recommendations[row.id] = { loading: false, error: 'Could not load recommendations for this subject.', faculty: null, room: null, time: null };
+    }
+};
+
+const expandedRows = ref({});
+const onRowExpand = (event) => fetchRecommendations(event.data);
+
+const confidenceSeverity = (label) => {
+    switch (label) {
+        case 'Best Match':
+            return 'success';
+        case 'Good Match':
+            return 'info';
+        default:
+            return 'warning';
+    }
+};
+
+// Recommendation Score progress-bar color — mirrors the same
+// Best Match / Good Match / Alternative bands the badge uses.
+const scoreColor = (score) => {
+    if (score >= 85) return '#16a34a';
+    if (score >= 65) return '#2563eb';
+    return '#d97706';
+};
+
+// "Use This" — the Registrar's explicit confirmation. Recommendations
+// never auto-assign; these are the only paths that fill a field from
+// a suggestion, and they're only ever triggered by a manual click.
+const applyFacultyRecommendation = (row, rec) => onFacultyChange(row, rec.id);
+const applyRoomRecommendation = (row, rec) => onRoomChange(row, rec.id);
+const applyTimeRecommendation = (row, rec) => {
+    row.days = [...rec.days];
+    row.start_time = rec.start_time;
+    row.end_time = rec.end_time;
+    markDirty(row, 'days');
+    markDirty(row, 'start_time');
+    markDirty(row, 'end_time');
+};
+
+/* --- Inline "Suggested Time" popover (Days column) ------------------ */
+/* Faculty/Room already surface a "Recommended" group right inside      */
+/* their own dropdown; Time gets the same one-click treatment here      */
+/* instead of requiring the Registrar to expand the row's full panel.   */
+
+const timePopover = ref(null);
+const timePopoverRow = ref(null);
+
+const toggleTimeSuggestions = (event, row) => {
+    timePopoverRow.value = row;
+    fetchRecommendations(row);
+    timePopover.value?.toggle(event);
+};
+
+const applyTimeRecommendationFromPopover = (row, rec) => {
+    applyTimeRecommendation(row, rec);
+    timePopover.value?.hide();
+};
+
 /* --- Manual scheduling — edits stay local until "Save Schedule" is      */
 /* clicked. No per-cell auto-save; the Registrar can edit as many rows    */
 /* as they like first. Every edited field just updates the local row     */
 /* and marks it "dirty"; nothing hits the server until Save.              */
 
-const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+// Laravel refreshes the XSRF-TOKEN cookie on every response, unlike the
+// <meta name="csrf-token"> tag which is frozen at initial page load and
+// goes stale the moment the session's token rotates (e.g. right after
+// login). Reading it fresh from the cookie for every request avoids
+// spurious "CSRF token mismatch" errors without needing a page refresh.
+const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+};
 
 const dirtyRowIds = ref(new Set());
 const hasUnsavedChanges = computed(() => dirtyRowIds.value.size > 0);
@@ -279,14 +556,19 @@ const onFacultyChange = (row, value) => {
 const onRoomChange = (row, value) => {
     row.room_id = value;
     markDirty(row, 'room_id');
+    // A new Room means any previous Capacity Warning confirmation no
+    // longer applies — it must be re-confirmed against the new Room.
+    stateFor(row.id).capacityConfirmed = false;
 };
 const onDaysChange = (row, value) => {
     row.days = value;
     markDirty(row, 'days');
+    autoFillEndTime(row);
 };
 const onStartTimeChange = (row, date) => {
     row.start_time = dateToTimeString(date);
     markDirty(row, 'start_time');
+    autoFillEndTime(row);
 };
 const onEndTimeChange = (row, date) => {
     row.end_time = dateToTimeString(date);
@@ -345,6 +627,45 @@ const saveSchedule = async () => {
         return;
     }
 
+    // Faculty/Room/Section conflicts are hard blocks — never savable.
+    // The Save button is already disabled in this state, but this is
+    // the authoritative reject in case it's reached another way.
+    if (blockingConflictRowIds.value.size > 0) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Cannot Save Schedule',
+            text: 'Cannot save because scheduling conflicts were detected. Resolve the Scheduling Issues listed above and try again.',
+            confirmButtonColor: '#dc2626',
+        });
+        return;
+    }
+
+    // Room Capacity Warnings can be saved, but only once the Registrar
+    // explicitly confirms each one.
+    const stillUnconfirmed = unconfirmedCapacityRowIds.value;
+    if (stillUnconfirmed.length > 0) {
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Room Capacity Warning',
+            html: tableConflicts.value
+                .filter((c) => c.type === 'capacity' && stillUnconfirmed.includes(c.rowIds[0]))
+                .map((c) => `<div class="text-left text-sm">${c.detail}</div>`)
+                .join(''),
+            showCancelButton: true,
+            confirmButtonText: 'Save Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+        });
+
+        if (!result.isConfirmed) {
+            return;
+        }
+
+        stillUnconfirmed.forEach((rowId) => {
+            stateFor(rowId).capacityConfirmed = true;
+        });
+    }
+
     savingSchedule.value = true;
 
     const payloadRows = rows.value.map((row) => ({
@@ -355,6 +676,7 @@ const saveSchedule = async () => {
         start_time: row.start_time || null,
         end_time: row.end_time || null,
         capacity: row.capacity || null,
+        capacity_confirmed: Boolean(stateFor(row.id).capacityConfirmed),
     }));
 
     try {
@@ -363,7 +685,7 @@ const saveSchedule = async () => {
             headers: {
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
-                'X-CSRF-TOKEN': csrfToken(),
+                'X-XSRF-TOKEN': csrfToken(),
             },
             body: JSON.stringify({ rows: payloadRows }),
         });
@@ -612,7 +934,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         icon="pi pi-save"
                         severity="success"
                         :loading="savingSchedule"
-                        :disabled="rows.length === 0"
+                        :disabled="rows.length === 0 || blockingConflictRowIds.size > 0"
+                        :title="blockingConflictRowIds.size > 0 ? 'Resolve the Scheduling Issues above before saving.' : undefined"
                         @click="saveSchedule"
                     />
                 </div>
@@ -643,6 +966,31 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             <p class="mt-1 text-slate-800 font-medium">{{ section.estimated_students }}</p>
                         </div>
                     </div>
+                </template>
+            </Card>
+
+            <!-- Scheduling Issues panel — real-time, recomputed on every edit -->
+            <Card v-if="tableConflicts.length > 0" class="!rounded-2xl border border-red-200 bg-red-50/60 shadow-sm mb-6">
+                <template #content>
+                    <div class="flex items-center gap-2 mb-3">
+                        <i class="pi pi-exclamation-triangle text-red-500"></i>
+                        <h2 class="font-semibold text-red-700">Scheduling Issues</h2>
+                        <Tag :value="`${tableConflicts.length}`" severity="danger" class="!text-xs" />
+                    </div>
+                    <ul class="space-y-2">
+                        <li
+                            v-for="(conflict, index) in tableConflicts"
+                            :key="index"
+                            class="text-sm bg-white rounded-lg border border-red-100 px-3 py-2 flex items-start gap-2"
+                        >
+                            <Tag
+                                :value="conflict.label"
+                                :severity="conflict.type === 'capacity' ? 'warning' : 'danger'"
+                                class="!text-xs shrink-0"
+                            />
+                            <span class="text-slate-600">{{ conflict.detail }}</span>
+                        </li>
+                    </ul>
                 </template>
             </Card>
 
@@ -679,8 +1027,19 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         :value="rows"
                         :loading="loading"
                         dataKey="id"
+                        v-model:expandedRows="expandedRows"
+                        @rowExpand="onRowExpand"
                         class="rounded-xl overflow-hidden schedule-table"
-                        :rowClass="(row) => (dirtyRowIds.has(row.id) ? '!bg-amber-50' : undefined)"
+                        :rowClass="
+                            (row) =>
+                                rowHasBlockingConflict(row.id)
+                                    ? '!bg-red-50'
+                                    : rowHasCapacityWarning(row.id)
+                                      ? '!bg-amber-50'
+                                      : dirtyRowIds.has(row.id)
+                                        ? '!bg-amber-50'
+                                        : undefined
+                        "
                         stripedRows
                         responsiveLayout="scroll"
                         scrollable
@@ -704,6 +1063,16 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             </div>
                         </template>
 
+                        <Column expander style="width: 3rem" />
+
+                        <Column header="EDP Code" style="min-width: 8rem">
+                            <template #body="{ data }">
+                                <span v-if="data.edp_code" class="font-mono text-xs font-semibold text-indigo-700">
+                                    {{ data.edp_code }}
+                                </span>
+                                <Tag v-else value="Pending" severity="secondary" />
+                            </template>
+                        </Column>
                         <Column header="Subject Code" style="min-width: 9rem">
                             <template #body="{ data }">
                                 <span class="font-medium text-slate-700">{{ data.subject?.subject_code }}</span>
@@ -739,17 +1108,25 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     showClear
                                     placeholder="Select faculty"
                                     class="w-full"
-                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id }"
+                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id) }"
                                     emptyMessage="No active faculty"
                                     emptyFilterMessage="No matching faculty"
                                     @update:modelValue="(v) => onFacultyChange(data, v)"
+                                    @show="fetchRecommendations(data)"
                                 >
                                     <template #optiongroup="{ option }">
                                         <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
                                     </template>
+                                    <template #option="{ option }">
+                                        <span>{{ option.label }}</span>
+                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
+                                    </template>
                                 </Select>
                                 <p v-if="stateFor(data.id).errors.faculty_id" class="text-red-500 text-xs mt-1">
                                     <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.faculty_id }}
+                                </p>
+                                <p v-else-if="facultyConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                    <i class="pi pi-exclamation-triangle mr-1"></i>Faculty already booked this day/time.
                                 </p>
                             </template>
                         </Column>
@@ -768,54 +1145,81 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     showClear
                                     placeholder="Select room"
                                     class="w-full"
-                                    :class="{ 'p-invalid': stateFor(data.id).errors.room_id }"
+                                    :class="{ 'p-invalid': stateFor(data.id).errors.room_id || roomConflictRowIds.has(data.id) }"
                                     emptyMessage="No active rooms"
                                     emptyFilterMessage="No matching rooms"
                                     @update:modelValue="(v) => onRoomChange(data, v)"
+                                    @show="fetchRecommendations(data)"
                                 >
                                     <template #optiongroup="{ option }">
                                         <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
+                                    </template>
+                                    <template #option="{ option }">
+                                        <span>{{ option.label }}</span>
+                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
                                     </template>
                                 </Select>
                                 <p v-if="stateFor(data.id).errors.room_id" class="text-red-500 text-xs mt-1">
                                     <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.room_id }}
                                 </p>
+                                <p v-else-if="roomConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                    <i class="pi pi-exclamation-triangle mr-1"></i>Room already booked this day/time.
+                                </p>
+                                <p v-else-if="rowHasCapacityWarning(data.id)" class="text-amber-600 text-xs mt-1">
+                                    <i class="pi pi-exclamation-triangle mr-1"></i>Section capacity exceeds this room's capacity.
+                                </p>
                             </template>
                         </Column>
 
                         <!-- Days -->
-                        <Column header="Days" style="min-width: 11rem">
+                        <Column header="Days" style="min-width: 12rem">
                             <template #body="{ data }">
-                                <MultiSelect
-                                    v-model="data.days"
-                                    :options="dayOptions"
-                                    optionLabel="label"
-                                    optionValue="value"
-                                    placeholder="Select days"
-                                    class="w-full"
-                                    :class="{ 'p-invalid': stateFor(data.id).errors.days }"
-                                    @update:modelValue="(v) => onDaysChange(data, v)"
-                                >
-                                    <template #value="{ value, placeholder }">
-                                        <span v-if="!value || value.length === 0" class="text-slate-400">{{ placeholder }}</span>
-                                        <span v-else class="font-medium">{{ formatDays(value) }}</span>
-                                    </template>
-                                    <template #header>
-                                        <div class="flex flex-wrap gap-1 px-3 pt-2 pb-1">
-                                            <button
-                                                v-for="preset in dayPresets"
-                                                :key="preset.label"
-                                                type="button"
-                                                class="text-xs px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600"
-                                                @click="applyDayPreset(data, preset)"
-                                            >
-                                                {{ preset.label }}
-                                            </button>
-                                        </div>
-                                    </template>
-                                </MultiSelect>
+                                <div class="flex items-start gap-1">
+                                    <MultiSelect
+                                        v-model="data.days"
+                                        :options="dayOptions"
+                                        optionLabel="label"
+                                        optionValue="value"
+                                        placeholder="Select days"
+                                        class="w-full"
+                                        :class="{ 'p-invalid': stateFor(data.id).errors.days || sectionConflictRowIds.has(data.id) }"
+                                        @update:modelValue="(v) => onDaysChange(data, v)"
+                                    >
+                                        <template #value="{ value, placeholder }">
+                                            <span v-if="!value || value.length === 0" class="text-slate-400">{{ placeholder }}</span>
+                                            <span v-else class="font-medium">{{ formatDays(value) }}</span>
+                                        </template>
+                                        <template #header>
+                                            <div class="flex flex-wrap gap-1 px-3 pt-2 pb-1">
+                                                <button
+                                                    v-for="preset in dayPresets"
+                                                    :key="preset.label"
+                                                    type="button"
+                                                    class="text-xs px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600"
+                                                    @click="applyDayPreset(data, preset)"
+                                                >
+                                                    {{ preset.label }}
+                                                </button>
+                                            </div>
+                                        </template>
+                                    </MultiSelect>
+                                    <Button
+                                        icon="pi pi-sparkles"
+                                        text
+                                        rounded
+                                        size="small"
+                                        severity="secondary"
+                                        class="!p-1.5 shrink-0"
+                                        aria-label="Suggested times"
+                                        title="Suggested times"
+                                        @click="toggleTimeSuggestions($event, data)"
+                                    />
+                                </div>
                                 <p v-if="stateFor(data.id).errors.days" class="text-red-500 text-xs mt-1">
                                     <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.days }}
+                                </p>
+                                <p v-else-if="sectionConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                    <i class="pi pi-exclamation-triangle mr-1"></i>Overlaps another class in this section.
                                 </p>
                             </template>
                         </Column>
@@ -864,11 +1268,12 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         <Column header="Status" style="width: 9rem">
                             <template #body="{ data }">
                                 <div class="flex items-center gap-1">
-                                    <Tag :value="data.status" :severity="statusSeverity(data.status)" />
+                                    <Tag :value="displayStatus(data)" :severity="statusSeverity(displayStatus(data))" />
                                     <i
-                                        v-if="hasActiveConflict(data)"
-                                        class="pi pi-exclamation-triangle text-amber-500"
-                                        title="Unresolved scheduling conflict"
+                                        v-if="rowHasBlockingConflict(data.id) || rowHasCapacityWarning(data.id) || hasActiveConflict(data)"
+                                        class="pi pi-exclamation-triangle"
+                                        :class="rowHasBlockingConflict(data.id) || hasActiveConflict(data) ? 'text-red-500' : 'text-amber-500'"
+                                        :title="conflictTooltip(data.id) || 'Unresolved scheduling conflict'"
                                     ></i>
                                 </div>
                             </template>
@@ -892,7 +1297,210 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                 />
                             </template>
                         </Column>
+
+                        <!-- Smart Assignment Recommendation Panel (Prompt 8.6) -->
+                        <template #expansion="{ data }">
+                            <div class="p-4 bg-slate-50 rounded-lg">
+                                <div class="flex items-center justify-between mb-3">
+                                    <p class="text-sm font-semibold text-slate-700">
+                                        <i class="pi pi-sparkles mr-1 text-indigo-500"></i>Recommended Faculty, Room &amp; Time
+                                    </p>
+                                    <Button
+                                        icon="pi pi-refresh"
+                                        label="Refresh"
+                                        text
+                                        size="small"
+                                        :loading="recommendationStateFor(data.id).loading"
+                                        @click="fetchRecommendations(data, true)"
+                                    />
+                                </div>
+
+                                <div v-if="recommendationStateFor(data.id).loading" class="text-sm text-slate-500">
+                                    Finding the best matches for {{ data.subject?.subject_code }}…
+                                </div>
+                                <div v-else-if="recommendationStateFor(data.id).error" class="text-sm text-red-500">
+                                    {{ recommendationStateFor(data.id).error }}
+                                </div>
+                                <div v-else-if="recommendationStateFor(data.id).faculty" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <!-- Recommended Faculty -->
+                                    <div class="bg-white rounded-lg border border-slate-200 p-3">
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Recommended Faculty</p>
+                                        <p v-if="recommendationStateFor(data.id).faculty.message" class="text-sm text-slate-500">
+                                            {{ recommendationStateFor(data.id).faculty.message }}
+                                        </p>
+                                        <ul v-else class="flex flex-col gap-3">
+                                            <li
+                                                v-for="rec in recommendationStateFor(data.id).faculty.recommendations"
+                                                :key="rec.id"
+                                                class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
+                                            >
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <div class="min-w-0">
+                                                        <p class="text-sm font-medium text-slate-700 truncate">{{ rec.name }}</p>
+                                                        <div class="flex items-center gap-1.5 mt-0.5">
+                                                            <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
+                                                            <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                                        </div>
+                                                    </div>
+                                                    <Button label="Use This" text size="small" @click="applyFacultyRecommendation(data, rec)" />
+                                                </div>
+                                                <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                                    <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
+                                                </div>
+                                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
+                                                    <li
+                                                        v-for="reason in rec.reasons"
+                                                        :key="reason.label"
+                                                        class="text-[0.7rem] flex items-center gap-1"
+                                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                                    >
+                                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                                    </li>
+                                                </ul>
+                                            </li>
+                                        </ul>
+                                    </div>
+
+                                    <!-- Recommended Room -->
+                                    <div class="bg-white rounded-lg border border-slate-200 p-3">
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Recommended Room</p>
+                                        <p v-if="recommendationStateFor(data.id).room?.message" class="text-sm text-slate-500">
+                                            {{ recommendationStateFor(data.id).room.message }}
+                                        </p>
+                                        <ul v-else class="flex flex-col gap-3">
+                                            <li
+                                                v-for="rec in recommendationStateFor(data.id).room?.recommendations ?? []"
+                                                :key="rec.id"
+                                                class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
+                                            >
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <div class="min-w-0">
+                                                        <p class="text-sm font-medium text-slate-700 truncate">{{ rec.name }}</p>
+                                                        <div class="flex items-center gap-1.5 mt-0.5">
+                                                            <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
+                                                            <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                                        </div>
+                                                    </div>
+                                                    <Button label="Use This" text size="small" @click="applyRoomRecommendation(data, rec)" />
+                                                </div>
+                                                <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                                    <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
+                                                </div>
+                                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
+                                                    <li
+                                                        v-for="reason in rec.reasons"
+                                                        :key="reason.label"
+                                                        class="text-[0.7rem] flex items-center gap-1"
+                                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                                    >
+                                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                                    </li>
+                                                </ul>
+                                            </li>
+                                        </ul>
+                                    </div>
+
+                                    <!-- Recommended Time -->
+                                    <div class="bg-white rounded-lg border border-slate-200 p-3">
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Recommended Time</p>
+                                        <p v-if="recommendationStateFor(data.id).time?.message" class="text-sm text-slate-500">
+                                            {{ recommendationStateFor(data.id).time.message }}
+                                        </p>
+                                        <ul v-else class="flex flex-col gap-3">
+                                            <li
+                                                v-for="(rec, idx) in recommendationStateFor(data.id).time?.recommendations ?? []"
+                                                :key="idx"
+                                                class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
+                                            >
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <div class="min-w-0">
+                                                        <p class="text-sm font-medium text-slate-700 truncate">
+                                                            {{ formatDays(rec.days) }} · {{ formatTimeRange(rec.start_time, rec.end_time) }}
+                                                        </p>
+                                                        <div class="flex items-center gap-1.5 mt-0.5">
+                                                            <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
+                                                            <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                                        </div>
+                                                    </div>
+                                                    <Button label="Use This" text size="small" @click="applyTimeRecommendation(data, rec)" />
+                                                </div>
+                                                <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                                    <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
+                                                </div>
+                                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
+                                                    <li
+                                                        v-for="reason in rec.reasons"
+                                                        :key="reason.label"
+                                                        class="text-[0.7rem] flex items-center gap-1"
+                                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                                    >
+                                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                                    </li>
+                                                </ul>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-slate-400 mt-3">
+                                    <i class="pi pi-info-circle mr-1"></i>Recommendations are suggestions only — nothing is assigned until you pick it.
+                                </p>
+                            </div>
+                        </template>
                     </DataTable>
+
+                    <!-- Suggested Time popover (Days column quick-pick) -->
+                    <Popover ref="timePopover">
+                        <div class="w-80 max-w-[90vw]">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 px-1">
+                                Suggested Times<span v-if="timePopoverRow?.subject?.subject_code"> — {{ timePopoverRow.subject.subject_code }}</span>
+                            </p>
+                            <div v-if="recommendationStateFor(timePopoverRow?.id).loading" class="text-sm text-slate-500 px-1 py-2">
+                                Finding open slots…
+                            </div>
+                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).error" class="text-sm text-red-500 px-1 py-2">
+                                {{ recommendationStateFor(timePopoverRow?.id).error }}
+                            </div>
+                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).time?.message" class="text-sm text-slate-500 px-1 py-2">
+                                {{ recommendationStateFor(timePopoverRow?.id).time.message }}
+                            </div>
+                            <ul v-else class="flex flex-col gap-3 max-h-80 overflow-y-auto pr-1">
+                                <li
+                                    v-for="(rec, idx) in recommendationStateFor(timePopoverRow?.id).time?.recommendations ?? []"
+                                    :key="idx"
+                                    class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
+                                >
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div class="min-w-0">
+                                            <p class="text-sm font-medium text-slate-700 truncate">
+                                                {{ formatDays(rec.days) }} · {{ formatTimeRange(rec.start_time, rec.end_time) }}
+                                            </p>
+                                            <div class="flex items-center gap-1.5 mt-0.5">
+                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
+                                                <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                            </div>
+                                        </div>
+                                        <Button label="Use This" text size="small" @click="applyTimeRecommendationFromPopover(timePopoverRow, rec)" />
+                                    </div>
+                                    <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                        <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
+                                    </div>
+                                    <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
+                                        <li
+                                            v-for="reason in rec.reasons"
+                                            :key="reason.label"
+                                            class="text-[0.7rem] flex items-center gap-1"
+                                            :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                        >
+                                            <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                        </li>
+                                    </ul>
+                                </li>
+                            </ul>
+                            <p class="text-xs text-slate-400 mt-2 px-1">
+                                <i class="pi pi-info-circle mr-1"></i>Suggestions only — nothing is assigned until you click "Use This".
+                            </p>
+                        </div>
+                    </Popover>
                 </template>
             </Card>
         </div>

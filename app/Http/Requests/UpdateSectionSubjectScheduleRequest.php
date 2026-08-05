@@ -40,6 +40,11 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             'start_time' => ['sometimes', 'nullable', 'date_format:H:i'],
             'end_time' => ['sometimes', 'nullable', 'date_format:H:i', 'after:start_time'],
             'capacity' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            // Set true once the Registrar has explicitly acknowledged a
+            // Room Capacity warning (Section Capacity > Room Capacity) —
+            // lets the save proceed despite the warning. See
+            // SectionSubjectController::updateSchedule().
+            'capacity_confirmed' => ['sometimes', 'boolean'],
         ];
     }
 

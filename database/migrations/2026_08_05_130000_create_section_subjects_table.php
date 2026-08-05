@@ -23,6 +23,13 @@ return new class extends Migration
             $table->foreignId('subject_id')->constrained('subjects')->cascadeOnDelete();
             $table->enum('source', ['Curriculum', 'Manual'])->default('Manual');
 
+            // EDP Code — auto-generated the moment this Subject is placed
+            // into the Section (see EDPCodeService), before any Faculty,
+            // Room, Days, or Time is assigned. Never regenerated or
+            // edited once set. Unique so two rows can never end up
+            // sharing the same code.
+            $table->string('edp_code', 20)->nullable()->unique();
+
             // Schedule placeholders. Left empty when the subject is
             // added — Faculty, Room, and Time are assigned later by
             // the scheduling engine, never automatically here.

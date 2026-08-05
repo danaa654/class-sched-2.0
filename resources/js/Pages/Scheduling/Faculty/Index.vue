@@ -375,10 +375,10 @@ const fullName = (faculty) => {
                         </Column>
                         <Column header="Department" style="width: 12rem">
                             <template #body="{ data }">
-                                {{ data.department?.name || '—' }}
+                                {{ data.department?.name || data.specialization || '—' }}
                             </template>
                         </Column>
-                        <Column header="Specialization" style="width: 12rem">
+                        <Column header="Major" style="width: 12rem">
                             <template #body="{ data }">
                                 {{ data.specialization || '—' }}
                             </template>
@@ -620,9 +620,9 @@ const fullName = (faculty) => {
                     </p>
                 </div>
 
-                <!-- Specialization -->
+                <!-- Specialization / Major -->
                 <div class="flex flex-col gap-1">
-                    <label for="specialization" class="text-sm font-medium text-slate-700">Specialization</label>
+                    <label for="specialization" class="text-sm font-medium text-slate-700">Major</label>
                     <InputText
                         id="specialization"
                         v-model="facultyForm.specialization"

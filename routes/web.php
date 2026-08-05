@@ -110,6 +110,9 @@ Route::middleware('auth')->group(function () {
     // Section Subjects page (scheduling.section-subjects.show) IS the
     // scheduling workspace; there is no separate workspace page/route.
     Route::patch('/scheduling/section-subjects/{section}/{subject}/schedule', [SectionSubjectController::class, 'updateSchedule'])->name('scheduling.section-subjects.schedule');
+    // Smart Assignment Recommendation Engine (Prompt 8.6) — ranked
+    // Faculty/Room/Time suggestions for one row, never auto-assigns.
+    Route::get('/scheduling/section-subjects/{section}/{subject}/recommend', [SectionSubjectController::class, 'recommend'])->name('scheduling.section-subjects.recommend');
     // "Save Schedule" batch save — the Registrar edits Faculty/Room/Days/
     // Start/End Time across multiple rows locally in the table, then
     // submits every row at once here; all rows save in a single

@@ -14,6 +14,10 @@ use App\Models\Room;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Subject;
+use App\Services\EDPCodeService;
+use App\Services\RecommendationService;
+use App\Services\ScheduleConflictService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +26,13 @@ use Inertia\Response;
 
 class SectionSubjectController extends Controller
 {
+    public function __construct(
+        private readonly EDPCodeService $edpCodeService,
+        private readonly ScheduleConflictService $conflictService,
+        private readonly RecommendationService $recommendationService
+    ) {
+    }
+
     /**
      * Section.year_level uses "First Year"… while CurriculumItem.year_level
      * uses "1st Year"… — this maps between the two so a Section's own
@@ -220,45 +231,34 @@ class SectionSubjectController extends Controller
 
         $errors = [];
 
-        // Capacity cannot exceed the assigned Room's capacity.
+        // Room Capacity Warning — Section Capacity > Room Capacity is not
+        // a hard block, but the Registrar must explicitly confirm before
+        // it's allowed to save (see UpdateSectionSubjectScheduleRequest).
         if ($roomId && $capacity) {
             $room = Room::find($roomId);
-            if ($room && $capacity > $room->capacity) {
-                $errors['capacity'] = "Capacity cannot exceed this room's capacity ({$room->capacity}).";
+            if ($room && $capacity > $room->capacity && ! $request->boolean('capacity_confirmed')) {
+                $errors['capacity'] = "Section Capacity ({$capacity}) exceeds this room's capacity ({$room->capacity}). "
+                    .'Confirm to save anyway.';
             }
         }
 
         $dayTokens = array_filter(explode(',', (string) $days));
 
-        if ($facultyId && $startTime && $endTime && ! empty($dayTokens)) {
-            $conflict = $this->findTimeConflict(
-                SectionSubject::query()->where('faculty_id', $facultyId),
-                $subject->id,
-                $dayTokens,
-                $startTime,
-                $endTime
-            );
-
-            if ($conflict) {
-                $errors['faculty_id'] = 'This faculty member already has a class at this day and time ('
-                    ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
-            }
-        }
-
-        if ($roomId && $startTime && $endTime && ! empty($dayTokens)) {
-            $conflict = $this->findTimeConflict(
-                SectionSubject::query()->where('room_id', $roomId),
-                $subject->id,
-                $dayTokens,
-                $startTime,
-                $endTime
-            );
-
-            if ($conflict) {
-                $errors['room_id'] = 'This room is already booked at this day and time ('
-                    ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
-            }
-        }
+        // Section / Faculty / Room / Time-overlap conflict checks all
+        // live in ScheduleConflictService — never duplicated here — so
+        // the manual workspace and the future Genetic Algorithm scheduler
+        // both validate against the exact same rules.
+        $errors = array_merge($errors, $this->conflictService->validate(
+            [
+                'section_id' => $section->id,
+                'faculty_id' => $facultyId,
+                'room_id' => $roomId,
+                'days' => $dayTokens,
+                'start_time' => $startTime,
+                'end_time' => $endTime,
+            ],
+            $subject->id
+        ));
 
         if (! empty($errors)) {
             return response()->json(['errors' => $errors], 422);
@@ -283,6 +283,21 @@ class SectionSubjectController extends Controller
             'sectionSubject' => $subject->fresh(['subject', 'faculty', 'room']),
             'message' => 'Schedule updated.',
         ]);
+    }
+
+    /**
+     * Smart Assignment Recommendation Engine (Prompt 8.6).
+     *
+     * Returns ranked Faculty, Room, and Time suggestions for one
+     * scheduling workspace row — never assigns anything itself. All
+     * of the actual recommendation logic lives in RecommendationService
+     * (reused later by the Genetic Algorithm), never here.
+     */
+    public function recommend(Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        return response()->json($this->recommendationService->recommend($subject));
     }
 
     /**
@@ -337,45 +352,34 @@ class SectionSubjectController extends Controller
 
                 $rowErrors = [];
 
-                // Capacity cannot exceed the assigned Room's capacity.
+                // Room Capacity Warning — not a hard block, but the
+                // Registrar must explicitly confirm this row before it's
+                // allowed to save (see BatchUpdateSectionSubjectScheduleRequest).
                 if ($roomId && $capacity) {
                     $room = Room::find($roomId);
-                    if ($room && $capacity > $room->capacity) {
-                        $rowErrors['capacity'] = "Capacity cannot exceed this room's capacity ({$room->capacity}).";
+                    if ($room && $capacity > $room->capacity && empty($rowData['capacity_confirmed'])) {
+                        $rowErrors['capacity'] = "Section Capacity ({$capacity}) exceeds this room's capacity ({$room->capacity}). "
+                            .'Confirm to save anyway.';
                     }
                 }
 
                 $dayTokens = array_filter(explode(',', (string) $days));
 
-                if ($facultyId && $startTime && $endTime && ! empty($dayTokens)) {
-                    $conflict = $this->findTimeConflict(
-                        SectionSubject::query()->where('faculty_id', $facultyId),
-                        $subject->id,
-                        $dayTokens,
-                        $startTime,
-                        $endTime
-                    );
-
-                    if ($conflict) {
-                        $rowErrors['faculty_id'] = 'This faculty member already has a class at this day and time ('
-                            ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
-                    }
-                }
-
-                if ($roomId && $startTime && $endTime && ! empty($dayTokens)) {
-                    $conflict = $this->findTimeConflict(
-                        SectionSubject::query()->where('room_id', $roomId),
-                        $subject->id,
-                        $dayTokens,
-                        $startTime,
-                        $endTime
-                    );
-
-                    if ($conflict) {
-                        $rowErrors['room_id'] = 'This room is already booked at this day and time ('
-                            ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
-                    }
-                }
+                // Same shared ScheduleConflictService the single-cell
+                // save uses above — kept identical so batch saves can
+                // never disagree with per-cell saves about what counts
+                // as a conflict.
+                $rowErrors = array_merge($rowErrors, $this->conflictService->validate(
+                    [
+                        'section_id' => $section->id,
+                        'faculty_id' => $facultyId,
+                        'room_id' => $roomId,
+                        'days' => $dayTokens,
+                        'start_time' => $startTime,
+                        'end_time' => $endTime,
+                    ],
+                    $subject->id
+                ));
 
                 if (! empty($rowErrors)) {
                     // Keyed by SectionSubject id so the frontend can
@@ -431,34 +435,6 @@ class SectionSubjectController extends Controller
     }
 
     /**
-     * Finds another SectionSubject row (excluding the one being
-     * edited) already booked on any of the given Days whose
-     * Start/End Time overlaps the given window, within an
-     * already-scoped query (by faculty_id or room_id).
-     */
-    private function findTimeConflict(
-        \Illuminate\Database\Eloquent\Builder $query,
-        int $excludingId,
-        array $dayTokens,
-        string $startTime,
-        string $endTime
-    ): ?SectionSubject {
-        return $query->with(['subject:id,subject_code', 'section:id,section_code'])
-            ->where('id', '!=', $excludingId)
-            ->whereNotNull('days')
-            ->whereNotNull('start_time')
-            ->whereNotNull('end_time')
-            ->where(function ($q) use ($dayTokens) {
-                foreach ($dayTokens as $day) {
-                    $q->orWhere('days', 'like', "%{$day}%");
-                }
-            })
-            ->where('start_time', '<', $endTime)
-            ->where('end_time', '>', $startTime)
-            ->first();
-    }
-
-    /**
      * Build a rolling list of Academic Year options (e.g. "2026-2027"),
      * matching SectionController's own generator so both places offer
      * the same choices.
@@ -504,13 +480,21 @@ class SectionSubjectController extends Controller
             return back()->with('error', 'No new subjects found for this section\'s curriculum, year level, and semester.');
         }
 
+        $section->loadMissing('major');
+
         foreach ($subjectIds as $subjectId) {
-            SectionSubject::create([
+            $sectionSubject = SectionSubject::create([
                 'section_id' => $section->id,
                 'subject_id' => $subjectId,
                 'source' => 'Curriculum',
                 'capacity' => $section->estimated_students,
             ]);
+
+            // EDP Code is minted the moment a subject is placed into the
+            // section — it doesn't wait for scheduling. No-op if the row
+            // somehow already has one.
+            $sectionSubject->setRelation('section', $section);
+            $this->edpCodeService->generateForSectionSubject($sectionSubject);
         }
 
         $count = $subjectIds->count();
@@ -569,7 +553,7 @@ class SectionSubjectController extends Controller
         $validated = $request->validated();
 
         foreach ($validated['subject_ids'] as $subjectId) {
-            SectionSubject::create([
+            $sectionSubject = SectionSubject::create([
                 'section_id' => $section->id,
                 'subject_id' => $subjectId,
                 'source' => $validated['source'],
@@ -581,6 +565,12 @@ class SectionSubjectController extends Controller
                 'capacity' => $validated['capacity'] ?? $section->estimated_students,
                 'status' => 'Draft',
             ]);
+
+            // EDP Code is minted the moment a subject is placed into the
+            // section — it doesn't wait for scheduling. No-op if the row
+            // somehow already has one.
+            $sectionSubject->setRelation('section', $section->loadMissing('major'));
+            $this->edpCodeService->generateForSectionSubject($sectionSubject);
         }
 
         $count = count($validated['subject_ids']);

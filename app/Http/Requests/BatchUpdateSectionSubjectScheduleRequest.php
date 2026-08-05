@@ -47,6 +47,11 @@ class BatchUpdateSectionSubjectScheduleRequest extends FormRequest
             'rows.*.start_time' => ['nullable', 'date_format:H:i'],
             'rows.*.end_time' => ['nullable', 'date_format:H:i', 'after:rows.*.start_time'],
             'rows.*.capacity' => ['nullable', 'integer', 'min:1'],
+            // Set true once the Registrar has explicitly acknowledged a
+            // Room Capacity warning (Section Capacity > Room Capacity) for
+            // this row — lets that row save despite the warning. See
+            // SectionSubjectController::batchUpdateSchedule().
+            'rows.*.capacity_confirmed' => ['nullable', 'boolean'],
         ];
     }
 

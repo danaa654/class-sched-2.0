@@ -3,11 +3,39 @@
 namespace Database\Seeders;
 
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\Major;
 use Illuminate\Database\Seeder;
 
 class FacultySeeder extends Seeder
 {
+    /**
+     * Colleges that have exactly one Department (and therefore one
+     * Major) in DepartmentSeeder — every "departmental" faculty member
+     * there can be assigned unambiguously without per-row data.
+     * Keyed by College code -> the single Department's major-code
+     * suffix (i.e. Department::name, per DepartmentSeeder::DEPARTMENTS).
+     *
+     * @var array<string, string>
+     */
+    private const SINGLE_DEPARTMENT_COLLEGES = [
+        'CCS' => 'BSIT',
+        'CTE' => 'BSED',
+    ];
+
+    /**
+     * Colleges with more than one Department/Major where 'cross_department'
+     * faculty teach across all of them. Keyed by College code -> ordered
+     * list of Department::name values (major-code suffixes, per
+     * DepartmentSeeder::DEPARTMENTS) to display as the faculty's majors.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private const CROSS_DEPARTMENT_MAJORS = [
+        'COC' => ['BSCRIMQD', 'BSCRIMFI', 'BSCRIMFB', 'BSCRIMLD'],
+        'SHTM' => ['BSHM', 'BSTM'],
+    ];
     /**
      * Old-roster employment type label -> current `employment_type` enum value.
      */
@@ -52,13 +80,22 @@ class FacultySeeder extends Seeder
         // college instead of once per faculty row.
         $collegeIds = College::pluck('id', 'code');
 
+        // Department lookup keyed "COLLEGE_CODE:MAJOR_CODE_SUFFIX" ->
+        // Department, e.g. "COC:BSCRIMQD" -> the BSCRIMQD Department row.
+        // Department::name holds that major-code suffix (see
+        // DepartmentSeeder::DEPARTMENTS — it's confusingly named
+        // 'name' but is really the major code, e.g. 'BSIT').
+        $departmentLookup = Department::with('college:id,code')
+            ->get()
+            ->filter(fn (Department $d) => $d->college !== null)
+            ->keyBy(fn (Department $d) => "{$d->college->code}:{$d->name}");
+
+        // Department -> Major.short_name, so `specialization` can show
+        // the human-readable program instead of a raw department code.
+        $majorShortNameByDepartment = Major::pluck('short_name', 'department_id');
+
         foreach ($this->facultyByCollege() as $code => $facultyList) {
             $collegeId = $code === null ? null : ($collegeIds[$code] ?? null);
-
-            // No department-level breakdown exists in the source roster
-            // (only college/college-abbreviation groupings), so department_id
-            // is intentionally left null here. Assign it later once the
-            // registrar confirms each faculty member's specific program.
             $facultyCategory = $code === null ? 'General Education Faculty' : 'Department Faculty';
 
             foreach ($facultyList as $row) {
@@ -67,12 +104,53 @@ class FacultySeeder extends Seeder
                 $nameParts = $this->parseFullName($row['full_name']);
                 $employmentType = self::EMPLOYMENT_TYPE[$row['employment_type']];
 
+                $departmentId = null;
+                $specialization = null;
                 $remarksParts = [];
+
                 if ($nameParts['title']) {
                     $remarksParts[] = "Title: {$nameParts['title']}";
                 }
-                if ($row['faculty_scope'] === 'cross_department') {
+
+                if ($code !== null && $row['faculty_scope'] === 'departmental') {
+                    // Single-department colleges don't need a per-row
+                    // department_code — there's only one possible answer.
+                    $deptSuffix = $row['department_code'] ?? self::SINGLE_DEPARTMENT_COLLEGES[$code] ?? null;
+                    $department = $deptSuffix ? $departmentLookup->get("{$code}:{$deptSuffix}") : null;
+
+                    if ($department) {
+                        $departmentId = $department->id;
+                        $specialization = $majorShortNameByDepartment[$department->id] ?? null;
+                    }
+                } elseif ($code !== null && $row['faculty_scope'] === 'cross_department') {
+                    // Genuinely teaches across the whole college, not
+                    // one specific program — department_id stays null,
+                    // college_id alone represents them.
                     $remarksParts[] = 'Teaches across multiple departments within the college.';
+
+                    // For colleges with more than one major, show all of
+                    // them in `specialization` (e.g. "BSHM, BSTM") instead
+                    // of leaving it blank, since that's the whole point of
+                    // cross_department for these colleges.
+                    if (isset(self::CROSS_DEPARTMENT_MAJORS[$code])) {
+                        $majorNames = collect(self::CROSS_DEPARTMENT_MAJORS[$code])
+                            ->map(function (string $deptSuffix) use ($code, $departmentLookup, $majorShortNameByDepartment) {
+                                $department = $departmentLookup->get("{$code}:{$deptSuffix}");
+
+                                if (! $department) {
+                                    return null;
+                                }
+
+                                return $majorShortNameByDepartment[$department->id] ?? $deptSuffix;
+                            })
+                            ->filter()
+                            ->unique()
+                            ->values();
+
+                        if ($majorNames->isNotEmpty()) {
+                            $specialization = $majorNames->implode(', ');
+                        }
+                    }
                 }
 
                 Faculty::updateOrCreate(
@@ -86,8 +164,13 @@ class FacultySeeder extends Seeder
                         'suffix'              => $nameParts['suffix'],
                         'employment_type'     => $employmentType,
                         'faculty_category'    => $facultyCategory,
+                        // A Faculty member with no College/Department is,
+                        // by definition, General Education Faculty — see
+                        // $facultyCategory above (keyed off the `null`
+                        // college group in facultyByCollege()).
                         'college_id'          => $collegeId,
-                        'department_id'       => null,
+                        'department_id'       => $departmentId,
+                        'specialization'      => $specialization,
                         'max_teaching_units'  => self::MAX_TEACHING_UNITS[$row['employment_type']],
                         'status'              => 'Active',
                         'remarks'             => $remarksParts ? implode(' ', $remarksParts) : null,
@@ -143,23 +226,29 @@ class FacultySeeder extends Seeder
 
             // ----------------------------------------------------------------
             // COC — College of Criminology
+            //
+            // COC has 4 majors/departments (BSCRIMQD, BSCRIMFI, BSCRIMFB,
+            // BSCRIMLD — see DepartmentSeeder), but they're all one college
+            // and the source roster doesn't tie any faculty member to just
+            // one of the four — so, like SHTM, department_id stays null and
+            // college_id alone represents them.
             // ----------------------------------------------------------------
             'COC' => [
-                ['full_name' => 'ALFANTE, ADRIAN LI P.', 'email' => 'adrian.alfante@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'ANSAY, MARY GRACE D.', 'email' => 'mary.ansay@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'ARSOLA, CHERRIE MIE V.', 'email' => 'cherrie.arsola@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'AUTENTICO, FRESCEL E.', 'email' => 'frescel.autentico@pap.edu.ph', 'employment_type' => 'Part-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'BERNADOS, MARC', 'email' => 'marc.bernados@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'CALANG, DR. VERONICA V.', 'email' => 'veronica.calang@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'EVALLE, MAELJHEN V.', 'email' => 'maeljhen.evalle@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'GALULA, CHARLIE', 'email' => 'charlie.galula@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'ISRAEL, EDELBERT G.', 'email' => 'edelbert.israel@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'JUAREZ, EFFREY REY A.', 'email' => 'effrey.juarez@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'NOVAL, DR. FILEMON E.', 'email' => 'filemon.noval@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'PADAYAO, RENDON B.', 'email' => 'rendon.padayao@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'PRANGOS, DARYL P.', 'email' => 'daryl.prangos@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'PULVERA, WILFREDO P.', 'email' => 'wilfredo.pulvera@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'VILLAHERMOSA, MARDY B.', 'email' => 'mardy.villahermosa@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
+                ['full_name' => 'ALFANTE, ADRIAN LI P.', 'email' => 'adrian.alfante@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'ANSAY, MARY GRACE D.', 'email' => 'mary.ansay@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'ARSOLA, CHERRIE MIE V.', 'email' => 'cherrie.arsola@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'AUTENTICO, FRESCEL E.', 'email' => 'frescel.autentico@pap.edu.ph', 'employment_type' => 'Part-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'BERNADOS, MARC', 'email' => 'marc.bernados@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'CALANG, DR. VERONICA V.', 'email' => 'veronica.calang@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'EVALLE, MAELJHEN V.', 'email' => 'maeljhen.evalle@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'GALULA, CHARLIE', 'email' => 'charlie.galula@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'ISRAEL, EDELBERT G.', 'email' => 'edelbert.israel@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'JUAREZ, EFFREY REY A.', 'email' => 'effrey.juarez@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'NOVAL, DR. FILEMON E.', 'email' => 'filemon.noval@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'PADAYAO, RENDON B.', 'email' => 'rendon.padayao@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'PRANGOS, DARYL P.', 'email' => 'daryl.prangos@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'PULVERA, WILFREDO P.', 'email' => 'wilfredo.pulvera@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'VILLAHERMOSA, MARDY B.', 'email' => 'mardy.villahermosa@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
             ],
 
             // ----------------------------------------------------------------
@@ -181,14 +270,20 @@ class FacultySeeder extends Seeder
 
             // ----------------------------------------------------------------
             // SHTM — School of Hospitality and Tourism Management
+            //
+            // SHTM has 2 majors/departments (BSHM, BSTM), but they're both
+            // one college and the source roster doesn't tie any faculty
+            // member to just one of the two — so, like the cross_department
+            // rows in CCS/CTE, department_id stays null and college_id
+            // alone represents them.
             // ----------------------------------------------------------------
             'SHTM' => [
-                ['full_name' => 'CUI, JOECYLIN R.', 'email' => 'joecylin.cui@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'LLANTO, MYRA MAE C.', 'email' => 'myra.llanto@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'MIRAFUENTES, HONEY ANGELU M.', 'email' => 'honey.mirafuentes@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'MONTEFALCON, RHODORA MARTINA', 'email' => 'rhodora.montefalcon@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'UBAS, DR. MARIA GRACITA T.', 'email' => 'maria.ubas@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
-                ['full_name' => 'YECYEC, ANABELLE B.', 'email' => 'anabelle.yecyec@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'departmental'],
+                ['full_name' => 'CUI, JOECYLIN R.', 'email' => 'joecylin.cui@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'LLANTO, MYRA MAE C.', 'email' => 'myra.llanto@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'MIRAFUENTES, HONEY ANGELU M.', 'email' => 'honey.mirafuentes@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'MONTEFALCON, RHODORA MARTINA', 'email' => 'rhodora.montefalcon@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'UBAS, DR. MARIA GRACITA T.', 'email' => 'maria.ubas@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
+                ['full_name' => 'YECYEC, ANABELLE B.', 'email' => 'anabelle.yecyec@pap.edu.ph', 'employment_type' => 'Full-Time', 'faculty_scope' => 'cross_department'],
             ],
 
         ];
