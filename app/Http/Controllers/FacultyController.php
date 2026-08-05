@@ -1,0 +1,117 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\StoreFacultyRequest;
+use App\Http\Requests\UpdateFacultyRequest;
+use App\Models\College;
+use App\Models\Department;
+use App\Models\Faculty;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class FacultyController extends Controller
+{
+    /**
+     * Display the Faculty Master page.
+     *
+     * Faculty members here are NOT system users — they never log in.
+     * This is purely a roster the registrar/admin maintains so the
+     * scheduling module has faculty to draw from later. No subject,
+     * schedule, room, or section assignment happens here.
+     */
+    public function index(Request $request): Response
+    {
+        $search = trim((string) $request->query('faculty_search', ''));
+
+        $faculties = Faculty::query()
+            ->with(['college' => fn ($query) => $query->withTrashed(), 'department' => fn ($query) => $query->withTrashed()])
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('faculty_id', 'like', "%{$search}%")
+                        ->orWhere('first_name', 'like', "%{$search}%")
+                        ->orWhere('last_name', 'like', "%{$search}%")
+                        ->orWhere('specialization', 'like', "%{$search}%")
+                        ->orWhereHas('college', function ($collegeQuery) use ($search) {
+                            $collegeQuery->withTrashed()->where('name', 'like', "%{$search}%");
+                        })
+                        ->orWhereHas('department', function ($departmentQuery) use ($search) {
+                            $departmentQuery->withTrashed()->where('name', 'like', "%{$search}%");
+                        });
+                });
+            })
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->paginate(10, ['*'], 'faculty_page')
+            ->withQueryString();
+
+        return Inertia::render('Scheduling/Faculty/Index', [
+            'faculties' => $faculties,
+            'filters' => ['faculty_search' => $search],
+            'colleges' => College::query()
+                ->where('status', 'Active')
+                ->orderBy('name')
+                ->get(['id', 'name']),
+            'departments' => Department::query()
+                ->orderBy('name')
+                ->get(['id', 'name', 'college_id']),
+            'nextFacultyId' => $this->nextFacultyId(),
+        ]);
+    }
+
+    /**
+     * Store a newly created faculty member in the Faculty Master.
+     */
+    public function store(StoreFacultyRequest $request): RedirectResponse
+    {
+        Faculty::create($request->validated());
+
+        return redirect()->route('scheduling.faculty')->with('success', 'Faculty member added successfully.');
+    }
+
+    /**
+     * Update an existing faculty member in the Faculty Master.
+     */
+    public function update(UpdateFacultyRequest $request, Faculty $faculty): RedirectResponse
+    {
+        $faculty->update($request->validated());
+
+        return redirect()->route('scheduling.faculty')->with('success', 'Faculty member updated successfully.');
+    }
+
+    /**
+     * Delete a faculty member from the Faculty Master.
+     */
+    public function destroy(Faculty $faculty): RedirectResponse
+    {
+        $faculty->delete();
+
+        return redirect()->route('scheduling.faculty')->with('success', 'Faculty member deleted successfully.');
+    }
+
+    /**
+     * Determine the next sequential Faculty ID, e.g. FAC-2026-0001.
+     *
+     * This is only a suggestion pre-filled into the Add Faculty form —
+     * the registrar/admin can still edit it freely before saving, and
+     * uniqueness is always re-checked server-side on store.
+     */
+    private function nextFacultyId(): string
+    {
+        $year = now()->year;
+        $prefix = "FAC-{$year}-";
+
+        $lastId = Faculty::withTrashed()
+            ->where('faculty_id', 'like', "{$prefix}%")
+            ->orderByDesc('faculty_id')
+            ->value('faculty_id');
+
+        $nextNumber = $lastId
+            ? ((int) substr($lastId, strlen($prefix))) + 1
+            : 1;
+
+        return $prefix.str_pad((string) $nextNumber, 4, '0', STR_PAD_LEFT);
+    }
+}

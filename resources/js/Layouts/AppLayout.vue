@@ -23,8 +23,12 @@ const academicManagementItems = [
     { label: 'Curriculum', route: 'curriculums' },
 ];
 
-const restMenuItems = [
+const schedulingItems = [
     { label: 'Scheduling', route: 'scheduling' },
+    { label: 'Faculty', route: 'scheduling.faculty' },
+];
+
+const restMenuItems = [
     { label: 'Reports', route: 'reports' },
     { label: 'Settings', route: 'settings' },
 ];
@@ -106,6 +110,24 @@ const isActive = (routeName) => {
                     </p>
                     <Link
                         v-for="item in academicManagementItems"
+                        :key="item.label"
+                        :href="route(item.route)"
+                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        :class="isActive(item.route)
+                            ? 'bg-[#2563EB] text-white'
+                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                    >
+                        {{ item.label }}
+                    </Link>
+                </div>
+
+                <!-- Scheduling -->
+                <div class="pt-3">
+                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                        Scheduling
+                    </p>
+                    <Link
+                        v-for="item in schedulingItems"
                         :key="item.label"
                         :href="route(item.route)"
                         class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
