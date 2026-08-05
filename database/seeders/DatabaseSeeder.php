@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             AdminSeeder::class,
             CollegeSeeder::class,
             DepartmentSeeder::class,
+            FacultySeeder::class,
             MajorSeeder::class,
             SubjectSeeder::class,
             RoomSeeder::class,

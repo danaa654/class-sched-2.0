@@ -7,6 +7,7 @@ use App\Http\Requests\UpdateFacultyRequest;
 use App\Models\College;
 use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\Subject;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -25,6 +26,8 @@ class FacultyController extends Controller
     public function index(Request $request): Response
     {
         $search = trim((string) $request->query('faculty_search', ''));
+        $category = $request->query('faculty_category', '');
+        $category = in_array($category, ['Department Faculty', 'General Education Faculty'], true) ? $category : '';
 
         $faculties = Faculty::query()
             ->with(['college' => fn ($query) => $query->withTrashed(), 'department' => fn ($query) => $query->withTrashed()])
@@ -42,6 +45,7 @@ class FacultyController extends Controller
                         });
                 });
             })
+            ->when($category !== '', fn ($query) => $query->where('faculty_category', $category))
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->paginate(10, ['*'], 'faculty_page')
@@ -49,7 +53,7 @@ class FacultyController extends Controller
 
         return Inertia::render('Scheduling/Faculty/Index', [
             'faculties' => $faculties,
-            'filters' => ['faculty_search' => $search],
+            'filters' => ['faculty_search' => $search, 'faculty_category' => $category],
             'colleges' => College::query()
                 ->where('status', 'Active')
                 ->orderBy('name')
@@ -58,6 +62,35 @@ class FacultyController extends Controller
                 ->orderBy('name')
                 ->get(['id', 'name', 'college_id']),
             'nextFacultyId' => $this->nextFacultyId(),
+        ]);
+    }
+
+    /**
+     * Display the Faculty Details page (Information, Teaching
+     * Qualifications, Availability, and Workload tabs).
+     */
+    public function show(Faculty $faculty): Response
+    {
+        $faculty->load([
+            'college' => fn ($query) => $query->withTrashed(),
+            'department' => fn ($query) => $query->withTrashed(),
+            'subjects' => fn ($query) => $query->orderBy('subject_code'),
+            'availabilities',
+        ]);
+
+        return Inertia::render('Scheduling/Faculty/Details', [
+            'faculty' => $faculty,
+            'colleges' => College::query()
+                ->where('status', 'Active')
+                ->orderBy('name')
+                ->get(['id', 'name']),
+            'departments' => Department::query()
+                ->orderBy('name')
+                ->get(['id', 'name', 'college_id']),
+            'subjects' => Subject::query()
+                ->where('is_active', true)
+                ->orderBy('subject_code')
+                ->get(['id', 'subject_code', 'subject_title', 'category', 'units']),
         ]);
     }
 

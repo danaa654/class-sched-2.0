@@ -21,7 +21,7 @@ const props = defineProps({
     faculties: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
     filters: {
         type: Object,
-        default: () => ({ faculty_search: '' }),
+        default: () => ({ faculty_search: '', faculty_category: '' }),
     },
     colleges: { type: Array, default: () => [] },
     departments: { type: Array, default: () => [] },
@@ -54,15 +54,18 @@ watch(
 /* ------------------------------------------------------------------ */
 
 const search = ref(props.filters.faculty_search ?? '');
+const categoryFilter = ref(props.filters.faculty_category ?? '');
 const loading = ref(false);
 let searchDebounce = null;
+
+const facultyCategoryOptions = ['Department Faculty', 'General Education Faculty'];
 
 const reloadFaculties = (extra = {}) => {
     loading.value = true;
 
     router.get(
         route('scheduling.faculty'),
-        { faculty_search: search.value, ...extra },
+        { faculty_search: search.value, faculty_category: categoryFilter.value, ...extra },
         {
             preserveState: true,
             preserveScroll: true,
@@ -80,6 +83,10 @@ watch(search, () => {
     searchDebounce = setTimeout(() => {
         reloadFaculties({ faculty_page: 1 });
     }, 350);
+});
+
+watch(categoryFilter, () => {
+    reloadFaculties({ faculty_page: 1 });
 });
 
 const onPage = (event) => {
@@ -118,6 +125,7 @@ const facultyForm = useForm({
     last_name: '',
     suffix: '',
     employment_type: null,
+    faculty_category: 'Department Faculty',
     college_id: null,
     department_id: null,
     specialization: '',
@@ -127,6 +135,8 @@ const facultyForm = useForm({
     contact_number: '',
     remarks: '',
 });
+
+const isDepartmentFaculty = computed(() => facultyForm.faculty_category === 'Department Faculty');
 
 // Department depends on College — reset it whenever College changes,
 // unless we're pre-filling both at once when opening Edit.
@@ -139,6 +149,19 @@ watch(
             return;
         }
         facultyForm.department_id = null;
+    },
+);
+
+// General Education Faculty don't belong to a College/Department —
+// clear both automatically whenever the category is switched away
+// from Department Faculty.
+watch(
+    () => facultyForm.faculty_category,
+    (category) => {
+        if (category === 'General Education Faculty') {
+            facultyForm.college_id = null;
+            facultyForm.department_id = null;
+        }
     },
 );
 
@@ -160,6 +183,7 @@ const openEdit = (faculty) => {
     facultyForm.last_name = faculty.last_name;
     facultyForm.suffix = faculty.suffix ?? '';
     facultyForm.employment_type = faculty.employment_type;
+    facultyForm.faculty_category = faculty.faculty_category ?? 'Department Faculty';
     facultyForm.college_id = faculty.college_id;
     facultyForm.department_id = faculty.department_id;
     facultyForm.specialization = faculty.specialization ?? '';
@@ -261,14 +285,23 @@ const fullName = (faculty) => {
                     <!-- Top Toolbar -->
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                         <template #start>
-                            <span class="relative w-full sm:w-80">
-                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                                <InputText
-                                    v-model="search"
-                                    placeholder="Search by ID, name, college, department or specialization"
-                                    class="w-full !pl-9"
+                            <div class="flex flex-wrap items-center gap-3 w-full">
+                                <span class="relative w-full sm:w-80">
+                                    <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                    <InputText
+                                        v-model="search"
+                                        placeholder="Search by ID, name, college, department or specialization"
+                                        class="w-full !pl-9"
+                                    />
+                                </span>
+                                <Select
+                                    v-model="categoryFilter"
+                                    :options="facultyCategoryOptions"
+                                    placeholder="Filter by Faculty Category"
+                                    showClear
+                                    class="w-full sm:w-64"
                                 />
-                            </span>
+                            </div>
                         </template>
                         <template #end>
                             <div class="flex items-center gap-2">
@@ -327,6 +360,14 @@ const fullName = (faculty) => {
                                 {{ data.employment_type }}
                             </template>
                         </Column>
+                        <Column header="Faculty Category" style="width: 12rem">
+                            <template #body="{ data }">
+                                <Tag
+                                    :value="data.faculty_category"
+                                    :severity="data.faculty_category === 'General Education Faculty' ? 'warning' : 'info'"
+                                />
+                            </template>
+                        </Column>
                         <Column header="College" style="width: 12rem">
                             <template #body="{ data }">
                                 {{ data.college?.name || '—' }}
@@ -358,6 +399,15 @@ const fullName = (faculty) => {
                         <Column header="Actions" style="width: 9rem">
                             <template #body="{ data }">
                                 <div class="flex gap-1">
+                                    <Button
+                                        icon="pi pi-eye"
+                                        text
+                                        rounded
+                                        severity="info"
+                                        size="small"
+                                        aria-label="View"
+                                        @click="router.visit(route('scheduling.faculty.show', data.id))"
+                                    />
                                     <Button
                                         icon="pi pi-pencil"
                                         text
@@ -433,6 +483,24 @@ const fullName = (faculty) => {
                     </small>
                 </div>
 
+                <!-- Faculty Category -->
+                <div class="flex flex-col gap-1">
+                    <label for="faculty_category" class="text-sm font-medium text-slate-700">
+                        Faculty Category <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="faculty_category"
+                        v-model="facultyForm.faculty_category"
+                        :options="facultyCategoryOptions"
+                        placeholder="Select faculty category"
+                        :invalid="!!facultyForm.errors.faculty_category"
+                        class="w-full"
+                    />
+                    <small v-if="facultyForm.errors.faculty_category" class="text-red-500">
+                        {{ facultyForm.errors.faculty_category }}
+                    </small>
+                </div>
+
                 <!-- First Name -->
                 <div class="flex flex-col gap-1">
                     <label for="first_name" class="text-sm font-medium text-slate-700">
@@ -497,8 +565,8 @@ const fullName = (faculty) => {
                     </small>
                 </div>
 
-                <!-- College -->
-                <div class="flex flex-col gap-1">
+                <!-- College (Department Faculty only) -->
+                <div v-if="isDepartmentFaculty" class="flex flex-col gap-1">
                     <label for="college_id" class="text-sm font-medium text-slate-700">
                         College <span class="text-red-500">*</span>
                     </label>
@@ -518,8 +586,8 @@ const fullName = (faculty) => {
                     </small>
                 </div>
 
-                <!-- Department -->
-                <div class="flex flex-col gap-1">
+                <!-- Department (Department Faculty only) -->
+                <div v-if="isDepartmentFaculty" class="flex flex-col gap-1">
                     <label for="department_id" class="text-sm font-medium text-slate-700">
                         Department <span class="text-red-500">*</span>
                     </label>
@@ -541,6 +609,15 @@ const fullName = (faculty) => {
                     <small v-else-if="facultyForm.errors.department_id" class="text-red-500">
                         {{ facultyForm.errors.department_id }}
                     </small>
+                </div>
+
+                <!-- General Education helper message (replaces College/Department) -->
+                <div v-if="!isDepartmentFaculty" class="sm:col-span-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
+                    <i class="pi pi-info-circle text-amber-500 mt-0.5"></i>
+                    <p class="text-sm text-amber-700">
+                        This faculty member is not assigned to any specific college or department and may teach
+                        General Education subjects.
+                    </p>
                 </div>
 
                 <!-- Specialization -->

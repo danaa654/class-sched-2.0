@@ -38,6 +38,9 @@ class StoreSectionSubjectRequest extends FormRequest
                 // A Subject cannot be duplicated within the same Section.
                 Rule::unique('section_subjects', 'subject_id')->where('section_id', $section?->id),
             ],
+            // Optional — applied to every subject in this batch. Left
+            // null for curriculum imports unless the user set one.
+            'capacity' => ['nullable', 'integer', 'min:1'],
         ];
     }
 

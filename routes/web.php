@@ -9,6 +9,7 @@ use App\Http\Controllers\CurriculumController;
 use App\Http\Controllers\CurriculumSubjectController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\FacultyAvailabilityController;
 use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\MajorController;
 use App\Http\Controllers\ReportsController;
@@ -82,8 +83,13 @@ Route::middleware('auth')->group(function () {
     Route::get('/scheduling', [SchedulingController::class, 'index'])->name('scheduling');
     Route::get('/scheduling/faculty', [FacultyController::class, 'index'])->name('scheduling.faculty');
     Route::post('/scheduling/faculty', [FacultyController::class, 'store'])->name('scheduling.faculty.store');
+    Route::get('/scheduling/faculty/{faculty}', [FacultyController::class, 'show'])->name('scheduling.faculty.show');
     Route::put('/scheduling/faculty/{faculty}', [FacultyController::class, 'update'])->name('scheduling.faculty.update');
     Route::delete('/scheduling/faculty/{faculty}', [FacultyController::class, 'destroy'])->name('scheduling.faculty.destroy');
+
+    Route::post('/scheduling/faculty/{faculty}/availability', [FacultyAvailabilityController::class, 'store'])->name('scheduling.faculty.availability.store');
+    Route::put('/scheduling/faculty/{faculty}/availability/{faculty_availability}', [FacultyAvailabilityController::class, 'update'])->name('scheduling.faculty.availability.update');
+    Route::delete('/scheduling/faculty/{faculty}/availability/{faculty_availability}', [FacultyAvailabilityController::class, 'destroy'])->name('scheduling.faculty.availability.destroy');
     Route::get('/scheduling/teaching-qualifications', [TeachingQualificationController::class, 'index'])->name('scheduling.teaching-qualifications');
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');
@@ -96,9 +102,19 @@ Route::middleware('auth')->group(function () {
     Route::delete('/scheduling/sections/{section}', [SectionController::class, 'destroy'])->name('scheduling.sections.destroy');
     Route::get('/scheduling/section-subjects', [SectionSubjectController::class, 'index'])->name('scheduling.section-subjects');
     Route::get('/scheduling/section-subjects/{section}', [SectionSubjectController::class, 'show'])->name('scheduling.section-subjects.show');
+    Route::post('/scheduling/section-subjects/{section}/generate-curriculum', [SectionSubjectController::class, 'generateCurriculumSubjects'])->name('scheduling.section-subjects.generate-curriculum');
     Route::get('/scheduling/section-subjects/{section}/curriculum-preview', [SectionSubjectController::class, 'curriculumPreview'])->name('scheduling.section-subjects.curriculum-preview');
     Route::post('/scheduling/section-subjects/{section}', [SectionSubjectController::class, 'store'])->name('scheduling.section-subjects.store');
     Route::delete('/scheduling/section-subjects/{section}/{subject}', [SectionSubjectController::class, 'destroy'])->name('scheduling.section-subjects.destroy');
+    // Inline scheduling-cell auto-save (Faculty/Room/Days/Time/Capacity) — the
+    // Section Subjects page (scheduling.section-subjects.show) IS the
+    // scheduling workspace; there is no separate workspace page/route.
+    Route::patch('/scheduling/section-subjects/{section}/{subject}/schedule', [SectionSubjectController::class, 'updateSchedule'])->name('scheduling.section-subjects.schedule');
+    // "Save Schedule" batch save — the Registrar edits Faculty/Room/Days/
+    // Start/End Time across multiple rows locally in the table, then
+    // submits every row at once here; all rows save in a single
+    // transaction (Prompt 8.4 — Manual Scheduling Per Subject).
+    Route::post('/scheduling/section-subjects/{section}/schedule/batch', [SectionSubjectController::class, 'batchUpdateSchedule'])->name('scheduling.section-subjects.schedule.batch');
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
 

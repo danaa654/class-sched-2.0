@@ -34,6 +34,7 @@ class UpdateSectionRequest extends FormRequest
             'curriculum_id' => ['required', 'integer', 'exists:curriculums,id'],
             'year_level' => ['required', Rule::in(StoreSectionRequest::YEAR_LEVELS)],
             'academic_year' => ['required', 'string', 'max:20'],
+            'semester' => ['required', Rule::in(StoreSectionRequest::SEMESTERS)],
             'estimated_students' => ['required', 'integer', 'min:1'],
             'status' => ['required', Rule::in(['Active', 'Inactive'])],
             'remarks' => ['nullable', 'string'],

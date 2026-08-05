@@ -20,6 +20,15 @@ class StoreSectionRequest extends FormRequest
     ];
 
     /**
+     * Matches curriculum_items.semester's enum exactly, so a Section's
+     * own Semester lines up with the Curriculum data used by
+     * "Generate Curriculum Subjects".
+     *
+     * @var list<string>
+     */
+    public const SEMESTERS = ['First Semester', 'Second Semester', 'Summer'];
+
+    /**
      * Determine if the user is authorized to make this request.
      */
     public function authorize(): bool
@@ -41,6 +50,7 @@ class StoreSectionRequest extends FormRequest
             'curriculum_id' => ['required', 'integer', 'exists:curriculums,id'],
             'year_level' => ['required', Rule::in(self::YEAR_LEVELS)],
             'academic_year' => ['required', 'string', 'max:20'],
+            'semester' => ['required', Rule::in(self::SEMESTERS)],
             'estimated_students' => ['required', 'integer', 'min:1'],
             'status' => ['required', Rule::in(['Active', 'Inactive'])],
             'remarks' => ['nullable', 'string'],

@@ -32,6 +32,7 @@ class Section extends Model
         'major_id',
         'curriculum_id',
         'academic_year',
+        'semester',
         'year_level',
         'estimated_students',
         'status',

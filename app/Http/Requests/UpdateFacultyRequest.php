@@ -16,6 +16,23 @@ class UpdateFacultyRequest extends FormRequest
     }
 
     /**
+     * Prepare the data for validation.
+     *
+     * General Education Faculty don't belong to a specific College or
+     * Department — force both to null server-side regardless of what
+     * the client sent, so the rule stays authoritative rather than the UI.
+     */
+    protected function prepareForValidation(): void
+    {
+        if ($this->input('faculty_category') === 'General Education Faculty') {
+            $this->merge([
+                'college_id' => null,
+                'department_id' => null,
+            ]);
+        }
+    }
+
+    /**
      * Get the validation rules that apply to the request.
      *
      * @return array<string, mixed>
@@ -32,9 +49,17 @@ class UpdateFacultyRequest extends FormRequest
             'last_name' => ['required', 'string', 'max:100'],
             'suffix' => ['nullable', 'string', 'max:20'],
             'employment_type' => ['required', Rule::in(['Full-time', 'Part-time', 'Contractual'])],
-            'college_id' => ['required', 'exists:colleges,id'],
+            'faculty_category' => ['required', Rule::in(['Department Faculty', 'General Education Faculty'])],
+            // College/Department are only required for Department Faculty.
+            // General Education Faculty leave both null (cleared above).
+            'college_id' => [
+                Rule::requiredIf($this->input('faculty_category') === 'Department Faculty'),
+                'nullable',
+                'exists:colleges,id',
+            ],
             'department_id' => [
-                'required',
+                Rule::requiredIf($this->input('faculty_category') === 'Department Faculty'),
+                'nullable',
                 Rule::exists('departments', 'id')->where('college_id', $this->input('college_id')),
             ],
             'specialization' => ['nullable', 'string', 'max:255'],

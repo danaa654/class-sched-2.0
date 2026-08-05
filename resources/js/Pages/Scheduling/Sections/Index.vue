@@ -26,6 +26,7 @@ const props = defineProps({
     activeMajors: { type: Array, default: () => [] },
     curriculums: { type: Array, default: () => [] },
     yearLevels: { type: Array, default: () => [] },
+    semesterOptions: { type: Array, default: () => [] },
     academicYears: { type: Array, default: () => [] },
 });
 
@@ -116,10 +117,14 @@ const statusOptions = [
 ];
 
 const yearLevelOptions = computed(() => props.yearLevels.map((level) => ({ label: level, value: level })));
+const semesterSelectOptions = computed(() => props.semesterOptions.map((sem) => ({ label: sem, value: sem })));
 const academicYearOptions = computed(() => props.academicYears.map((year) => ({ label: year, value: year })));
 
+// "Add Section" only — editing now happens on the full Edit Section
+// workspace page (see openEdit below), which is the single place
+// scheduling for a section is managed.
 const addSectionVisible = ref(false);
-const editingSection = ref(null); // null => Add mode, otherwise the Section being edited
+const editingSection = ref(null);
 
 const sectionForm = useForm({
     section_code: '',
@@ -128,6 +133,7 @@ const sectionForm = useForm({
     curriculum_id: null,
     year_level: null,
     academic_year: null,
+    semester: null,
     estimated_students: 1,
     status: 'Active',
     remarks: '',
@@ -165,19 +171,10 @@ const openAdd = () => {
     addSectionVisible.value = true;
 };
 
+// Edit now navigates straight into the Edit Section workspace (same
+// page reached by clicking the row) instead of opening a dialog here.
 const openEdit = (section) => {
-    editingSection.value = section;
-    sectionForm.clearErrors();
-    sectionForm.section_code = section.section_code;
-    sectionForm.section_name = section.section_name;
-    sectionForm.major_id = section.major_id;
-    sectionForm.curriculum_id = section.curriculum_id;
-    sectionForm.year_level = section.year_level;
-    sectionForm.academic_year = section.academic_year;
-    sectionForm.estimated_students = section.estimated_students;
-    sectionForm.status = section.status;
-    sectionForm.remarks = section.remarks ?? '';
-    addSectionVisible.value = true;
+    goToSectionSubjects(section);
 };
 
 const closeAddSection = () => {
@@ -520,6 +517,26 @@ const onDeleteSection = (section) => {
                     />
                     <small v-if="sectionForm.errors.academic_year" class="text-red-500">
                         {{ sectionForm.errors.academic_year }}
+                    </small>
+                </div>
+
+                <!-- Semester -->
+                <div class="flex flex-col gap-1">
+                    <label for="semester" class="text-sm font-medium text-slate-700">
+                        Semester <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="semester"
+                        v-model="sectionForm.semester"
+                        :options="semesterSelectOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select semester"
+                        :invalid="!!sectionForm.errors.semester"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.semester" class="text-red-500">
+                        {{ sectionForm.errors.semester }}
                     </small>
                 </div>
 

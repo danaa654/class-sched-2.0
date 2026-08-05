@@ -22,6 +22,18 @@ return new class extends Migration
             $table->foreignId('section_id')->constrained('sections')->cascadeOnDelete();
             $table->foreignId('subject_id')->constrained('subjects')->cascadeOnDelete();
             $table->enum('source', ['Curriculum', 'Manual'])->default('Manual');
+
+            // Schedule placeholders. Left empty when the subject is
+            // added — Faculty, Room, and Time are assigned later by
+            // the scheduling engine, never automatically here.
+            $table->unsignedInteger('capacity')->nullable();
+            $table->foreignId('faculty_id')->nullable()->constrained('faculties')->nullOnDelete();
+            $table->foreignId('room_id')->nullable()->constrained('rooms')->nullOnDelete();
+            $table->string('days')->nullable();
+            $table->time('start_time')->nullable();
+            $table->time('end_time')->nullable();
+            $table->enum('status', ['Draft', 'Scheduled', 'Conflict'])->default('Draft');
+
             $table->text('remarks')->nullable();
             $table->timestamps();
 

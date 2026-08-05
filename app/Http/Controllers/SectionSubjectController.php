@@ -2,16 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\BatchUpdateSectionSubjectScheduleRequest;
+use App\Http\Requests\StoreSectionRequest;
 use App\Http\Requests\StoreSectionSubjectRequest;
+use App\Http\Requests\UpdateSectionSubjectScheduleRequest;
 use App\Models\Curriculum;
 use App\Models\CurriculumItem;
+use App\Models\Faculty;
+use App\Models\Major;
+use App\Models\Room;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Subject;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -73,11 +78,13 @@ class SectionSubjectController extends Controller
     }
 
     /**
-     * Display the subject-assignment page for a single Section.
-     *
-     * This is NOT the schedule — no faculty, room, or time is assigned
-     * here. It only builds the list of Subjects the Section needs
-     * scheduled, which the scheduling engine reads later.
+     * Display the Section Subjects page for a single Section — this IS
+     * the Registrar's scheduling workspace. Every subject assigned to
+     * the section is shown with its schedule slot (Faculty, Room,
+     * Days, Start/End Time) editable inline; nothing is auto-assigned,
+     * those fields stay empty/Draft until the Registrar fills them in
+     * (manually, or later via AI recommendations) — see
+     * updateSchedule().
      */
     public function show(Request $request, Section $section): Response
     {
@@ -86,7 +93,7 @@ class SectionSubjectController extends Controller
         $search = trim((string) $request->query('subject_search', ''));
 
         $sectionSubjects = $section->sectionSubjects()
-            ->with('subject')
+            ->with(['subject', 'faculty', 'room'])
             ->when($search !== '', function ($query) use ($search) {
                 $query->whereHas('subject', function ($subjectQuery) use ($search) {
                     $subjectQuery->where('subject_code', 'like', "%{$search}%")
@@ -98,14 +105,16 @@ class SectionSubjectController extends Controller
             ->sortBy(fn ($item) => $item->subject?->subject_code)
             ->values();
 
-        // Curriculums available for "Load From Curriculum" — restricted to
-        // the Section's own Major, since a Section's subjects should come
-        // from a Curriculum that actually applies to it.
+        // Every active Curriculum belonging to this Section's own Major,
+        // for the "Load From Curriculum" tab's Curriculum dropdown.
+        // Curriculum.major_id is required (one Curriculum = one Major),
+        // so this is a hard restriction, not a client-side filter —
+        // a BSIT section will never see a BSED curriculum to pick from.
         $curriculums = Curriculum::query()
-            ->where('major_id', $section->major_id)
             ->where('status', 'Active')
+            ->where('major_id', $section->major_id)
             ->orderBy('code')
-            ->get(['id', 'code', 'name']);
+            ->get(['id', 'code', 'name', 'major_id']);
 
         // Active Subjects for "Manual Selection" — restricted to the
         // Section's own Major, plus true General Education subjects
@@ -132,56 +141,428 @@ class SectionSubjectController extends Controller
             ->orderBy('subject_code')
             ->get(['id', 'subject_code', 'subject_title', 'category', 'units']);
 
+        // Every active Faculty member, with the Subjects they're
+        // qualified to teach (Teaching Qualifications module). Sent in
+        // full so the scheduling table can filter the Faculty dropdown
+        // per-row client-side without a round trip per cell. General
+        // Education Faculty are qualified for every "General Education"
+        // subject regardless of their explicit pivot rows.
+        $activeFaculty = Faculty::query()
+            ->where('status', 'Active')
+            ->with('subjects:id')
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'faculty_category'])
+            ->map(fn (Faculty $faculty) => [
+                'id' => $faculty->id,
+                'full_name' => $faculty->full_name,
+                'faculty_category' => $faculty->faculty_category,
+                'qualified_subject_ids' => $faculty->subjects->pluck('id'),
+            ]);
+
+        $activeRooms = Room::query()
+            ->where('status', 'Active')
+            ->orderBy('room_code')
+            ->get(['id', 'room_code', 'room_name', 'room_type', 'capacity']);
+
         return Inertia::render('Scheduling/SectionSubjects/Show', [
             'section' => $section,
             'sectionSubjects' => $sectionSubjects,
             'filters' => ['subject_search' => $search],
-            'curriculums' => $curriculums,
             'availableSubjects' => $availableSubjects,
+            // Scheduling table (Faculty/Room/Days/Time cells).
+            'activeFaculty' => $activeFaculty,
+            'activeRooms' => $activeRooms,
+            'curriculums' => $curriculums,
             'yearLevelMap' => self::YEAR_LEVEL_MAP,
             'sectionYearLevel' => self::YEAR_LEVEL_MAP[$section->year_level] ?? null,
-            'semesterOptions' => self::SEMESTER_OPTIONS,
+            'sectionSemester' => $section->semester,
+            // Section Information tab (Tab 1) options.
+            'activeMajors' => Major::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name', 'code']),
+            'yearLevels' => StoreSectionRequest::YEAR_LEVELS,
+            'semesterOptions' => StoreSectionRequest::SEMESTERS,
+            'academicYears' => $this->academicYearOptions(),
         ]);
     }
 
     /**
-     * Preview the Subjects a Curriculum + Year Level would load into the
-     * Section, before anything is saved. Excludes Subjects already
-     * placed in the Section, and is scoped to the Section's own Major.
+     * Inline "spreadsheet" schedule update for a single Subject row on
+     * the workspace — Faculty, Room, Days, Start/End Time, or Capacity.
+     * The frontend auto-saves one field at a time as the user edits a
+     * cell.
+     *
+     * Runs the same conflict checks the scheduling engine relies on:
+     * a Faculty or Room already booked on an overlapping Day/Time slot
+     * elsewhere blocks the save. On success the row's Status is
+     * recomputed (Draft / Scheduled / Conflict) and the fresh row is
+     * returned so the frontend can update in place without a full
+     * page reload.
      */
-    public function curriculumPreview(Request $request, Section $section): JsonResponse
+    public function updateSchedule(
+        UpdateSectionSubjectScheduleRequest $request,
+        Section $section,
+        SectionSubject $subject
+    ): \Illuminate\Http\JsonResponse {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $validated = $request->validated();
+
+        // Merge the incoming (possibly partial) edit onto the row's
+        // current values so conflict-checking always evaluates the
+        // row's *resulting* Day/Time/Faculty/Room, not just the one
+        // field that changed.
+        $facultyId = array_key_exists('faculty_id', $validated) ? $validated['faculty_id'] : $subject->faculty_id;
+        $roomId = array_key_exists('room_id', $validated) ? $validated['room_id'] : $subject->room_id;
+        $days = array_key_exists('days', $validated) ? implode(',', $validated['days'] ?? []) : $subject->days;
+        $startTime = array_key_exists('start_time', $validated) ? $validated['start_time'] : $subject->start_time;
+        $endTime = array_key_exists('end_time', $validated) ? $validated['end_time'] : $subject->end_time;
+        $capacity = array_key_exists('capacity', $validated) ? $validated['capacity'] : $subject->capacity;
+
+        $errors = [];
+
+        // Capacity cannot exceed the assigned Room's capacity.
+        if ($roomId && $capacity) {
+            $room = Room::find($roomId);
+            if ($room && $capacity > $room->capacity) {
+                $errors['capacity'] = "Capacity cannot exceed this room's capacity ({$room->capacity}).";
+            }
+        }
+
+        $dayTokens = array_filter(explode(',', (string) $days));
+
+        if ($facultyId && $startTime && $endTime && ! empty($dayTokens)) {
+            $conflict = $this->findTimeConflict(
+                SectionSubject::query()->where('faculty_id', $facultyId),
+                $subject->id,
+                $dayTokens,
+                $startTime,
+                $endTime
+            );
+
+            if ($conflict) {
+                $errors['faculty_id'] = 'This faculty member already has a class at this day and time ('
+                    ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
+            }
+        }
+
+        if ($roomId && $startTime && $endTime && ! empty($dayTokens)) {
+            $conflict = $this->findTimeConflict(
+                SectionSubject::query()->where('room_id', $roomId),
+                $subject->id,
+                $dayTokens,
+                $startTime,
+                $endTime
+            );
+
+            if ($conflict) {
+                $errors['room_id'] = 'This room is already booked at this day and time ('
+                    ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
+            }
+        }
+
+        if (! empty($errors)) {
+            return response()->json(['errors' => $errors], 422);
+        }
+
+        $status = 'Draft';
+        if ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
+            $status = 'Scheduled';
+        }
+
+        $subject->update([
+            'faculty_id' => $facultyId,
+            'room_id' => $roomId,
+            'days' => $days ?: null,
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'capacity' => $capacity,
+            'status' => $status,
+        ]);
+
+        return response()->json([
+            'sectionSubject' => $subject->fresh(['subject', 'faculty', 'room']),
+            'message' => 'Schedule updated.',
+        ]);
+    }
+
+    /**
+     * "Save Schedule" — the manual scheduling workspace's batch save.
+     * The Registrar edits Faculty/Room/Days/Start/End Time across as
+     * many subject rows as they like *locally* in the table (no
+     * per-cell auto-save), then submits everything at once here.
+     *
+     * Every row is validated with the same Faculty/Room conflict
+     * checks updateSchedule() runs for a single cell — including
+     * against other rows in this same batch, since rows are saved
+     * one at a time inside the transaction and later rows can see
+     * earlier rows' just-saved values on the same connection. If
+     * ANY row fails validation, the whole transaction is rolled
+     * back — nothing is saved — and every row's errors are returned
+     * together so the Registrar can fix them all at once. Only when
+     * every row passes does the transaction commit.
+     */
+    public function batchUpdateSchedule(
+        BatchUpdateSectionSubjectScheduleRequest $request,
+        Section $section
+    ): \Illuminate\Http\JsonResponse {
+        $rows = $request->validated()['rows'];
+
+        // Guard against rows that belong to a different Section
+        // slipping in (e.g. a stale tab); exists:section_subjects,id
+        // in the FormRequest only checks the row exists at all.
+        $rowIds = collect($rows)->pluck('id');
+        $validRowIds = $section->sectionSubjects()->whereIn('id', $rowIds)->pluck('id');
+        $foreignIds = $rowIds->diff($validRowIds);
+
+        if ($foreignIds->isNotEmpty()) {
+            return response()->json([
+                'message' => 'One or more rows no longer belong to this section. Please refresh and try again.',
+            ], 422);
+        }
+
+        $errors = [];
+
+        DB::beginTransaction();
+
+        try {
+            foreach ($rows as $rowData) {
+                $subject = SectionSubject::query()->where('id', $rowData['id'])->lockForUpdate()->first();
+
+                $facultyId = $rowData['faculty_id'] ?? null;
+                $roomId = $rowData['room_id'] ?? null;
+                $days = ! empty($rowData['days']) ? implode(',', $rowData['days']) : null;
+                $startTime = $rowData['start_time'] ?? null;
+                $endTime = $rowData['end_time'] ?? null;
+                $capacity = $rowData['capacity'] ?? $subject->capacity;
+
+                $rowErrors = [];
+
+                // Capacity cannot exceed the assigned Room's capacity.
+                if ($roomId && $capacity) {
+                    $room = Room::find($roomId);
+                    if ($room && $capacity > $room->capacity) {
+                        $rowErrors['capacity'] = "Capacity cannot exceed this room's capacity ({$room->capacity}).";
+                    }
+                }
+
+                $dayTokens = array_filter(explode(',', (string) $days));
+
+                if ($facultyId && $startTime && $endTime && ! empty($dayTokens)) {
+                    $conflict = $this->findTimeConflict(
+                        SectionSubject::query()->where('faculty_id', $facultyId),
+                        $subject->id,
+                        $dayTokens,
+                        $startTime,
+                        $endTime
+                    );
+
+                    if ($conflict) {
+                        $rowErrors['faculty_id'] = 'This faculty member already has a class at this day and time ('
+                            ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
+                    }
+                }
+
+                if ($roomId && $startTime && $endTime && ! empty($dayTokens)) {
+                    $conflict = $this->findTimeConflict(
+                        SectionSubject::query()->where('room_id', $roomId),
+                        $subject->id,
+                        $dayTokens,
+                        $startTime,
+                        $endTime
+                    );
+
+                    if ($conflict) {
+                        $rowErrors['room_id'] = 'This room is already booked at this day and time ('
+                            ."{$conflict->subject?->subject_code} — {$conflict->section?->section_code}).";
+                    }
+                }
+
+                if (! empty($rowErrors)) {
+                    // Keyed by SectionSubject id so the frontend can
+                    // map each error back to the exact row.
+                    $errors[$subject->id] = $rowErrors;
+
+                    continue;
+                }
+
+                $status = 'Draft';
+                if ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
+                    $status = 'Scheduled';
+                }
+
+                $subject->update([
+                    'faculty_id' => $facultyId,
+                    'room_id' => $roomId,
+                    'days' => $days ?: null,
+                    'start_time' => $startTime,
+                    'end_time' => $endTime,
+                    'capacity' => $capacity,
+                    'status' => $status,
+                ]);
+            }
+
+            if (! empty($errors)) {
+                DB::rollBack();
+
+                return response()->json([
+                    'errors' => $errors,
+                    'message' => 'Some rows have scheduling conflicts. Nothing was saved — fix the highlighted rows and try again.',
+                ], 422);
+            }
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Failed to save the schedule. Please try again.',
+            ], 500);
+        }
+
+        $fresh = $section->sectionSubjects()
+            ->with(['subject', 'faculty', 'room'])
+            ->whereIn('id', $rowIds)
+            ->get();
+
+        return response()->json([
+            'sectionSubjects' => $fresh,
+            'message' => 'Schedule saved successfully.',
+        ]);
+    }
+
+    /**
+     * Finds another SectionSubject row (excluding the one being
+     * edited) already booked on any of the given Days whose
+     * Start/End Time overlaps the given window, within an
+     * already-scoped query (by faculty_id or room_id).
+     */
+    private function findTimeConflict(
+        \Illuminate\Database\Eloquent\Builder $query,
+        int $excludingId,
+        array $dayTokens,
+        string $startTime,
+        string $endTime
+    ): ?SectionSubject {
+        return $query->with(['subject:id,subject_code', 'section:id,section_code'])
+            ->where('id', '!=', $excludingId)
+            ->whereNotNull('days')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->where(function ($q) use ($dayTokens) {
+                foreach ($dayTokens as $day) {
+                    $q->orWhere('days', 'like', "%{$day}%");
+                }
+            })
+            ->where('start_time', '<', $endTime)
+            ->where('end_time', '>', $startTime)
+            ->first();
+    }
+
+    /**
+     * Build a rolling list of Academic Year options (e.g. "2026-2027"),
+     * matching SectionController's own generator so both places offer
+     * the same choices.
+     *
+     * @return list<string>
+     */
+    private function academicYearOptions(): array
+    {
+        $currentYear = (int) now()->format('Y');
+        $startYear = $currentYear - 1;
+
+        return collect(range($startYear, $startYear + 6))
+            ->map(fn (int $year) => "{$year}-" . ($year + 1))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * "Generate Curriculum Subjects" (Tab 2) — automatically loads every
+     * Subject from the Section's own Curriculum, Year Level, and
+     * Semester. Subjects already assigned to the Section are skipped,
+     * so this is safe to click repeatedly (additive, never destructive,
+     * never duplicates).
+     */
+    public function generateCurriculumSubjects(Section $section): RedirectResponse
+    {
+        $mappedYearLevel = self::YEAR_LEVEL_MAP[$section->year_level] ?? null;
+
+        if (! $mappedYearLevel) {
+            return back()->with('error', 'This section has no recognized year level to generate subjects from.');
+        }
+
+        $placedSubjectIds = $section->sectionSubjects()->pluck('subject_id');
+
+        $subjectIds = CurriculumItem::query()
+            ->where('curriculum_id', $section->curriculum_id)
+            ->where('year_level', $mappedYearLevel)
+            ->where('semester', $section->semester)
+            ->whereNotIn('subject_id', $placedSubjectIds)
+            ->pluck('subject_id');
+
+        if ($subjectIds->isEmpty()) {
+            return back()->with('error', 'No new subjects found for this section\'s curriculum, year level, and semester.');
+        }
+
+        foreach ($subjectIds as $subjectId) {
+            SectionSubject::create([
+                'section_id' => $section->id,
+                'subject_id' => $subjectId,
+                'source' => 'Curriculum',
+                'capacity' => $section->estimated_students,
+            ]);
+        }
+
+        $count = $subjectIds->count();
+
+        return back()->with('success', "{$count} " . ($count === 1 ? 'subject' : 'subjects') . ' generated from the curriculum.');
+    }
+
+    /**
+     * "Preview Subjects" (Load From Curriculum tab) — every Subject on
+     * the given Curriculum for the given Year Level and Semester that
+     * isn't already assigned to this Section. Curriculum, Year Level,
+     * and Semester together pin the preview to one specific
+     * major/year/semester offering, since Curriculum.major_id fixes
+     * the major and CurriculumItem.year_level/semester fix the rest.
+     */
+    public function curriculumPreview(Request $request, Section $section): \Illuminate\Http\JsonResponse
     {
         $validated = $request->validate([
             'curriculum_id' => ['required', 'integer', 'exists:curriculums,id'],
-            'year_level' => ['required', 'string', Rule::in(array_values(self::YEAR_LEVEL_MAP))],
-            'semester' => ['required', 'string', Rule::in(['First Semester', 'Second Semester', 'Summer'])],
+            'year_level' => ['required', 'string'],
+            'semester' => ['required', 'string'],
         ]);
-
-        $curriculum = Curriculum::where('id', $validated['curriculum_id'])
-            ->where('major_id', $section->major_id)
-            ->firstOrFail();
 
         $placedSubjectIds = $section->sectionSubjects()->pluck('subject_id');
 
         $subjects = CurriculumItem::query()
-            ->where('curriculum_id', $curriculum->id)
+            ->where('curriculum_id', $validated['curriculum_id'])
             ->where('year_level', $validated['year_level'])
             ->where('semester', $validated['semester'])
             ->whereNotIn('subject_id', $placedSubjectIds)
-            ->with('subject:id,subject_code,subject_title,category,units,lecture_hours,laboratory_hours')
+            ->with('subject:id,subject_code,subject_title,category,units')
             ->get()
             ->pluck('subject')
             ->filter()
+            ->map(fn (Subject $subject) => [
+                'id' => $subject->id,
+                'subject_code' => $subject->subject_code,
+                'subject_title' => $subject->subject_title,
+                'category' => $subject->category,
+                'units' => $subject->units,
+            ])
+            ->sortBy('subject_code')
             ->values();
 
         return response()->json(['subjects' => $subjects]);
     }
 
     /**
-     * Add one or more Subjects to the Section — used by both "Load From
-     * Curriculum" (after the user trims the preview) and "Manual
-     * Selection". Duplicate subjects within the Section are rejected by
-     * StoreSectionSubjectRequest.
+     * Add one or more Subjects to the Section manually — for irregular
+     * students, bridging subjects, replacement subjects, or
+     * cross-enrolled subjects. Duplicate subjects within the Section
+     * are rejected by StoreSectionSubjectRequest.
      */
     public function store(StoreSectionSubjectRequest $request, Section $section): RedirectResponse
     {
@@ -192,14 +573,19 @@ class SectionSubjectController extends Controller
                 'section_id' => $section->id,
                 'subject_id' => $subjectId,
                 'source' => $validated['source'],
+                // New subjects always start with an empty schedule slot.
+                // Faculty, Room, Days, and Time are assigned later by the
+                // scheduling engine — never automatically here. Capacity
+                // defaults to the Section's own Estimated Students unless
+                // the caller explicitly set one.
+                'capacity' => $validated['capacity'] ?? $section->estimated_students,
+                'status' => 'Draft',
             ]);
         }
 
         $count = count($validated['subject_ids']);
 
-        return redirect()
-            ->route('scheduling.section-subjects.show', $section)
-            ->with('success', $count === 1 ? 'Subject added to the section.' : "{$count} subjects added to the section.");
+        return back()->with('success', $count === 1 ? 'Subject added to the section.' : "{$count} subjects added to the section.");
     }
 
     /**
@@ -211,8 +597,6 @@ class SectionSubjectController extends Controller
     {
         $section->sectionSubjects()->where('subject_id', $subject->id)->delete();
 
-        return redirect()
-            ->route('scheduling.section-subjects.show', $section)
-            ->with('success', 'Subject removed from the section.');
+        return back()->with('success', 'Subject removed from the section.');
     }
 }

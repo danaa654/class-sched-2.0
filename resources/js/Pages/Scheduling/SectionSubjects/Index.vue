@@ -1,15 +1,20 @@
 <script setup>
-import { Head, Link, usePage, router } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { Head, useForm, usePage, router } from '@inertiajs/vue3';
+import { ref, computed, watch } from 'vue';
 import { useToast } from 'primevue/usetoast';
+import Swal from 'sweetalert2';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Card from 'primevue/card';
 import Toolbar from 'primevue/toolbar';
 import InputText from 'primevue/inputtext';
+import InputNumber from 'primevue/inputnumber';
+import Textarea from 'primevue/textarea';
+import Select from 'primevue/select';
 import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Tag from 'primevue/tag';
+import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
 
 const props = defineProps({
@@ -18,11 +23,17 @@ const props = defineProps({
         type: Object,
         default: () => ({ section_search: '' }),
     },
+    activeMajors: { type: Array, default: () => [] },
+    curriculums: { type: Array, default: () => [] },
+    yearLevels: { type: Array, default: () => [] },
+    semesterOptions: { type: Array, default: () => [] },
+    academicYears: { type: Array, default: () => [] },
 });
 
 const toast = useToast();
 const page = usePage();
 
+// Show a toast whenever the backend flashes a success/error message.
 watch(
     () => page.props.flash?.success,
     (message) => {
@@ -40,6 +51,10 @@ watch(
     },
 );
 
+/* ------------------------------------------------------------------ */
+/* Search / list                                                       */
+/* ------------------------------------------------------------------ */
+
 const search = ref(props.filters.section_search ?? '');
 const loading = ref(false);
 let searchDebounce = null;
@@ -48,7 +63,7 @@ const reloadSections = (extra = {}) => {
     loading.value = true;
 
     router.get(
-        route('scheduling.section-subjects'),
+        route('scheduling.sections'),
         { section_search: search.value, ...extra },
         {
             preserveState: true,
@@ -60,6 +75,29 @@ const reloadSections = (extra = {}) => {
             },
         },
     );
+};
+
+/**
+ * Clicking a Section row opens the Edit Section workspace (Section
+ * Information / Subjects / Schedule tabs) for that Section. Edit/Delete
+ * buttons in the Actions column call @click.stop so they don't also
+ * trigger this navigation.
+ */
+const goToSectionSubjects = (section) => {
+    router.get(route('scheduling.section-subjects.show', section.id));
+};
+
+/**
+ * "Manage Subjects" (book icon) opens the dedicated Subject Assignment
+ * workspace at /scheduling/sections/{section}/subjects — a full page,
+ * not a modal.
+ */
+const goToManageSubjects = (section) => {
+    router.get(route('scheduling.sections.subjects', section.id));
+};
+
+const onRowClick = (event) => {
+    goToSectionSubjects(event.data);
 };
 
 watch(search, () => {
@@ -76,24 +114,153 @@ const onPage = (event) => {
 const onRefresh = () => {
     reloadSections({ section_page: props.sections.current_page });
 };
+
+/* ------------------------------------------------------------------ */
+/* Add / Edit Section                                                  */
+/* ------------------------------------------------------------------ */
+
+const statusOptions = [
+    { label: 'Active', value: 'Active' },
+    { label: 'Inactive', value: 'Inactive' },
+];
+
+const yearLevelOptions = computed(() => props.yearLevels.map((level) => ({ label: level, value: level })));
+const semesterSelectOptions = computed(() => props.semesterOptions.map((sem) => ({ label: sem, value: sem })));
+const academicYearOptions = computed(() => props.academicYears.map((year) => ({ label: year, value: year })));
+
+// "Add Section" only — editing now happens on the full Edit Section
+// workspace page (see openEdit below), which is the single place
+// scheduling for a section is managed.
+const addSectionVisible = ref(false);
+const editingSection = ref(null);
+
+const sectionForm = useForm({
+    section_code: '',
+    section_name: '',
+    major_id: null,
+    curriculum_id: null,
+    year_level: null,
+    academic_year: null,
+    semester: null,
+    estimated_students: 1,
+    status: 'Active',
+    remarks: '',
+});
+
+// Only show curriculums that belong to the selected Major.
+const filteredCurriculums = computed(() => {
+    if (!sectionForm.major_id) {
+        return [];
+    }
+
+    return props.curriculums
+        .filter((curriculum) => curriculum.major_id === sectionForm.major_id)
+        .map((curriculum) => ({ label: `${curriculum.code} — ${curriculum.name}`, value: curriculum.id }));
+});
+
+// If the Major changes and the currently selected Curriculum no longer
+// belongs to it, clear the Curriculum selection.
+watch(
+    () => sectionForm.major_id,
+    () => {
+        const stillValid = filteredCurriculums.value.some(
+            (curriculum) => curriculum.value === sectionForm.curriculum_id,
+        );
+        if (!stillValid) {
+            sectionForm.curriculum_id = null;
+        }
+    },
+);
+
+const openAdd = () => {
+    editingSection.value = null;
+    sectionForm.reset();
+    sectionForm.clearErrors();
+    addSectionVisible.value = true;
+};
+
+// Edit now navigates straight into the Edit Section workspace (same
+// page reached by clicking the row) instead of opening a dialog here.
+const openEdit = (section) => {
+    goToSectionSubjects(section);
+};
+
+const closeAddSection = () => {
+    addSectionVisible.value = false;
+    editingSection.value = null;
+    sectionForm.reset();
+    sectionForm.clearErrors();
+};
+
+const onSaveSection = () => {
+    const options = {
+        preserveScroll: true,
+        onSuccess: () => {
+            const wasEditing = !!editingSection.value;
+            closeAddSection();
+            Swal.fire({
+                title: wasEditing ? 'Section updated' : 'Section saved',
+                text: wasEditing
+                    ? 'The section was updated successfully.'
+                    : 'The section was created successfully.',
+                icon: 'success',
+                confirmButtonColor: '#16A34A',
+            });
+            onRefresh();
+        },
+        onError: () => {
+            toast.add({
+                severity: 'warn',
+                summary: 'Missing information',
+                detail: 'Please check the highlighted fields and try again.',
+                life: 3000,
+            });
+        },
+    };
+
+    if (editingSection.value) {
+        sectionForm.put(route('scheduling.sections.update', editingSection.value.id), options);
+    } else {
+        sectionForm.post(route('scheduling.sections.store'), options);
+    }
+};
+
+const onDeleteSection = (section) => {
+    Swal.fire({
+        title: 'Delete this section?',
+        text: `${section.section_code} — ${section.section_name} will be permanently deleted.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete it',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('scheduling.sections.destroy', section.id), {
+                preserveScroll: true,
+                onSuccess: () => onRefresh(),
+            });
+        }
+    });
+};
 </script>
 
 <template>
-    <Head title="Section Subjects" />
+    <Head title="Sections" />
 
     <AppLayout>
         <Toast />
 
         <template #header>
-            <span class="text-lg font-semibold text-[#1E293B]">Section Subjects</span>
+            <span class="text-lg font-semibold text-[#1E293B]">Sections</span>
         </template>
 
         <div class="max-w-7xl mx-auto w-full">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Section Subjects</h1>
+                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Sections</h1>
                 <p class="mt-1 text-slate-500">
-                    Pick a section to build its subject list for scheduling.
+                    Manage academic sections used for class scheduling.
                 </p>
             </div>
 
@@ -112,14 +279,17 @@ const onRefresh = () => {
                             </span>
                         </template>
                         <template #end>
-                            <Button
-                                icon="pi pi-refresh"
-                                severity="secondary"
-                                outlined
-                                :loading="loading"
-                                @click="onRefresh"
-                                aria-label="Refresh"
-                            />
+                            <div class="flex items-center gap-2">
+                                <Button
+                                    icon="pi pi-refresh"
+                                    severity="secondary"
+                                    outlined
+                                    :loading="loading"
+                                    @click="onRefresh"
+                                    aria-label="Refresh"
+                                />
+                                <Button label="Add Section" icon="pi pi-plus" severity="success" @click="openAdd" />
+                            </div>
                         </template>
                     </Toolbar>
 
@@ -136,14 +306,24 @@ const onRefresh = () => {
                         :rows="sections.per_page"
                         :totalRecords="sections.total"
                         :first="(sections.current_page - 1) * sections.per_page"
+                        rowHover
+                        :rowClass="() => 'cursor-pointer'"
                         @page="onPage"
+                        @row-click="onRowClick"
                     >
                         <template #empty>
                             <div class="text-center py-10">
                                 <p class="text-slate-500 font-medium">No sections found.</p>
                                 <p class="text-slate-400 text-sm mt-1">
-                                    Create a section first under Scheduling &rarr; Sections.
+                                    Click "Add Section" to create your first section.
                                 </p>
+                                <Button
+                                    label="Add Section"
+                                    icon="pi pi-plus"
+                                    severity="success"
+                                    class="mt-3"
+                                    @click="openAdd"
+                                />
                             </div>
                         </template>
 
@@ -169,9 +349,9 @@ const onRefresh = () => {
                                 {{ data.academic_year }}
                             </template>
                         </Column>
-                        <Column header="Subjects" style="width: 8rem">
+                        <Column header="Est. Students" style="width: 8rem">
                             <template #body="{ data }">
-                                <Tag :value="`${data.subjects_count} subject(s)`" severity="info" />
+                                {{ data.estimated_students }}
                             </template>
                         </Column>
                         <Column header="Status" style="width: 9rem">
@@ -182,22 +362,260 @@ const onRefresh = () => {
                                 />
                             </template>
                         </Column>
-                        <Column header="Actions" style="width: 10rem">
+                        <Column header="Actions" style="width: 12rem">
                             <template #body="{ data }">
-                                <Link :href="route('scheduling.section-subjects.show', data.id)">
+                                <div class="flex gap-1">
                                     <Button
-                                        label="Manage Subjects"
                                         icon="pi pi-book"
                                         text
+                                        rounded
+                                        severity="info"
                                         size="small"
-                                        severity="secondary"
+                                        aria-label="Manage Subjects"
+                                        @click.stop="goToManageSubjects(data)"
                                     />
-                                </Link>
+                                    <Button
+                                        icon="pi pi-pencil"
+                                        text
+                                        rounded
+                                        severity="secondary"
+                                        size="small"
+                                        aria-label="Edit"
+                                        @click.stop="openEdit(data)"
+                                    />
+                                    <Button
+                                        icon="pi pi-trash"
+                                        text
+                                        rounded
+                                        severity="danger"
+                                        size="small"
+                                        aria-label="Delete"
+                                        @click.stop="onDeleteSection(data)"
+                                    />
+                                </div>
                             </template>
                         </Column>
                     </DataTable>
                 </template>
             </Card>
         </div>
+
+        <!-- Add Section Dialog -->
+        <Dialog
+            v-model:visible="addSectionVisible"
+            modal
+            :header="editingSection ? 'Edit Section' : 'Add Section'"
+            :style="{ width: '700px' }"
+            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :draggable="false"
+            @hide="closeAddSection"
+        >
+            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveSection">
+                <!-- Section Code -->
+                <div class="flex flex-col gap-1">
+                    <label for="section_code" class="text-sm font-medium text-slate-700">
+                        Section Code <span class="text-red-500">*</span>
+                    </label>
+                    <InputText
+                        id="section_code"
+                        v-model="sectionForm.section_code"
+                        placeholder="e.g. BSIT-1A, BSIT-2B"
+                        :invalid="!!sectionForm.errors.section_code"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.section_code" class="text-red-500">
+                        {{ sectionForm.errors.section_code }}
+                    </small>
+                </div>
+
+                <!-- Section Name -->
+                <div class="flex flex-col gap-1">
+                    <label for="section_name" class="text-sm font-medium text-slate-700">
+                        Section Name <span class="text-red-500">*</span>
+                    </label>
+                    <InputText
+                        id="section_name"
+                        v-model="sectionForm.section_name"
+                        placeholder="e.g. Section A"
+                        :invalid="!!sectionForm.errors.section_name"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.section_name" class="text-red-500">
+                        {{ sectionForm.errors.section_name }}
+                    </small>
+                </div>
+
+                <!-- Major -->
+                <div class="flex flex-col gap-1">
+                    <label for="major_id" class="text-sm font-medium text-slate-700">
+                        Major <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="major_id"
+                        v-model="sectionForm.major_id"
+                        :options="activeMajors"
+                        optionLabel="name"
+                        optionValue="id"
+                        filter
+                        placeholder="Select a major"
+                        :invalid="!!sectionForm.errors.major_id"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.major_id" class="text-red-500">
+                        {{ sectionForm.errors.major_id }}
+                    </small>
+                </div>
+
+                <!-- Curriculum -->
+                <div class="flex flex-col gap-1">
+                    <label for="curriculum_id" class="text-sm font-medium text-slate-700">
+                        Curriculum <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="curriculum_id"
+                        v-model="sectionForm.curriculum_id"
+                        :options="filteredCurriculums"
+                        optionLabel="label"
+                        optionValue="value"
+                        filter
+                        :disabled="!sectionForm.major_id"
+                        :placeholder="sectionForm.major_id ? 'Select a curriculum' : 'Select a major first'"
+                        :invalid="!!sectionForm.errors.curriculum_id"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.curriculum_id" class="text-red-500">
+                        {{ sectionForm.errors.curriculum_id }}
+                    </small>
+                </div>
+
+                <!-- Year Level -->
+                <div class="flex flex-col gap-1">
+                    <label for="year_level" class="text-sm font-medium text-slate-700">
+                        Year Level <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="year_level"
+                        v-model="sectionForm.year_level"
+                        :options="yearLevelOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select year level"
+                        :invalid="!!sectionForm.errors.year_level"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.year_level" class="text-red-500">
+                        {{ sectionForm.errors.year_level }}
+                    </small>
+                </div>
+
+                <!-- Academic Year -->
+                <div class="flex flex-col gap-1">
+                    <label for="academic_year" class="text-sm font-medium text-slate-700">
+                        Academic Year <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="academic_year"
+                        v-model="sectionForm.academic_year"
+                        :options="academicYearOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select academic year"
+                        :invalid="!!sectionForm.errors.academic_year"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.academic_year" class="text-red-500">
+                        {{ sectionForm.errors.academic_year }}
+                    </small>
+                </div>
+
+                <!-- Semester -->
+                <div class="flex flex-col gap-1">
+                    <label for="semester" class="text-sm font-medium text-slate-700">
+                        Semester <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="semester"
+                        v-model="sectionForm.semester"
+                        :options="semesterSelectOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select semester"
+                        :invalid="!!sectionForm.errors.semester"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.semester" class="text-red-500">
+                        {{ sectionForm.errors.semester }}
+                    </small>
+                </div>
+
+                <!-- Estimated Students -->
+                <div class="flex flex-col gap-1">
+                    <label for="estimated_students" class="text-sm font-medium text-slate-700">
+                        Estimated Number of Students <span class="text-red-500">*</span>
+                    </label>
+                    <InputNumber
+                        id="estimated_students"
+                        v-model="sectionForm.estimated_students"
+                        :min="1"
+                        showButtons
+                        buttonLayout="horizontal"
+                        :invalid="!!sectionForm.errors.estimated_students"
+                        class="w-full"
+                        inputClass="w-full"
+                    />
+                    <small v-if="sectionForm.errors.estimated_students" class="text-red-500">
+                        {{ sectionForm.errors.estimated_students }}
+                    </small>
+                </div>
+
+                <!-- Status -->
+                <div class="flex flex-col gap-1">
+                    <label for="status" class="text-sm font-medium text-slate-700">
+                        Status <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="status"
+                        v-model="sectionForm.status"
+                        :options="statusOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select status"
+                        :invalid="!!sectionForm.errors.status"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.status" class="text-red-500">
+                        {{ sectionForm.errors.status }}
+                    </small>
+                </div>
+
+                <!-- Remarks -->
+                <div class="flex flex-col gap-1 sm:col-span-2">
+                    <label for="remarks" class="text-sm font-medium text-slate-700">Remarks</label>
+                    <Textarea
+                        id="remarks"
+                        v-model="sectionForm.remarks"
+                        autoResize
+                        rows="3"
+                        placeholder="Optional notes about this section"
+                        :invalid="!!sectionForm.errors.remarks"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.remarks" class="text-red-500">
+                        {{ sectionForm.errors.remarks }}
+                    </small>
+                </div>
+            </form>
+
+            <template #footer>
+                <Button label="Cancel" severity="secondary" outlined @click="closeAddSection" />
+                <Button
+                    :label="editingSection ? 'Update Section' : 'Save Section'"
+                    icon="pi pi-check"
+                    severity="success"
+                    :loading="sectionForm.processing"
+                    @click="onSaveSection"
+                />
+            </template>
+        </Dialog>
     </AppLayout>
 </template>

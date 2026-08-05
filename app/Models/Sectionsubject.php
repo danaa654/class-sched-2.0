@@ -9,9 +9,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * The placement of one master Subject inside one Section's subject
  * list. This is the pivot record for Section <-> Subject, carrying
- * where the placement came from (Source) and optional Remarks.
+ * where the placement came from (Source) plus the (initially empty)
+ * schedule slot for that subject — Capacity, Faculty, Room, Days,
+ * Start/End Time, and Status.
  *
- * This is NOT the schedule — no faculty, room, or time lives here.
+ * A newly-added subject always starts with every schedule field
+ * empty and Status = 'Draft'. Faculty/Room/Time are never assigned
+ * automatically — that happens later, in the scheduling engine.
  */
 class SectionSubject extends Model
 {
@@ -26,8 +30,25 @@ class SectionSubject extends Model
         'section_id',
         'subject_id',
         'source',
+        'capacity',
+        'faculty_id',
+        'room_id',
+        'days',
+        'start_time',
+        'end_time',
+        'status',
         'remarks',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'capacity' => 'integer',
+        ];
+    }
 
     /**
      * The Section this placement belongs to.
@@ -47,5 +68,27 @@ class SectionSubject extends Model
     public function subject(): BelongsTo
     {
         return $this->belongsTo(Subject::class);
+    }
+
+    /**
+     * The Faculty assigned to teach this subject for this section.
+     * Null until assigned by the scheduling engine.
+     *
+     * @return BelongsTo<Faculty, SectionSubject>
+     */
+    public function faculty(): BelongsTo
+    {
+        return $this->belongsTo(Faculty::class);
+    }
+
+    /**
+     * The Room assigned for this subject's meetings. Null until
+     * assigned by the scheduling engine.
+     *
+     * @return BelongsTo<Room, SectionSubject>
+     */
+    public function room(): BelongsTo
+    {
+        return $this->belongsTo(Room::class);
     }
 }

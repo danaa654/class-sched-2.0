@@ -18,6 +18,7 @@ return new class extends Migration
             $table->foreignId('major_id')->constrained('majors');
             $table->foreignId('curriculum_id')->constrained('curriculums');
             $table->string('academic_year');
+            $table->enum('semester', ['First Semester', 'Second Semester', 'Summer'])->default('First Semester');
             $table->enum('year_level', [
                 'First Year',
                 'Second Year',

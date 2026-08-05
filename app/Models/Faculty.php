@@ -34,6 +34,7 @@ class Faculty extends Model
         'last_name',
         'suffix',
         'employment_type',
+        'faculty_category',
         'college_id',
         'department_id',
         'specialization',
@@ -78,6 +79,22 @@ class Faculty extends Model
     public function subjects(): BelongsToMany
     {
         return $this->belongsToMany(Subject::class, 'faculty_subject')->withTimestamps();
+    }
+
+    /**
+     * Weekly availability windows for this faculty member.
+     *
+     * At most one record per day of week. The scheduling engine's
+     * Genetic Algorithm reads this relationship to ensure it never
+     * assigns a faculty member outside their declared available hours.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<FacultyAvailability>
+     */
+    public function availabilities(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(FacultyAvailability::class)->orderByRaw(
+            "FIELD(day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')"
+        );
     }
 
     /**

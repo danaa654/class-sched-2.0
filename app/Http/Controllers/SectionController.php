@@ -66,6 +66,7 @@ class SectionController extends Controller
             'activeMajors' => $activeMajors,
             'curriculums' => $curriculums,
             'yearLevels' => StoreSectionRequest::YEAR_LEVELS,
+            'semesterOptions' => StoreSectionRequest::SEMESTERS,
             'academicYears' => $this->academicYearOptions(),
         ]);
     }
@@ -82,12 +83,17 @@ class SectionController extends Controller
 
     /**
      * Update an existing section.
+     *
+     * Redirects back to wherever the request came from — the quick-edit
+     * dialog on the Sections list, or the Section Information tab of
+     * the Edit Section workspace — instead of always bouncing to the
+     * Sections list.
      */
     public function update(UpdateSectionRequest $request, Section $section): RedirectResponse
     {
         $section->update($request->validated());
 
-        return redirect()->route('scheduling.sections')->with('success', 'Section updated successfully.');
+        return back()->with('success', 'Section updated successfully.');
     }
 
     /**
