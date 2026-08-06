@@ -90,7 +90,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/faculty/{faculty}/availability', [FacultyAvailabilityController::class, 'store'])->name('scheduling.faculty.availability.store');
     Route::put('/scheduling/faculty/{faculty}/availability/{faculty_availability}', [FacultyAvailabilityController::class, 'update'])->name('scheduling.faculty.availability.update');
     Route::delete('/scheduling/faculty/{faculty}/availability/{faculty_availability}', [FacultyAvailabilityController::class, 'destroy'])->name('scheduling.faculty.availability.destroy');
-    Route::get('/scheduling/teaching-qualifications', [TeachingQualificationController::class, 'index'])->name('scheduling.teaching-qualifications');
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');
     Route::post('/scheduling/rooms', [RoomController::class, 'store'])->name('scheduling.rooms.store');

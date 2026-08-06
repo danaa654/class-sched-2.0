@@ -163,7 +163,7 @@ class SectionSubjectController extends Controller
             ->with('subjects:id')
             ->orderBy('last_name')
             ->orderBy('first_name')
-            ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'faculty_category'])
+            ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'college_id'])
             ->map(fn (Faculty $faculty) => [
                 'id' => $faculty->id,
                 'full_name' => $faculty->full_name,

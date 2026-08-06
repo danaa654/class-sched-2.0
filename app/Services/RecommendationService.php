@@ -208,25 +208,27 @@ class RecommendationService
      * FACULTY RECOMMENDATION SCORE (100 points, Major subjects):
      *
      *   1. Qualified to teach the subject ............. 40 pts
-     *   2. Same Department as the Section .............. 20 pts
-     *   3. Same College as the Section ................. 10 pts
-     *   4. Available during the selected Day/Time ...... 15 pts
-     *   5. Lowest current teaching load ................ 10 pts
-     *   6. Preferred teaching block for subject hours ... 5 pts
+     *   2. Same College as the Section .................. 30 pts
+     *   3. Available during the selected Day/Time ...... 15 pts
+     *   4. Lowest current teaching load ................ 10 pts
+     *   5. Preferred teaching block for subject hours ... 5 pts
      *
      * Faculty who are not qualified are excluded entirely — this is a
-     * hard filter, never a scoring penalty.
+     * hard filter, never a scoring penalty. A faculty member belongs
+     * to exactly one College (not a Department/Major) — Teaching
+     * Qualifications remain the sole authority on WHETHER a faculty
+     * member may teach a given subject; College only affects ranking
+     * among faculty who are already qualified.
      *
-     * FOR GENERAL EDUCATION SUBJECTS: Department matching is ignored
-     * entirely (criteria 2 and 3 never apply). Only General Education
-     * Faculty who are qualified to teach the subject are considered,
-     * ranked by Qualified -> Availability -> Lowest Teaching Load.
+     * FOR GENERAL EDUCATION SUBJECTS: College matching is ignored
+     * entirely (criterion 2 never applies). Only General Education
+     * Faculty — who don't require a College assignment — and who are
+     * qualified to teach the subject are considered, ranked by
+     * Qualified -> Availability -> Lowest Teaching Load.
      */
     private const FACULTY_POINTS_QUALIFIED = 40;
 
-    private const FACULTY_POINTS_SAME_DEPARTMENT = 20;
-
-    private const FACULTY_POINTS_SAME_COLLEGE = 10;
+    private const FACULTY_POINTS_SAME_COLLEGE = 30;
 
     private const FACULTY_POINTS_AVAILABLE = 15;
 
@@ -238,7 +240,6 @@ class RecommendationService
     {
         $section->loadMissing('major.department');
         $major = $section->major;
-        $departmentId = $major?->department_id;
         $collegeId = $major?->department?->college_id;
 
         $isGeneralEducation = $subject->category === 'General Education';
@@ -249,8 +250,12 @@ class RecommendationService
         // are eligible; for Major subjects, only Department Faculty.
         $qualified = Faculty::query()
             ->where('status', 'Active')
-            ->where('faculty_category', $isGeneralEducation ? 'General Education Faculty' : 'Department Faculty')
-            ->with(['subjects:id', 'department:id,college_id', 'availabilities'])
+            ->when(
+                $isGeneralEducation,
+                fn ($q) => $q->whereNull('college_id'),
+                fn ($q) => $q->whereNotNull('college_id'),
+            )
+            ->with(['subjects:id', 'availabilities'])
             ->get()
             ->filter(fn (Faculty $faculty) => $faculty->subjects->pluck('id')->contains($subject->id))
             ->values();
@@ -262,7 +267,7 @@ class RecommendationService
         $hasSchedule = $current && $current->days && $current->start_time && $current->end_time;
 
         $ranked = $qualified->map(function (Faculty $faculty) use (
-            $departmentId, $collegeId, $isGeneralEducation, $subject, $current, $hasSchedule
+            $collegeId, $isGeneralEducation, $subject, $current, $hasSchedule
         ) {
             $currentLoad = SectionSubject::query()
                 ->where('faculty_id', $faculty->id)
@@ -276,27 +281,26 @@ class RecommendationService
 
             [$available, $conflictCount] = $this->facultyAvailabilityAndConflicts($faculty, $current);
 
-            $sameDepartment = ! $isGeneralEducation && $faculty->department_id === $departmentId;
-            // Being in the same Department implies being in the same
-            // College, so this is never false when sameDepartment is true.
-            $sameCollege = ! $isGeneralEducation && ($sameDepartment || $faculty->department?->college_id === $collegeId);
+            // Faculty belong to exactly one College. General Education
+            // subjects ignore College matching entirely (GenEd Faculty
+            // don't require a College assignment in the first place).
+            $sameCollege = ! $isGeneralEducation && $collegeId !== null && $faculty->college_id === $collegeId;
 
             $preferredBlock = $this->prefersTeachingBlock($faculty, $subject);
 
-            // Criteria 4 (Available) only really applies once the row
+            // Criteria 3 (Available) only really applies once the row
             // has a Day/Time to check against — before that, treat it
             // as neutral (full points) rather than penalizing every
             // candidate for a slot that hasn't been picked yet.
             $availablePoints = (! $hasSchedule || $available) ? self::FACULTY_POINTS_AVAILABLE : 0;
 
-            // Criteria 5 (Lowest current load) scales smoothly: a
+            // Criteria 4 (Lowest current load) scales smoothly: a
             // completely free faculty member earns full points, one
             // already at their max_teaching_units earns none.
             $lowLoadPoints = (int) round(self::FACULTY_POINTS_LOW_LOAD * (1 - min($loadRatio, 1)));
 
             $points = [
                 'qualified' => self::FACULTY_POINTS_QUALIFIED,
-                'same_department' => $sameDepartment ? self::FACULTY_POINTS_SAME_DEPARTMENT : 0,
                 'same_college' => $sameCollege ? self::FACULTY_POINTS_SAME_COLLEGE : 0,
                 'available' => $availablePoints,
                 'low_load' => $lowLoadPoints,
@@ -307,7 +311,6 @@ class RecommendationService
 
             $reasons = [['label' => 'Qualified', 'met' => true]];
             if (! $isGeneralEducation) {
-                $reasons[] = ['label' => 'Same Department', 'met' => $sameDepartment];
                 $reasons[] = ['label' => 'Same College', 'met' => $sameCollege];
             }
             $reasons[] = ['label' => 'Available', 'met' => $availablePoints > 0];
@@ -318,7 +321,6 @@ class RecommendationService
                 'id' => $faculty->id,
                 'name' => $faculty->full_name,
                 'faculty_category' => $faculty->faculty_category,
-                'same_department' => $sameDepartment,
                 'same_college' => $sameCollege,
                 'current_load' => $currentLoad,
                 'max_teaching_units' => $faculty->max_teaching_units,

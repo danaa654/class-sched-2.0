@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreFacultyRequest;
 use App\Http\Requests\UpdateFacultyRequest;
 use App\Models\College;
-use App\Models\Department;
 use App\Models\Faculty;
 use App\Models\Subject;
 use Illuminate\Http\RedirectResponse;
@@ -30,22 +29,20 @@ class FacultyController extends Controller
         $category = in_array($category, ['Department Faculty', 'General Education Faculty'], true) ? $category : '';
 
         $faculties = Faculty::query()
-            ->with(['college' => fn ($query) => $query->withTrashed(), 'department' => fn ($query) => $query->withTrashed()])
+            ->with(['college' => fn ($query) => $query->withTrashed()])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('faculty_id', 'like', "%{$search}%")
                         ->orWhere('first_name', 'like', "%{$search}%")
                         ->orWhere('last_name', 'like', "%{$search}%")
-                        ->orWhere('specialization', 'like', "%{$search}%")
                         ->orWhereHas('college', function ($collegeQuery) use ($search) {
                             $collegeQuery->withTrashed()->where('name', 'like', "%{$search}%");
-                        })
-                        ->orWhereHas('department', function ($departmentQuery) use ($search) {
-                            $departmentQuery->withTrashed()->where('name', 'like', "%{$search}%");
                         });
                 });
             })
-            ->when($category !== '', fn ($query) => $query->where('faculty_category', $category))
+            ->when($category !== '', fn ($query) => $category === 'General Education Faculty'
+                ? $query->whereNull('college_id')
+                : $query->whereNotNull('college_id'))
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->paginate(10, ['*'], 'faculty_page')
@@ -58,9 +55,6 @@ class FacultyController extends Controller
                 ->where('status', 'Active')
                 ->orderBy('name')
                 ->get(['id', 'name']),
-            'departments' => Department::query()
-                ->orderBy('name')
-                ->get(['id', 'name', 'college_id']),
             'nextFacultyId' => $this->nextFacultyId(),
         ]);
     }
@@ -73,7 +67,6 @@ class FacultyController extends Controller
     {
         $faculty->load([
             'college' => fn ($query) => $query->withTrashed(),
-            'department' => fn ($query) => $query->withTrashed(),
             'subjects' => fn ($query) => $query->orderBy('subject_code'),
             'availabilities',
         ]);
@@ -84,9 +77,6 @@ class FacultyController extends Controller
                 ->where('status', 'Active')
                 ->orderBy('name')
                 ->get(['id', 'name']),
-            'departments' => Department::query()
-                ->orderBy('name')
-                ->get(['id', 'name', 'college_id']),
             'subjects' => Subject::query()
                 ->where('is_active', true)
                 ->orderBy('subject_code')

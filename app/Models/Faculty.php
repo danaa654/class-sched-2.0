@@ -34,16 +34,23 @@ class Faculty extends Model
         'last_name',
         'suffix',
         'employment_type',
-        'faculty_category',
         'college_id',
-        'department_id',
-        'specialization',
         'max_teaching_units',
         'status',
         'email',
         'contact_number',
         'remarks',
     ];
+
+    /**
+     * `faculty_category` is derived (see getFacultyCategoryAttribute()
+     * below) rather than a real column, so it must be explicitly
+     * appended to appear in JSON responses the same way the old stored
+     * column did.
+     *
+     * @var list<string>
+     */
+    protected $appends = ['faculty_category'];
 
     /**
      * The college this faculty member belongs to.
@@ -53,16 +60,6 @@ class Faculty extends Model
     public function college(): BelongsTo
     {
         return $this->belongsTo(College::class);
-    }
-
-    /**
-     * The department this faculty member belongs to.
-     *
-     * @return BelongsTo<Department, Faculty>
-     */
-    public function department(): BelongsTo
-    {
-        return $this->belongsTo(Department::class);
     }
 
     /**
@@ -106,5 +103,18 @@ class Faculty extends Model
         $suffix = $this->suffix ? ' '.$this->suffix : '';
 
         return "{$this->last_name}, {$this->first_name}{$middleInitial}{$suffix}";
+    }
+
+    /**
+     * Derived from `college_id` rather than stored, so this can never
+     * drift out of sync with it: no College means General Education
+     * Faculty (GenEd/Minor — English, Math, Filipino, NSTP, PE, etc.),
+     * otherwise the faculty member belongs to a department (College).
+     */
+    public function getFacultyCategoryAttribute(): string
+    {
+        return $this->college_id === null
+            ? 'General Education Faculty'
+            : 'Department Faculty';
     }
 }

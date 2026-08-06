@@ -26,18 +26,16 @@ return new class extends Migration
 
             $table->enum('employment_type', ['Full-time', 'Part-time', 'Contractual']);
 
-            // Department Faculty belong to a College/Department (both
-            // required below by the app's validation). General Education
+            // Department Faculty belong to a College; General Education
             // Faculty (GenEd/Minor — English, Math, Filipino, NSTP, PE,
-            // etc.) don't belong to one, so college_id/department_id are
-            // nullable and left null for them.
-            $table->enum('faculty_category', ['Department Faculty', 'General Education Faculty'])
-                ->default('Department Faculty');
-
+            // etc.) don't belong to one, so college_id is nullable and
+            // left null for them. There's no separate category column —
+            // Faculty::getFacultyCategoryAttribute() derives "Department
+            // Faculty" vs "General Education Faculty" straight from
+            // whether college_id is set, so the two can never disagree.
+            // The scheduling engine uses this College together with
+            // Teaching Qualifications to rank candidates.
             $table->foreignId('college_id')->nullable()->constrained()->restrictOnDelete();
-            $table->foreignId('department_id')->nullable()->constrained()->restrictOnDelete();
-
-            $table->string('specialization')->nullable();
 
             // Teaching load ceiling used later by the scheduling module to
             // prevent overloading a faculty member. Defaults to 21 units.

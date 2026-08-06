@@ -7,6 +7,7 @@ import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { ZiggyVue } from '../../vendor/tightenco/ziggy';
 import PrimeVue from 'primevue/config';
 import ToastService from 'primevue/toastservice';
+import Tooltip from 'primevue/tooltip';
 import Aura from '@primeuix/themes/aura';
 import 'primeicons/primeicons.css';
 
@@ -32,6 +33,7 @@ createInertiaApp({
                 },
             })
             .use(ToastService)
+            .directive('tooltip', Tooltip)
             .mount(el);
     },
     progress: {

@@ -3,39 +3,11 @@
 namespace Database\Seeders;
 
 use App\Models\College;
-use App\Models\Department;
 use App\Models\Faculty;
-use App\Models\Major;
 use Illuminate\Database\Seeder;
 
 class FacultySeeder extends Seeder
 {
-    /**
-     * Colleges that have exactly one Department (and therefore one
-     * Major) in DepartmentSeeder — every "departmental" faculty member
-     * there can be assigned unambiguously without per-row data.
-     * Keyed by College code -> the single Department's major-code
-     * suffix (i.e. Department::name, per DepartmentSeeder::DEPARTMENTS).
-     *
-     * @var array<string, string>
-     */
-    private const SINGLE_DEPARTMENT_COLLEGES = [
-        'CCS' => 'BSIT',
-        'CTE' => 'BSED',
-    ];
-
-    /**
-     * Colleges with more than one Department/Major where 'cross_department'
-     * faculty teach across all of them. Keyed by College code -> ordered
-     * list of Department::name values (major-code suffixes, per
-     * DepartmentSeeder::DEPARTMENTS) to display as the faculty's majors.
-     *
-     * @var array<string, array<int, string>>
-     */
-    private const CROSS_DEPARTMENT_MAJORS = [
-        'COC' => ['BSCRIMQD', 'BSCRIMFI', 'BSCRIMFB', 'BSCRIMLD'],
-        'SHTM' => ['BSHM', 'BSTM'],
-    ];
     /**
      * Old-roster employment type label -> current `employment_type` enum value.
      */
@@ -80,23 +52,8 @@ class FacultySeeder extends Seeder
         // college instead of once per faculty row.
         $collegeIds = College::pluck('id', 'code');
 
-        // Department lookup keyed "COLLEGE_CODE:MAJOR_CODE_SUFFIX" ->
-        // Department, e.g. "COC:BSCRIMQD" -> the BSCRIMQD Department row.
-        // Department::name holds that major-code suffix (see
-        // DepartmentSeeder::DEPARTMENTS — it's confusingly named
-        // 'name' but is really the major code, e.g. 'BSIT').
-        $departmentLookup = Department::with('college:id,code')
-            ->get()
-            ->filter(fn (Department $d) => $d->college !== null)
-            ->keyBy(fn (Department $d) => "{$d->college->code}:{$d->name}");
-
-        // Department -> Major.short_name, so `specialization` can show
-        // the human-readable program instead of a raw department code.
-        $majorShortNameByDepartment = Major::pluck('short_name', 'department_id');
-
         foreach ($this->facultyByCollege() as $code => $facultyList) {
             $collegeId = $code === null ? null : ($collegeIds[$code] ?? null);
-            $facultyCategory = $code === null ? 'General Education Faculty' : 'Department Faculty';
 
             foreach ($facultyList as $row) {
                 $this->counter++;
@@ -104,53 +61,18 @@ class FacultySeeder extends Seeder
                 $nameParts = $this->parseFullName($row['full_name']);
                 $employmentType = self::EMPLOYMENT_TYPE[$row['employment_type']];
 
-                $departmentId = null;
-                $specialization = null;
                 $remarksParts = [];
 
                 if ($nameParts['title']) {
                     $remarksParts[] = "Title: {$nameParts['title']}";
                 }
 
-                if ($code !== null && $row['faculty_scope'] === 'departmental') {
-                    // Single-department colleges don't need a per-row
-                    // department_code — there's only one possible answer.
-                    $deptSuffix = $row['department_code'] ?? self::SINGLE_DEPARTMENT_COLLEGES[$code] ?? null;
-                    $department = $deptSuffix ? $departmentLookup->get("{$code}:{$deptSuffix}") : null;
-
-                    if ($department) {
-                        $departmentId = $department->id;
-                        $specialization = $majorShortNameByDepartment[$department->id] ?? null;
-                    }
-                } elseif ($code !== null && $row['faculty_scope'] === 'cross_department') {
-                    // Genuinely teaches across the whole college, not
-                    // one specific program — department_id stays null,
-                    // college_id alone represents them.
-                    $remarksParts[] = 'Teaches across multiple departments within the college.';
-
-                    // For colleges with more than one major, show all of
-                    // them in `specialization` (e.g. "BSHM, BSTM") instead
-                    // of leaving it blank, since that's the whole point of
-                    // cross_department for these colleges.
-                    if (isset(self::CROSS_DEPARTMENT_MAJORS[$code])) {
-                        $majorNames = collect(self::CROSS_DEPARTMENT_MAJORS[$code])
-                            ->map(function (string $deptSuffix) use ($code, $departmentLookup, $majorShortNameByDepartment) {
-                                $department = $departmentLookup->get("{$code}:{$deptSuffix}");
-
-                                if (! $department) {
-                                    return null;
-                                }
-
-                                return $majorShortNameByDepartment[$department->id] ?? $deptSuffix;
-                            })
-                            ->filter()
-                            ->unique()
-                            ->values();
-
-                        if ($majorNames->isNotEmpty()) {
-                            $specialization = $majorNames->implode(', ');
-                        }
-                    }
+                if ($code !== null && $row['faculty_scope'] === 'cross_department') {
+                    // Genuinely teaches across the whole college rather
+                    // than one specific program — college_id alone
+                    // represents them; there's no finer-grained field
+                    // to record that against anymore.
+                    $remarksParts[] = 'Teaches across multiple programs within the college.';
                 }
 
                 Faculty::updateOrCreate(
@@ -163,14 +85,12 @@ class FacultySeeder extends Seeder
                         'last_name'           => $nameParts['last_name'],
                         'suffix'              => $nameParts['suffix'],
                         'employment_type'     => $employmentType,
-                        'faculty_category'    => $facultyCategory,
-                        // A Faculty member with no College/Department is,
-                        // by definition, General Education Faculty — see
-                        // $facultyCategory above (keyed off the `null`
-                        // college group in facultyByCollege()).
+                        // A Faculty member with no College is, by
+                        // definition, General Education Faculty — see
+                        // Faculty::getFacultyCategoryAttribute(), which
+                        // derives the category from this column so the
+                        // two can never disagree.
                         'college_id'          => $collegeId,
-                        'department_id'       => $departmentId,
-                        'specialization'      => $specialization,
                         'max_teaching_units'  => self::MAX_TEACHING_UNITS[$row['employment_type']],
                         'status'              => 'Active',
                         'remarks'             => $remarksParts ? implode(' ', $remarksParts) : null,

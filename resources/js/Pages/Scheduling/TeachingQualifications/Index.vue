@@ -209,7 +209,7 @@ const saveQualifications = () => {
                             >
                                 <p class="text-sm font-semibold text-[#1E293B]">{{ fullName(faculty) }}</p>
                                 <p class="text-xs text-slate-500 mt-0.5">
-                                    {{ faculty.faculty_id }} &middot; {{ faculty.department?.name || '—' }}
+                                    {{ faculty.faculty_id }} &middot; {{ faculty.college?.name || '—' }}
                                 </p>
                                 <p class="text-xs text-slate-400 mt-0.5">{{ faculty.employment_type }}</p>
                             </button>
@@ -239,9 +239,9 @@ const saveQualifications = () => {
                                     <p class="text-sm font-semibold text-[#1E293B] mt-1">{{ fullName(selectedFaculty) }}</p>
                                 </div>
                                 <div>
-                                    <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Department</p>
+                                    <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">College</p>
                                     <p class="text-sm font-semibold text-[#1E293B] mt-1">
-                                        {{ selectedFaculty.department?.name || '—' }}
+                                        {{ selectedFaculty.college?.name || '—' }}
                                     </p>
                                 </div>
                                 <div>

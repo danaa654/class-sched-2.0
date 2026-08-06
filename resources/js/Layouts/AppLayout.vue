@@ -26,7 +26,6 @@ const academicManagementItems = [
 const schedulingItems = [
     { label: 'Scheduling', route: 'scheduling' },
     { label: 'Faculty', route: 'scheduling.faculty' },
-    { label: 'Teaching Qualifications', route: 'scheduling.teaching-qualifications' },
     { label: 'Rooms', route: 'scheduling.rooms' },
     { label: 'Sections', route: 'scheduling.sections' },
 ];

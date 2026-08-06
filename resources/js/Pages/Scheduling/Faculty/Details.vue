@@ -27,7 +27,6 @@ import Toast from 'primevue/toast';
 const props = defineProps({
     faculty: { type: Object, required: true },
     colleges: { type: Array, default: () => [] },
-    departments: { type: Array, default: () => [] },
     subjects: { type: Array, default: () => [] },
 });
 
@@ -60,20 +59,12 @@ const fullName = computed(() => {
 /* ------------------------------------------------------------------ */
 
 const employmentTypeOptions = ['Full-time', 'Part-time', 'Contractual'];
-const facultyCategoryOptions = ['Department Faculty', 'General Education Faculty'];
 const statusOptions = [
     { label: 'Active', value: 'Active' },
     { label: 'Inactive', value: 'Inactive' },
 ];
 
 const editVisible = ref(false);
-
-const filteredDepartments = computed(() => {
-    if (!facultyForm.college_id) return [];
-    return props.departments.filter((department) => department.college_id === facultyForm.college_id);
-});
-
-const isDepartmentFaculty = computed(() => facultyForm.faculty_category === 'Department Faculty');
 
 const facultyForm = useForm({
     faculty_id: props.faculty.faculty_id,
@@ -82,10 +73,7 @@ const facultyForm = useForm({
     last_name: props.faculty.last_name,
     suffix: props.faculty.suffix,
     employment_type: props.faculty.employment_type,
-    faculty_category: props.faculty.faculty_category ?? 'Department Faculty',
     college_id: props.faculty.college_id,
-    department_id: props.faculty.department_id,
-    specialization: props.faculty.specialization,
     max_teaching_units: props.faculty.max_teaching_units,
     status: props.faculty.status,
     email: props.faculty.email,
@@ -93,18 +81,20 @@ const facultyForm = useForm({
     remarks: props.faculty.remarks,
 });
 
-// General Education Faculty don't belong to a College/Department —
-// clear both automatically whenever the category is switched away
-// from Department Faculty.
-watch(
-    () => facultyForm.faculty_category,
-    (category) => {
-        if (category === 'General Education Faculty') {
-            facultyForm.college_id = null;
-            facultyForm.department_id = null;
-        }
-    },
-);
+// Faculty ID, name, suffix, contact number, and remarks are always
+// stored/displayed in caps (matches the table); Email is left as
+// typed since addresses are case-sensitive-looking to users.
+const UPPERCASE_FIELDS = ['faculty_id', 'first_name', 'middle_name', 'last_name', 'suffix', 'contact_number', 'remarks'];
+UPPERCASE_FIELDS.forEach((field) => {
+    watch(
+        () => facultyForm[field],
+        (value) => {
+            if (typeof value === 'string' && value !== value.toUpperCase()) {
+                facultyForm[field] = value.toUpperCase();
+            }
+        },
+    );
+});
 
 const openEdit = () => {
     facultyForm.clearErrors();
@@ -114,10 +104,7 @@ const openEdit = () => {
     facultyForm.last_name = props.faculty.last_name;
     facultyForm.suffix = props.faculty.suffix;
     facultyForm.employment_type = props.faculty.employment_type;
-    facultyForm.faculty_category = props.faculty.faculty_category ?? 'Department Faculty';
     facultyForm.college_id = props.faculty.college_id;
-    facultyForm.department_id = props.faculty.department_id;
-    facultyForm.specialization = props.faculty.specialization;
     facultyForm.max_teaching_units = props.faculty.max_teaching_units;
     facultyForm.status = props.faculty.status;
     facultyForm.email = props.faculty.email;
@@ -368,7 +355,7 @@ const workloadPercent = computed(() => {
                 <div>
                     <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">{{ fullName }}</h1>
                     <p class="mt-1 text-slate-500">
-                        {{ faculty.faculty_id }} &middot; {{ faculty.department?.name || '—' }} &middot;
+                        {{ faculty.faculty_id }} &middot; {{ faculty.college?.name || '—' }} &middot;
                         {{ faculty.employment_type }}
                     </p>
                 </div>
@@ -410,34 +397,18 @@ const workloadPercent = computed(() => {
                                         <p class="mt-1 text-slate-800 font-medium">{{ faculty.employment_type }}</p>
                                     </div>
                                     <div>
-                                        <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Faculty Category</p>
+                                        <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">College</p>
                                         <p class="mt-1">
-                                            <Tag
-                                                :value="faculty.faculty_category"
-                                                :severity="faculty.faculty_category === 'General Education Faculty' ? 'warning' : 'info'"
-                                            />
+                                            <span v-if="faculty.college?.name" class="text-slate-800 font-medium">{{ faculty.college.name }}</span>
+                                            <Tag v-else value="General Education" severity="warning" />
                                         </p>
                                     </div>
-                                    <template v-if="faculty.faculty_category === 'Department Faculty'">
-                                        <div>
-                                            <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">College</p>
-                                            <p class="mt-1 text-slate-800 font-medium">{{ faculty.college?.name || '—' }}</p>
-                                        </div>
-                                        <div>
-                                            <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Department</p>
-                                            <p class="mt-1 text-slate-800 font-medium">{{ faculty.department?.name || '—' }}</p>
-                                        </div>
-                                    </template>
-                                    <div v-else class="sm:col-span-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
+                                    <div v-if="!faculty.college?.name" class="sm:col-span-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
                                         <i class="pi pi-info-circle text-amber-500 mt-0.5"></i>
                                         <p class="text-sm text-amber-700">
-                                            This faculty member is not assigned to any specific college or department and
+                                            This faculty member is not assigned to any specific college and
                                             may teach General Education subjects.
                                         </p>
-                                    </div>
-                                    <div>
-                                        <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Specialization</p>
-                                        <p class="mt-1 text-slate-800 font-medium">{{ faculty.specialization || '—' }}</p>
                                     </div>
                                     <div>
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Max Teaching Units</p>
@@ -671,18 +642,6 @@ const workloadPercent = computed(() => {
                 </div>
 
                 <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">Faculty Category <span class="text-red-500">*</span></label>
-                    <Select
-                        v-model="facultyForm.faculty_category"
-                        :options="facultyCategoryOptions"
-                        placeholder="Select faculty category"
-                        :invalid="!!facultyForm.errors.faculty_category"
-                        class="w-full"
-                    />
-                    <small v-if="facultyForm.errors.faculty_category" class="text-red-500">{{ facultyForm.errors.faculty_category }}</small>
-                </div>
-
-                <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">First Name <span class="text-red-500">*</span></label>
                     <InputText v-model="facultyForm.first_name" :invalid="!!facultyForm.errors.first_name" class="w-full" />
                     <small v-if="facultyForm.errors.first_name" class="text-red-500">{{ facultyForm.errors.first_name }}</small>
@@ -704,48 +663,22 @@ const workloadPercent = computed(() => {
                     <InputText v-model="facultyForm.suffix" :invalid="!!facultyForm.errors.suffix" class="w-full" />
                 </div>
 
-                <div v-if="isDepartmentFaculty" class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">College <span class="text-red-500">*</span></label>
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-medium text-slate-700">College</label>
                     <Select
                         v-model="facultyForm.college_id"
                         :options="colleges"
                         optionLabel="name"
                         optionValue="id"
-                        placeholder="Select a college"
+                        placeholder="Leave blank for General Education"
                         showClear
                         :invalid="!!facultyForm.errors.college_id"
                         class="w-full"
                     />
                     <small v-if="facultyForm.errors.college_id" class="text-red-500">{{ facultyForm.errors.college_id }}</small>
-                </div>
-
-                <div v-if="isDepartmentFaculty" class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">Department <span class="text-red-500">*</span></label>
-                    <Select
-                        v-model="facultyForm.department_id"
-                        :options="filteredDepartments"
-                        optionLabel="name"
-                        optionValue="id"
-                        placeholder="Select a department"
-                        showClear
-                        :disabled="!facultyForm.college_id"
-                        :invalid="!!facultyForm.errors.department_id"
-                        class="w-full"
-                    />
-                    <small v-if="facultyForm.errors.department_id" class="text-red-500">{{ facultyForm.errors.department_id }}</small>
-                </div>
-
-                <div v-if="!isDepartmentFaculty" class="sm:col-span-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
-                    <i class="pi pi-info-circle text-amber-500 mt-0.5"></i>
-                    <p class="text-sm text-amber-700">
-                        This faculty member is not assigned to any specific college or department and may teach
-                        General Education subjects.
+                    <p v-else class="text-xs text-slate-400">
+                        Leave blank if this faculty member is General Education (no department).
                     </p>
-                </div>
-
-                <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">Specialization</label>
-                    <InputText v-model="facultyForm.specialization" :invalid="!!facultyForm.errors.specialization" class="w-full" />
                 </div>
 
                 <div class="flex flex-col gap-1">

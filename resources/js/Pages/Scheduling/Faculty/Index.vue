@@ -1,6 +1,6 @@
 <script setup>
 import { Head, useForm, usePage, router } from '@inertiajs/vue3';
-import { ref, computed, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import Swal from 'sweetalert2';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -24,7 +24,6 @@ const props = defineProps({
         default: () => ({ faculty_search: '', faculty_category: '' }),
     },
     colleges: { type: Array, default: () => [] },
-    departments: { type: Array, default: () => [] },
     nextFacultyId: { type: String, default: '' },
 });
 
@@ -58,6 +57,9 @@ const categoryFilter = ref(props.filters.faculty_category ?? '');
 const loading = ref(false);
 let searchDebounce = null;
 
+// Not a stored field — General Education Faculty is simply "no College
+// assigned". Kept as a quick filter option since it's still a useful
+// distinction, just derived rather than tracked separately.
 const facultyCategoryOptions = ['Department Faculty', 'General Education Faculty'];
 
 const reloadFaculties = (extra = {}) => {
@@ -107,14 +109,6 @@ const statusOptions = [
     { label: 'Inactive', value: 'Inactive' },
 ];
 
-// Departments visible in the Add/Edit dialog depend on the selected College.
-const filteredDepartments = computed(() => {
-    if (!facultyForm.college_id) {
-        return [];
-    }
-    return props.departments.filter((department) => department.college_id === facultyForm.college_id);
-});
-
 const addFacultyVisible = ref(false);
 const editingFaculty = ref(null); // null => Add mode, otherwise the Faculty being edited
 
@@ -125,10 +119,7 @@ const facultyForm = useForm({
     last_name: '',
     suffix: '',
     employment_type: null,
-    faculty_category: 'Department Faculty',
     college_id: null,
-    department_id: null,
-    specialization: '',
     max_teaching_units: 21,
     status: 'Active',
     email: '',
@@ -136,34 +127,20 @@ const facultyForm = useForm({
     remarks: '',
 });
 
-const isDepartmentFaculty = computed(() => facultyForm.faculty_category === 'Department Faculty');
-
-// Department depends on College — reset it whenever College changes,
-// unless we're pre-filling both at once when opening Edit.
-let skipDepartmentReset = false;
-watch(
-    () => facultyForm.college_id,
-    () => {
-        if (skipDepartmentReset) {
-            skipDepartmentReset = false;
-            return;
-        }
-        facultyForm.department_id = null;
-    },
-);
-
-// General Education Faculty don't belong to a College/Department —
-// clear both automatically whenever the category is switched away
-// from Department Faculty.
-watch(
-    () => facultyForm.faculty_category,
-    (category) => {
-        if (category === 'General Education Faculty') {
-            facultyForm.college_id = null;
-            facultyForm.department_id = null;
-        }
-    },
-);
+// Faculty ID, name, suffix, contact number, and remarks are always
+// stored/displayed in caps (matches the table); Email is left as
+// typed since addresses are case-sensitive-looking to users.
+const UPPERCASE_FIELDS = ['faculty_id', 'first_name', 'middle_name', 'last_name', 'suffix', 'contact_number', 'remarks'];
+UPPERCASE_FIELDS.forEach((field) => {
+    watch(
+        () => facultyForm[field],
+        (value) => {
+            if (typeof value === 'string' && value !== value.toUpperCase()) {
+                facultyForm[field] = value.toUpperCase();
+            }
+        },
+    );
+});
 
 const openAdd = () => {
     editingFaculty.value = null;
@@ -176,17 +153,13 @@ const openAdd = () => {
 const openEdit = (faculty) => {
     editingFaculty.value = faculty;
     facultyForm.clearErrors();
-    skipDepartmentReset = true;
     facultyForm.faculty_id = faculty.faculty_id;
     facultyForm.first_name = faculty.first_name;
     facultyForm.middle_name = faculty.middle_name ?? '';
     facultyForm.last_name = faculty.last_name;
     facultyForm.suffix = faculty.suffix ?? '';
     facultyForm.employment_type = faculty.employment_type;
-    facultyForm.faculty_category = faculty.faculty_category ?? 'Department Faculty';
     facultyForm.college_id = faculty.college_id;
-    facultyForm.department_id = faculty.department_id;
-    facultyForm.specialization = faculty.specialization ?? '';
     facultyForm.max_teaching_units = faculty.max_teaching_units;
     facultyForm.status = faculty.status;
     facultyForm.email = faculty.email ?? '';
@@ -290,14 +263,14 @@ const fullName = (faculty) => {
                                     <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                     <InputText
                                         v-model="search"
-                                        placeholder="Search by ID, name, college, department or specialization"
+                                        placeholder="Search by ID, name, or college"
                                         class="w-full !pl-9"
                                     />
                                 </span>
                                 <Select
                                     v-model="categoryFilter"
                                     :options="facultyCategoryOptions"
-                                    placeholder="Filter by Faculty Category"
+                                    placeholder="Filter by Department / General Education"
                                     showClear
                                     class="w-full sm:w-64"
                                 />
@@ -319,6 +292,10 @@ const fullName = (faculty) => {
                     </Toolbar>
 
                     <!-- Faculty Table -->
+                    <p class="text-xs text-slate-400 mb-2 flex items-center gap-1">
+                        <i class="pi pi-eye text-slate-400"></i>
+                        Click the view icon on a row to manage that faculty member's teaching qualifications, availability, and workload.
+                    </p>
                     <DataTable
                         :value="faculties.data"
                         :loading="loading"
@@ -360,27 +337,10 @@ const fullName = (faculty) => {
                                 {{ data.employment_type }}
                             </template>
                         </Column>
-                        <Column header="Faculty Category" style="width: 12rem">
+                        <Column header="College" style="width: 16rem">
                             <template #body="{ data }">
-                                <Tag
-                                    :value="data.faculty_category"
-                                    :severity="data.faculty_category === 'General Education Faculty' ? 'warning' : 'info'"
-                                />
-                            </template>
-                        </Column>
-                        <Column header="College" style="width: 12rem">
-                            <template #body="{ data }">
-                                {{ data.college?.name || '—' }}
-                            </template>
-                        </Column>
-                        <Column header="Department" style="width: 12rem">
-                            <template #body="{ data }">
-                                {{ data.department?.name || data.specialization || '—' }}
-                            </template>
-                        </Column>
-                        <Column header="Major" style="width: 12rem">
-                            <template #body="{ data }">
-                                {{ data.specialization || '—' }}
+                                <span v-if="data.college?.name">{{ data.college.name }}</span>
+                                <Tag v-else value="General Education" severity="warning" />
                             </template>
                         </Column>
                         <Column header="Max Teaching Units" style="width: 9rem">
@@ -400,6 +360,7 @@ const fullName = (faculty) => {
                             <template #body="{ data }">
                                 <div class="flex gap-1">
                                     <Button
+                                        v-tooltip.top="'View details, teaching qualifications, availability & workload'"
                                         icon="pi pi-eye"
                                         text
                                         rounded
@@ -483,24 +444,6 @@ const fullName = (faculty) => {
                     </small>
                 </div>
 
-                <!-- Faculty Category -->
-                <div class="flex flex-col gap-1">
-                    <label for="faculty_category" class="text-sm font-medium text-slate-700">
-                        Faculty Category <span class="text-red-500">*</span>
-                    </label>
-                    <Select
-                        id="faculty_category"
-                        v-model="facultyForm.faculty_category"
-                        :options="facultyCategoryOptions"
-                        placeholder="Select faculty category"
-                        :invalid="!!facultyForm.errors.faculty_category"
-                        class="w-full"
-                    />
-                    <small v-if="facultyForm.errors.faculty_category" class="text-red-500">
-                        {{ facultyForm.errors.faculty_category }}
-                    </small>
-                </div>
-
                 <!-- First Name -->
                 <div class="flex flex-col gap-1">
                     <label for="first_name" class="text-sm font-medium text-slate-700">
@@ -565,18 +508,16 @@ const fullName = (faculty) => {
                     </small>
                 </div>
 
-                <!-- College (Department Faculty only) -->
-                <div v-if="isDepartmentFaculty" class="flex flex-col gap-1">
-                    <label for="college_id" class="text-sm font-medium text-slate-700">
-                        College <span class="text-red-500">*</span>
-                    </label>
+                <!-- College -->
+                <div class="flex flex-col gap-1">
+                    <label for="college_id" class="text-sm font-medium text-slate-700">College</label>
                     <Select
                         id="college_id"
                         v-model="facultyForm.college_id"
                         :options="colleges"
                         optionLabel="name"
                         optionValue="id"
-                        placeholder="Select a college"
+                        placeholder="Leave blank for General Education"
                         showClear
                         :invalid="!!facultyForm.errors.college_id"
                         class="w-full"
@@ -584,55 +525,9 @@ const fullName = (faculty) => {
                     <small v-if="facultyForm.errors.college_id" class="text-red-500">
                         {{ facultyForm.errors.college_id }}
                     </small>
-                </div>
-
-                <!-- Department (Department Faculty only) -->
-                <div v-if="isDepartmentFaculty" class="flex flex-col gap-1">
-                    <label for="department_id" class="text-sm font-medium text-slate-700">
-                        Department <span class="text-red-500">*</span>
-                    </label>
-                    <Select
-                        id="department_id"
-                        v-model="facultyForm.department_id"
-                        :options="filteredDepartments"
-                        optionLabel="name"
-                        optionValue="id"
-                        placeholder="Select a department"
-                        showClear
-                        :disabled="!facultyForm.college_id"
-                        :invalid="!!facultyForm.errors.department_id"
-                        class="w-full"
-                    />
-                    <small v-if="!facultyForm.college_id" class="text-slate-400">
-                        Select a college first.
-                    </small>
-                    <small v-else-if="facultyForm.errors.department_id" class="text-red-500">
-                        {{ facultyForm.errors.department_id }}
-                    </small>
-                </div>
-
-                <!-- General Education helper message (replaces College/Department) -->
-                <div v-if="!isDepartmentFaculty" class="sm:col-span-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
-                    <i class="pi pi-info-circle text-amber-500 mt-0.5"></i>
-                    <p class="text-sm text-amber-700">
-                        This faculty member is not assigned to any specific college or department and may teach
-                        General Education subjects.
+                    <p v-else class="text-xs text-slate-400">
+                        Leave blank if this faculty member is General Education (no department).
                     </p>
-                </div>
-
-                <!-- Specialization / Major -->
-                <div class="flex flex-col gap-1">
-                    <label for="specialization" class="text-sm font-medium text-slate-700">Major</label>
-                    <InputText
-                        id="specialization"
-                        v-model="facultyForm.specialization"
-                        placeholder="e.g. Database Systems"
-                        :invalid="!!facultyForm.errors.specialization"
-                        class="w-full"
-                    />
-                    <small v-if="facultyForm.errors.specialization" class="text-red-500">
-                        {{ facultyForm.errors.specialization }}
-                    </small>
                 </div>
 
                 <!-- Maximum Teaching Units -->
