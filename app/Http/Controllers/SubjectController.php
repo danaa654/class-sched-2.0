@@ -6,6 +6,7 @@ use App\Http\Requests\StoreSubjectRequest;
 use App\Http\Requests\UpdateSubjectRequest;
 use App\Models\Major;
 use App\Models\Subject;
+use App\Support\RoomCategories;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -47,6 +48,7 @@ class SubjectController extends Controller
                 ->where('status', 'Active')
                 ->orderBy('name')
                 ->get(['id', 'name']),
+            'roomCategories' => RoomCategories::LIST,
         ]);
     }
 

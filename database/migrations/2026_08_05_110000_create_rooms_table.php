@@ -21,6 +21,9 @@ return new class extends Migration
                 'Lecture',
                 'Laboratory',
             ]);
+            $table->string('room_category')->nullable();
+            $table->foreignId('department_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('college_id')->nullable()->constrained()->nullOnDelete();
             $table->unsignedInteger('capacity');
             $table->enum('status', ['Active', 'Inactive'])->default('Active');
             $table->text('remarks')->nullable();

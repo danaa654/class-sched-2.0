@@ -25,6 +25,7 @@ class Subject extends Model
         'units',
         'lecture_hours',
         'laboratory_hours',
+        'preferred_room_category',
         'is_active',
         'description',
     ];

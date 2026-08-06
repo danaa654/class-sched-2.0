@@ -123,3 +123,11 @@ Route::middleware('auth')->group(function () {
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });
+
+// Catch-all for any URL that doesn't match a route above (stale links,
+// bookmarks to removed pages, typos, etc). Instead of Laravel's raw 404
+// page, send the user somewhere useful: logged-in users go to their
+// dashboard, guests go to the login page.
+Route::fallback(function () {
+    return redirect(auth()->check() ? route('dashboard') : route('login'));
+});

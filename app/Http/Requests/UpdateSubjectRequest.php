@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\RoomCategories;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -33,6 +34,7 @@ class UpdateSubjectRequest extends FormRequest
             'units' => ['required', 'integer', 'min:0'],
             'lecture_hours' => ['required', 'integer', 'min:0'],
             'laboratory_hours' => ['required', 'integer', 'min:0'],
+            'preferred_room_category' => ['nullable', Rule::in(RoomCategories::LIST)],
             'is_active' => ['sometimes', 'boolean'],
             'description' => ['nullable', 'string'],
         ];

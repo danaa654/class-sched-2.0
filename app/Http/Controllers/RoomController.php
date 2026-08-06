@@ -4,7 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreRoomRequest;
 use App\Http\Requests\UpdateRoomRequest;
+use App\Models\College;
+use App\Models\Department;
 use App\Models\Room;
+use App\Support\RoomCategories;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -25,12 +28,14 @@ class RoomController extends Controller
         $search = trim((string) $request->query('room_search', ''));
 
         $rooms = Room::query()
+            ->with(['department', 'college'])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('room_code', 'like', "%{$search}%")
                         ->orWhere('room_name', 'like', "%{$search}%")
                         ->orWhere('building', 'like', "%{$search}%")
-                        ->orWhere('room_type', 'like', "%{$search}%");
+                        ->orWhere('room_type', 'like', "%{$search}%")
+                        ->orWhere('room_category', 'like', "%{$search}%");
                 });
             })
             ->orderBy('room_code')
@@ -41,6 +46,15 @@ class RoomController extends Controller
             'rooms' => $rooms,
             'filters' => ['room_search' => $search],
             'roomTypes' => StoreRoomRequest::ROOM_TYPES,
+            'roomCategories' => RoomCategories::LIST,
+            'departments' => Department::query()
+                ->where('status', 'Active')
+                ->orderBy('name')
+                ->get(['id', 'name', 'college_id']),
+            'colleges' => College::query()
+                ->where('status', 'Active')
+                ->orderBy('name')
+                ->get(['id', 'name']),
         ]);
     }
 

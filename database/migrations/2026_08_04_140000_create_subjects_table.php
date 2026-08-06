@@ -21,6 +21,7 @@ return new class extends Migration
             $table->unsignedTinyInteger('units')->default(0);
             $table->unsignedTinyInteger('lecture_hours')->default(0);
             $table->unsignedTinyInteger('laboratory_hours')->default(0);
+            $table->string('preferred_room_category')->nullable();
             $table->text('description')->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamps();

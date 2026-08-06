@@ -22,6 +22,9 @@ import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Toast from 'primevue/toast';
 import Popover from 'primevue/popover';
+import Drawer from 'primevue/drawer';
+import ProgressBar from 'primevue/progressbar';
+import Divider from 'primevue/divider';
 
 const props = defineProps({
     section: { type: Object, required: true },
@@ -524,6 +527,58 @@ const toggleTimeSuggestions = (event, row) => {
 const applyTimeRecommendationFromPopover = (row, rec) => {
     applyTimeRecommendation(row, rec);
     timePopover.value?.hide();
+};
+
+/* ------------------------------------------------------------------ */
+/* Smart Schedule Recommendation Drawer (Prompt 8.7)                    */
+/*                                                                       */
+/* Right-side PrimeVue Drawer opened from a per-row "Recommend" button. */
+/* Shows the same Faculty/Room/Time lists as the row's inline panel,    */
+/* plus full-schedule Combined Recommendations built server-side by     */
+/* RecommendationService (Faculty x Room x Time, all conflict-checked   */
+/* via ScheduleConflictService). Reject = just close the Drawer; Apply  */
+/* only ever populates the row locally — the Registrar still has to     */
+/* click "Save Schedule" to persist anything.                           */
+/* ------------------------------------------------------------------ */
+
+const recommendDrawerVisible = ref(false);
+const recommendDrawerRow = ref(null);
+
+const openRecommendDrawer = (row) => {
+    recommendDrawerRow.value = row;
+    recommendDrawerVisible.value = true;
+    fetchRecommendations(row, true);
+};
+
+const recommendDrawerState = computed(() => recommendationStateFor(recommendDrawerRow.value?.id));
+
+const closeRecommendDrawer = () => {
+    recommendDrawerVisible.value = false;
+};
+
+// Accept a Combined Recommendation — populates Faculty, Room, Days,
+// Start Time, and End Time on the row in one click, exactly like
+// applying all three individual recommendations at once.
+const applyCombinedRecommendation = (row, combo) => {
+    onFacultyChange(row, combo.faculty.id);
+    onRoomChange(row, combo.room.id);
+    row.days = [...combo.time.days];
+    row.start_time = combo.time.start_time;
+    row.end_time = combo.time.end_time;
+    markDirty(row, 'days');
+    markDirty(row, 'start_time');
+    markDirty(row, 'end_time');
+    closeRecommendDrawer();
+};
+
+const applyFacultyRecommendationFromDrawer = (row, rec) => {
+    applyFacultyRecommendation(row, rec);
+};
+const applyRoomRecommendationFromDrawer = (row, rec) => {
+    applyRoomRecommendation(row, rec);
+};
+const applyTimeRecommendationFromDrawer = (row, rec) => {
+    applyTimeRecommendation(row, rec);
 };
 
 /* --- Manual scheduling — edits stay local until "Save Schedule" is      */
@@ -1284,17 +1339,27 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                 <Tag :value="data.source" :severity="sourceSeverity(data.source)" />
                             </template>
                         </Column>
-                        <Column header="Actions" style="width: 6rem">
+                        <Column header="Actions" style="width: 10rem">
                             <template #body="{ data }">
-                                <Button
-                                    icon="pi pi-trash"
-                                    text
-                                    rounded
-                                    severity="danger"
-                                    size="small"
-                                    aria-label="Remove"
-                                    @click="onRemove(data)"
-                                />
+                                <div class="flex items-center gap-1">
+                                    <Button
+                                        icon="pi pi-sparkles"
+                                        label="Recommend"
+                                        text
+                                        size="small"
+                                        aria-label="Smart Schedule Recommendation"
+                                        @click="openRecommendDrawer(data)"
+                                    />
+                                    <Button
+                                        icon="pi pi-trash"
+                                        text
+                                        rounded
+                                        severity="danger"
+                                        size="small"
+                                        aria-label="Remove"
+                                        @click="onRemove(data)"
+                                    />
+                                </div>
                             </template>
                         </Column>
 
@@ -1504,6 +1569,297 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                 </template>
             </Card>
         </div>
+
+        <!-- Smart Schedule Recommendation Drawer (Prompt 8.7) -->
+        <Drawer
+            v-model:visible="recommendDrawerVisible"
+            position="right"
+            :style="{ width: '38rem' }"
+            :breakpoints="{ '960px': '90vw', '640px': '100vw' }"
+        >
+            <template #header>
+                <div>
+                    <p class="text-lg font-semibold text-slate-800">
+                        <i class="pi pi-sparkles mr-1.5 text-indigo-500"></i>Smart Schedule Recommendation
+                    </p>
+                    <p v-if="recommendDrawerRow" class="text-xs text-slate-400 mt-0.5">
+                        Analyzed against all available Faculty, Rooms, and Time slots
+                    </p>
+                </div>
+            </template>
+
+            <div v-if="recommendDrawerRow" class="flex flex-col gap-5">
+                <!-- Context header: Subject / Section / Major / Academic Year / Semester -->
+                <div class="grid grid-cols-2 gap-3 bg-slate-50 rounded-lg p-3 text-sm">
+                    <div>
+                        <p class="text-[0.7rem] uppercase tracking-wide text-slate-400">Subject</p>
+                        <p class="font-medium text-slate-800">
+                            {{ recommendDrawerRow.subject?.subject_code }} — {{ recommendDrawerRow.subject?.subject_name }}
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-[0.7rem] uppercase tracking-wide text-slate-400">Section</p>
+                        <p class="font-medium text-slate-800">{{ section.section_code }} — {{ section.section_name }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[0.7rem] uppercase tracking-wide text-slate-400">Major</p>
+                        <p class="font-medium text-slate-800">{{ section.major?.name || '—' }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[0.7rem] uppercase tracking-wide text-slate-400">Academic Year</p>
+                        <p class="font-medium text-slate-800">{{ section.academic_year || '—' }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[0.7rem] uppercase tracking-wide text-slate-400">Semester</p>
+                        <p class="font-medium text-slate-800">{{ section.semester || '—' }}</p>
+                    </div>
+                </div>
+
+                <div class="flex justify-end -mt-2">
+                    <Button
+                        icon="pi pi-refresh"
+                        label="Re-analyze"
+                        text
+                        size="small"
+                        :loading="recommendDrawerState.loading"
+                        @click="fetchRecommendations(recommendDrawerRow, true)"
+                    />
+                </div>
+
+                <div v-if="recommendDrawerState.loading" class="text-sm text-slate-500 text-center py-6">
+                    <i class="pi pi-spin pi-spinner mr-1.5"></i>Analyzing Faculty, Rooms, and Time slots…
+                </div>
+                <div v-else-if="recommendDrawerState.error" class="text-sm text-red-500 text-center py-6">
+                    {{ recommendDrawerState.error }}
+                </div>
+
+                <template v-else>
+                    <!-- Combined Recommendations -->
+                    <div>
+                        <p class="text-sm font-semibold text-slate-700 mb-2">
+                            <i class="pi pi-star-fill mr-1 text-amber-400"></i>Combined Recommendations
+                        </p>
+                        <p v-if="recommendDrawerState.combined?.message" class="text-sm text-slate-500">
+                            {{ recommendDrawerState.combined.message }}
+                        </p>
+                        <div v-else class="flex flex-col gap-3">
+                            <Card
+                                v-for="(combo, idx) in recommendDrawerState.combined?.recommendations ?? []"
+                                :key="idx"
+                                class="border border-slate-200 shadow-none"
+                            >
+                                <template #content>
+                                    <div class="flex items-start justify-between gap-2 mb-2">
+                                        <p class="text-sm font-semibold text-slate-800">Recommendation #{{ idx + 1 }}</p>
+                                        <div class="flex items-center gap-2 shrink-0">
+                                            <Tag :value="combo.confidence" :severity="confidenceSeverity(combo.confidence)" />
+                                            <span class="text-xs font-semibold text-slate-500">{{ combo.score }}/{{ combo.score_max }}%</span>
+                                        </div>
+                                    </div>
+                                    <ProgressBar
+                                        :value="combo.score"
+                                        :showValue="false"
+                                        style="height: 6px"
+                                        :pt="{ value: { style: { backgroundColor: scoreColor(combo.score) } } }"
+                                        class="mb-3"
+                                    />
+                                    <div class="grid grid-cols-3 gap-2 text-xs mb-3">
+                                        <div>
+                                            <p class="text-slate-400 uppercase tracking-wide text-[0.65rem]">Faculty</p>
+                                            <p class="font-medium text-slate-700">{{ combo.faculty.name }}</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-slate-400 uppercase tracking-wide text-[0.65rem]">Room</p>
+                                            <p class="font-medium text-slate-700">{{ combo.room.name }}</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-slate-400 uppercase tracking-wide text-[0.65rem]">Schedule</p>
+                                            <p class="font-medium text-slate-700">
+                                                {{ formatDays(combo.time.days) }} · {{ formatTimeRange(combo.time.start_time, combo.time.end_time) }}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center justify-between">
+                                        <p class="text-[0.7rem] text-emerald-600">
+                                            <i class="pi pi-check-circle mr-1"></i>Conflict: {{ combo.conflict || 'None' }}
+                                        </p>
+                                        <Button
+                                            label="Apply"
+                                            size="small"
+                                            @click="applyCombinedRecommendation(recommendDrawerRow, combo)"
+                                        />
+                                    </div>
+                                </template>
+                            </Card>
+                        </div>
+                    </div>
+
+                    <Divider />
+
+                    <!-- Faculty Recommendations -->
+                    <div>
+                        <p class="text-sm font-semibold text-slate-700 mb-2">
+                            <i class="pi pi-user mr-1 text-indigo-500"></i>Top Faculty Recommendations
+                        </p>
+                        <p v-if="recommendDrawerState.faculty?.message" class="text-sm text-slate-500">
+                            {{ recommendDrawerState.faculty.message }}
+                        </p>
+                        <ul v-else class="flex flex-col gap-3">
+                            <li
+                                v-for="rec in recommendDrawerState.faculty?.recommendations ?? []"
+                                :key="rec.id"
+                                class="border border-slate-200 rounded-lg p-3"
+                            >
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-medium text-slate-800 truncate">{{ rec.name }}</p>
+                                        <p class="text-[0.7rem] text-slate-400">
+                                            {{ rec.faculty_category }}<span v-if="rec.same_department"> · Same Department</span>
+                                        </p>
+                                    </div>
+                                    <div class="flex items-center gap-2 shrink-0">
+                                        <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
+                                        <span class="text-xs font-semibold text-slate-500">{{ rec.score }}%</span>
+                                    </div>
+                                </div>
+                                <ProgressBar
+                                    :value="rec.score"
+                                    :showValue="false"
+                                    style="height: 5px"
+                                    :pt="{ value: { style: { backgroundColor: scoreColor(rec.score) } } }"
+                                    class="my-2"
+                                />
+                                <p class="text-[0.7rem] text-slate-500 mb-1.5">
+                                    Current Load: {{ rec.current_load }} / {{ rec.max_teaching_units }} Units
+                                </p>
+                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5 mb-2">
+                                    <li
+                                        v-for="reason in rec.reasons"
+                                        :key="reason.label"
+                                        class="text-[0.7rem] flex items-center gap-1"
+                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                    >
+                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                    </li>
+                                </ul>
+                                <div class="flex justify-end">
+                                    <Button label="Apply" text size="small" @click="applyFacultyRecommendationFromDrawer(recommendDrawerRow, rec)" />
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <Divider />
+
+                    <!-- Room Recommendations -->
+                    <div>
+                        <p class="text-sm font-semibold text-slate-700 mb-2">
+                            <i class="pi pi-building mr-1 text-indigo-500"></i>Top Room Recommendations
+                        </p>
+                        <p v-if="recommendDrawerState.room?.message" class="text-sm text-slate-500">
+                            {{ recommendDrawerState.room.message }}
+                        </p>
+                        <ul v-else class="flex flex-col gap-3">
+                            <li
+                                v-for="rec in recommendDrawerState.room?.recommendations ?? []"
+                                :key="rec.id"
+                                class="border border-slate-200 rounded-lg p-3"
+                            >
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-medium text-slate-800 truncate">{{ rec.name }}</p>
+                                        <p class="text-[0.7rem] text-slate-400">
+                                            {{ rec.room_category || rec.room_type }} · Capacity {{ rec.capacity }}
+                                            <span v-if="rec.department"> · {{ rec.department }}</span>
+                                        </p>
+                                    </div>
+                                    <div class="flex items-center gap-2 shrink-0">
+                                        <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
+                                        <span class="text-xs font-semibold text-slate-500">{{ rec.score }}%</span>
+                                    </div>
+                                </div>
+                                <ProgressBar
+                                    :value="rec.score"
+                                    :showValue="false"
+                                    style="height: 5px"
+                                    :pt="{ value: { style: { backgroundColor: scoreColor(rec.score) } } }"
+                                    class="my-2"
+                                />
+                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5 mb-2">
+                                    <li
+                                        v-for="reason in rec.reasons"
+                                        :key="reason.label"
+                                        class="text-[0.7rem] flex items-center gap-1"
+                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                    >
+                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                    </li>
+                                </ul>
+                                <div class="flex justify-end">
+                                    <Button label="Apply" text size="small" @click="applyRoomRecommendationFromDrawer(recommendDrawerRow, rec)" />
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <Divider />
+
+                    <!-- Time Recommendations -->
+                    <div>
+                        <p class="text-sm font-semibold text-slate-700 mb-2">
+                            <i class="pi pi-clock mr-1 text-indigo-500"></i>Top Time Recommendations
+                        </p>
+                        <p v-if="recommendDrawerState.time?.message" class="text-sm text-slate-500">
+                            {{ recommendDrawerState.time.message }}
+                        </p>
+                        <ul v-else class="flex flex-col gap-3">
+                            <li
+                                v-for="(rec, idx) in recommendDrawerState.time?.recommendations ?? []"
+                                :key="idx"
+                                class="border border-slate-200 rounded-lg p-3"
+                            >
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-medium text-slate-800 truncate">
+                                            {{ formatDays(rec.days) }} · {{ formatTimeRange(rec.start_time, rec.end_time) }}
+                                        </p>
+                                        <p class="text-[0.7rem] text-emerald-600">No conflicts detected</p>
+                                    </div>
+                                    <div class="flex items-center gap-2 shrink-0">
+                                        <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
+                                        <span class="text-xs font-semibold text-slate-500">{{ rec.score }}%</span>
+                                    </div>
+                                </div>
+                                <ProgressBar
+                                    :value="rec.score"
+                                    :showValue="false"
+                                    style="height: 5px"
+                                    :pt="{ value: { style: { backgroundColor: scoreColor(rec.score) } } }"
+                                    class="my-2"
+                                />
+                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5 mb-2">
+                                    <li
+                                        v-for="reason in rec.reasons"
+                                        :key="reason.label"
+                                        class="text-[0.7rem] flex items-center gap-1 text-emerald-600"
+                                    >
+                                        <i class="pi pi-check-circle"></i>{{ reason.label }}
+                                    </li>
+                                </ul>
+                                <div class="flex justify-end">
+                                    <Button label="Apply" text size="small" @click="applyTimeRecommendationFromDrawer(recommendDrawerRow, rec)" />
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </template>
+
+                <p class="text-xs text-slate-400 border-t border-slate-100 pt-3">
+                    <i class="pi pi-info-circle mr-1"></i>Recommendations are suggestions only. Applying one only fills in the
+                    scheduling table below — click <span class="font-medium">Save Schedule</span> to persist it.
+                </p>
+            </div>
+        </Drawer>
 
         <!-- Add Subject Dialog -->
         <Dialog

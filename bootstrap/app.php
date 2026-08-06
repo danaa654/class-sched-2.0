@@ -16,5 +16,14 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Belt-and-suspenders alongside the Route::fallback() in web.php:
+        // any 404 that still slips through (e.g. a route with a parameter
+        // that doesn't resolve, like /subjects/999) gets redirected
+        // instead of showing Laravel's raw "404 | NOT FOUND" page.
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, \Illuminate\Http\Request $request) {
+            if (! $request->expectsJson()) {
+                return redirect(auth()->check() ? route('dashboard') : route('login'))
+                    ->with('error', 'That page could not be found.');
+            }
+        });
     })->create();

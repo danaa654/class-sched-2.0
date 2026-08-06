@@ -24,6 +24,7 @@ const props = defineProps({
         default: () => ({ subject_search: '' }),
     },
     majors: { type: Array, default: () => [] },
+    roomCategories: { type: Array, default: () => [] },
 });
 
 const toast = useToast();
@@ -109,6 +110,7 @@ const subjectForm = useForm({
     units: 0,
     lecture_hours: 0,
     laboratory_hours: 0,
+    preferred_room_category: null,
     is_active: true,
     description: '',
 });
@@ -140,6 +142,7 @@ const openEdit = (subject) => {
     subjectForm.units = subject.units;
     subjectForm.lecture_hours = subject.lecture_hours;
     subjectForm.laboratory_hours = subject.laboratory_hours;
+    subjectForm.preferred_room_category = subject.preferred_room_category ?? null;
     subjectForm.is_active = subject.is_active;
     subjectForm.description = subject.description ?? '';
     addSubjectVisible.value = true;
@@ -309,6 +312,11 @@ const onDeleteSubject = (subject) => {
                         <Column header="Lab Hours" style="width: 8rem">
                             <template #body="{ data }">
                                 {{ data.laboratory_hours }}
+                            </template>
+                        </Column>
+                        <Column header="Preferred Room" style="width: 12rem">
+                            <template #body="{ data }">
+                                {{ data.preferred_room_category || '—' }}
                             </template>
                         </Column>
                         <Column header="Status" style="width: 9rem">
@@ -514,6 +522,28 @@ const onDeleteSubject = (subject) => {
                     />
                     <small v-if="subjectForm.errors.laboratory_hours" class="text-red-500">
                         {{ subjectForm.errors.laboratory_hours }}
+                    </small>
+                </div>
+
+                <!-- Preferred Room Category -->
+                <div class="flex flex-col gap-1 sm:col-span-2">
+                    <label for="preferred_room_category" class="text-sm font-medium text-slate-700">
+                        Preferred Room Category
+                    </label>
+                    <Select
+                        id="preferred_room_category"
+                        v-model="subjectForm.preferred_room_category"
+                        :options="roomCategories"
+                        placeholder="e.g. Computer Laboratory, Gymnasium, Classroom"
+                        showClear
+                        :invalid="!!subjectForm.errors.preferred_room_category"
+                        class="w-full"
+                    />
+                    <small class="text-slate-400">
+                        Drives Room Recommendations for this subject (e.g. Computer Programming → Computer Laboratory).
+                    </small>
+                    <small v-if="subjectForm.errors.preferred_room_category" class="text-red-500">
+                        {{ subjectForm.errors.preferred_room_category }}
                     </small>
                 </div>
 

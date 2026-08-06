@@ -99,7 +99,109 @@ class RecommendationService
 
         $time = $this->recommendTimes($subject, $section, $topFacultyId, $topRoomId, $sectionSubject);
 
-        return compact('faculty', 'room', 'time');
+        // Combined suggestions reuse the Faculty/Room lists already
+        // computed above (no re-querying) and reuse recommendTimes()
+        // — and therefore ScheduleConflictService — for every
+        // Faculty/Room pairing, so a Combined Recommendation can never
+        // disagree with the individual Faculty/Room/Time lists or with
+        // what happens when the Registrar actually saves.
+        $combined = $this->buildCombinedRecommendations(
+            $subject, $section, $faculty['recommendations'], $room['recommendations'], $sectionSubject
+        );
+
+        return compact('faculty', 'room', 'time', 'combined');
+    }
+
+    private const MAX_COMBINED_RESULTS = 5;
+
+    private const COMBINED_CANDIDATE_FACULTY = 3;
+
+    private const COMBINED_CANDIDATE_ROOMS = 3;
+
+    /**
+     * COMBINED RECOMMENDATION.
+     *
+     * Pairs the top-ranked Faculty with the top-ranked Rooms and, for
+     * each pairing, asks recommendTimes() (which itself calls
+     * ScheduleConflictService) for the single best conflict-free Time
+     * slot for that exact Faculty + Room combination. Pairings with no
+     * available Time slot are simply dropped — a Combined
+     * Recommendation is never shown unless it is fully conflict-free
+     * across Faculty, Room, Section, and Time simultaneously.
+     */
+    private function buildCombinedRecommendations(
+        Subject $subject,
+        Section $section,
+        array $facultyList,
+        array $roomList,
+        ?SectionSubject $current = null
+    ): array {
+        if (empty($facultyList) || empty($roomList)) {
+            return ['recommendations' => [], 'message' => 'Not enough qualified faculty or available rooms to build combined suggestions.'];
+        }
+
+        $combos = [];
+
+        foreach (array_slice($facultyList, 0, self::COMBINED_CANDIDATE_FACULTY) as $facultyRec) {
+            foreach (array_slice($roomList, 0, self::COMBINED_CANDIDATE_ROOMS) as $roomRec) {
+                $timeResult = $this->recommendTimes($subject, $section, $facultyRec['id'], $roomRec['id'], $current);
+                $bestTime = $timeResult['recommendations'][0] ?? null;
+
+                if (! $bestTime) {
+                    // No conflict-free slot exists for this exact
+                    // Faculty + Room pairing — never surfaced.
+                    continue;
+                }
+
+                $combinedScore = (int) round(($facultyRec['score'] + $roomRec['score'] + $bestTime['score']) / 3);
+
+                $combos[] = [
+                    'faculty' => [
+                        'id' => $facultyRec['id'],
+                        'name' => $facultyRec['name'],
+                        'score' => $facultyRec['score'],
+                    ],
+                    'room' => [
+                        'id' => $roomRec['id'],
+                        'name' => $roomRec['name'],
+                        'score' => $roomRec['score'],
+                    ],
+                    'time' => [
+                        'days' => $bestTime['days'],
+                        'start_time' => $bestTime['start_time'],
+                        'end_time' => $bestTime['end_time'],
+                        'score' => $bestTime['score'],
+                    ],
+                    'score' => $combinedScore,
+                    'score_max' => 100,
+                    'conflict' => null,
+                ];
+            }
+        }
+
+        if (empty($combos)) {
+            return ['recommendations' => [], 'message' => 'No fully conflict-free combined schedule could be generated.'];
+        }
+
+        // RANK — highest combined score first; ties broken by the
+        // higher-scoring Faculty pick (units/qualification carry more
+        // weight than Room fit for the Registrar's purposes).
+        usort($combos, function (array $a, array $b) {
+            if ($a['score'] !== $b['score']) {
+                return $b['score'] <=> $a['score'];
+            }
+
+            return $b['faculty']['score'] <=> $a['faculty']['score'];
+        });
+
+        $combos = array_slice($combos, 0, self::MAX_COMBINED_RESULTS);
+
+        foreach ($combos as &$c) {
+            $c['confidence'] = $this->confidenceFromScore($c['score']);
+        }
+        unset($c);
+
+        return ['recommendations' => $combos, 'message' => null];
     }
 
     /**
@@ -304,67 +406,134 @@ class RecommendationService
     }
 
     /**
-     * ROOM RECOMMENDATION SCORE (100 points):
+     * ROOM RECOMMENDATION SCORE (100 points) — Prompt 8.8.
      *
-     *   1. Correct room type for the subject ............ 40 pts
-     *   2. Enough capacity for the section ............... 30 pts
-     *   3. Currently available (no conflict) ............. 20 pts
-     *   4. Fewest conflicts (tie-breaker bonus) ........... 10 pts
+     *   1. Preferred Room Category matches the Subject ... 40 pts
+     *      e.g. "Computer Programming" -> "Computer Laboratory",
+     *      "PE" -> "Gymnasium". Falls back to the coarse
+     *      Lecture/Laboratory room_type match when either the
+     *      Subject or the Room hasn't been given a fine-grained
+     *      category yet, so older data doesn't just score zero.
+     *   2. Room capacity is sufficient for the Section ...... 25 pts
+     *   3. Room is currently available (no conflict) ........ 20 pts
+     *   4. Same College or Department as the Section ........ 10 pts
+     *   5. Closest capacity match (avoids oversized rooms) ... 5 pts
      *
-     * Only Active rooms are considered. Ranked by score, then by the
-     * room whose capacity is closest to (but never under) what's
-     * needed, so a 300-seat hall never outranks a right-sized room.
+     * Only Active rooms are considered. Never assigns anything —
+     * this only ranks and explains; the Registrar always clicks
+     * Apply (or doesn't) themselves.
      */
-    private const ROOM_POINTS_TYPE_MATCH = 40;
+    private const ROOM_POINTS_CATEGORY_MATCH = 40;
 
-    private const ROOM_POINTS_CAPACITY_OK = 30;
+    private const ROOM_POINTS_CAPACITY_OK = 25;
 
     private const ROOM_POINTS_AVAILABLE = 20;
 
-    private const ROOM_POINTS_FEWEST_CONFLICTS = 10;
+    private const ROOM_POINTS_SAME_DEPARTMENT_OR_COLLEGE = 10;
+
+    private const ROOM_POINTS_CLOSEST_CAPACITY = 5;
 
     public function recommendRooms(Subject $subject, Section $section, ?SectionSubject $current = null): array
     {
+        $section->loadMissing('major.department');
+
         $wantsLaboratory = (int) $subject->laboratory_hours > 0;
         $preferredType = $wantsLaboratory ? 'Laboratory' : 'Lecture';
+        $preferredCategory = $subject->preferred_room_category;
+
+        $sectionDepartmentId = $section->major?->department_id;
+        $sectionCollegeId = $section->major?->department?->college_id;
 
         $capacityNeeded = $current?->capacity ?? $section->estimated_students ?? 0;
 
-        $rooms = Room::query()->where('status', 'Active')->get();
+        $rooms = Room::query()->where('status', 'Active')->with(['department', 'college'])->get();
 
         if ($rooms->isEmpty()) {
             return ['recommendations' => [], 'message' => 'No active rooms found.'];
         }
 
-        $ranked = $rooms->map(function (Room $room) use ($preferredType, $capacityNeeded, $current) {
-            $typeMatch = $room->room_type === $preferredType;
+        // Used for the Closest Capacity Match tie-breaker — the room
+        // whose capacity is nearest to (but never under) what's
+        // needed gets the full 5 points; every other qualifying room
+        // is scaled down from there so a needlessly huge room never
+        // outranks a right-sized one.
+        $eligibleCapacities = $rooms
+            ->filter(fn (Room $room) => ! $capacityNeeded || $room->capacity >= $capacityNeeded)
+            ->pluck('capacity');
+        $closestCapacity = $eligibleCapacities->isNotEmpty() ? $eligibleCapacities->min() : null;
+
+        $ranked = $rooms->map(function (Room $room) use (
+            $preferredType,
+            $preferredCategory,
+            $sectionDepartmentId,
+            $sectionCollegeId,
+            $capacityNeeded,
+            $closestCapacity,
+            $current,
+        ) {
+            // 1. Category match — prefer the fine-grained category;
+            // fall back to the coarse Lecture/Laboratory room_type
+            // when either side hasn't set a category yet.
+            if ($preferredCategory && $room->room_category) {
+                $categoryMatch = $room->room_category === $preferredCategory;
+            } else {
+                $categoryMatch = $room->room_type === $preferredType;
+            }
+
+            // 2. Capacity sufficient
             $capacityOk = $capacityNeeded ? $room->capacity >= $capacityNeeded : true;
+
+            // 3. Availability (no conflict)
             $conflictCount = $this->roomConflictCount($room, $current);
             $available = $conflictCount === 0;
 
+            // 4. Same College or Department as the Section
+            $sameDepartment = $sectionDepartmentId && $room->department_id
+                && $room->department_id === $sectionDepartmentId;
+            $sameCollege = $sectionCollegeId && $room->college_id
+                && $room->college_id === $sectionCollegeId;
+            $sameDepartmentOrCollege = $sameDepartment || $sameCollege;
+
+            // 5. Closest capacity match — only meaningful among rooms
+            // that already satisfy criterion 2.
+            $closestCapacityPoints = 0;
+            if ($capacityOk && $closestCapacity !== null && $room->capacity > 0) {
+                // Full points at the closest capacity, linearly
+                // tapering to 0 as the room gets proportionally larger
+                // than necessary — an 800-seat hall for a 30-seat
+                // class scores near 0 here even though it "fits".
+                $ratio = $closestCapacity / $room->capacity;
+                $closestCapacityPoints = (int) round(self::ROOM_POINTS_CLOSEST_CAPACITY * $ratio);
+            }
+
             $points = [
-                'type_match' => $typeMatch ? self::ROOM_POINTS_TYPE_MATCH : 0,
+                'category_match' => $categoryMatch ? self::ROOM_POINTS_CATEGORY_MATCH : 0,
                 'capacity_ok' => $capacityOk ? self::ROOM_POINTS_CAPACITY_OK : 0,
                 'available' => $available ? self::ROOM_POINTS_AVAILABLE : 0,
-                'fewest_conflicts' => $conflictCount === 0 ? self::ROOM_POINTS_FEWEST_CONFLICTS : 0,
+                'same_department_or_college' => $sameDepartmentOrCollege ? self::ROOM_POINTS_SAME_DEPARTMENT_OR_COLLEGE : 0,
+                'closest_capacity' => $closestCapacityPoints,
             ];
 
             $score = array_sum($points);
 
             $reasons = [
-                ['label' => 'Correct Room Type', 'met' => $typeMatch],
+                ['label' => $categoryMatch ? 'Correct Room Type' : 'Wrong Room Type', 'met' => $categoryMatch],
                 ['label' => 'Enough Capacity', 'met' => $capacityOk],
-                ['label' => 'Currently Available', 'met' => $available],
-                ['label' => 'Fewest Conflicts', 'met' => $conflictCount === 0],
+                ['label' => 'Available', 'met' => $available],
+                ['label' => 'Same Department', 'met' => $sameDepartmentOrCollege],
             ];
 
             return [
                 'id' => $room->id,
                 'name' => "{$room->room_code} — {$room->room_name}",
                 'room_type' => $room->room_type,
+                'room_category' => $room->room_category,
+                'department' => $room->department?->name,
+                'college' => $room->college?->name,
                 'capacity' => $room->capacity,
-                'type_match' => $typeMatch,
+                'category_match' => $categoryMatch,
                 'capacity_ok' => $capacityOk,
+                'same_department_or_college' => $sameDepartmentOrCollege,
                 'conflict_count' => $conflictCount,
                 'score' => $score,
                 'score_max' => 100,
