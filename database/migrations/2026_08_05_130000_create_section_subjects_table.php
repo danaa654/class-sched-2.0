@@ -41,6 +41,19 @@ return new class extends Migration
             $table->time('end_time')->nullable();
             $table->enum('status', ['Draft', 'Scheduled', 'Conflict'])->default('Draft');
 
+            // Auto Generate Schedule (Prompt 8.9) — set when the Faculty,
+            // Room, and Time on this row came from AutoScheduleService
+            // rather than a manual edit. Lets "Clear Generated Schedule"
+            // and "Regenerate" safely touch only rows the engine itself
+            // produced, never anything the Registrar assigned by hand.
+            $table->boolean('is_auto_generated')->default(false);
+
+            // Recommendation Score breakdown (Faculty/Room/Time scores +
+            // reasons) captured at the moment this row was auto-generated,
+            // so the review panel can redisplay "why" without re-running
+            // the engine. Cleared whenever the row is cleared/edited.
+            $table->json('auto_generated_meta')->nullable();
+
             $table->text('remarks')->nullable();
             $table->timestamps();
 

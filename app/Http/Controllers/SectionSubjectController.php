@@ -14,6 +14,7 @@ use App\Models\Room;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Subject;
+use App\Services\AutoScheduleService;
 use App\Services\EDPCodeService;
 use App\Services\RecommendationService;
 use App\Services\ScheduleConflictService;
@@ -29,7 +30,8 @@ class SectionSubjectController extends Controller
     public function __construct(
         private readonly EDPCodeService $edpCodeService,
         private readonly ScheduleConflictService $conflictService,
-        private readonly RecommendationService $recommendationService
+        private readonly RecommendationService $recommendationService,
+        private readonly AutoScheduleService $autoScheduleService
     ) {
     }
 
@@ -277,6 +279,11 @@ class SectionSubjectController extends Controller
             'end_time' => $endTime,
             'capacity' => $capacity,
             'status' => $status,
+            // A hand-edited row is no longer purely "Auto Generated" —
+            // untag it so Clear Generated Schedule / Regenerate never
+            // touch what the Registrar just chose themselves.
+            'is_auto_generated' => false,
+            'auto_generated_meta' => null,
         ]);
 
         return response()->json([
@@ -298,6 +305,152 @@ class SectionSubjectController extends Controller
         abort_unless($subject->section_id === $section->id, 404);
 
         return response()->json($this->recommendationService->recommend($subject));
+    }
+
+    /**
+     * Faculty Recommendation Selector — Prompt 8.11.
+     *
+     * Backs the interactive dropdown on the Auto Generate review
+     * panel. With no `search` query param it just returns the
+     * recommended pool (identical to what Auto Generate itself
+     * picked from); with one, it also returns a global search across
+     * every Active faculty member so the Registrar can intentionally
+     * pick someone outside the recommended list.
+     */
+    public function facultyOptions(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $subject->loadMissing(['subject', 'section.major.department']);
+
+        return response()->json($this->recommendationService->facultyOptionsForSelector(
+            $subject->subject,
+            $subject->section,
+            $subject,
+            $request->query('search')
+        ));
+    }
+
+    /**
+     * Faculty Recommendation Selector — Manual Override (Prompt 8.11).
+     *
+     * Applies the Registrar's faculty pick to this row IMMEDIATELY
+     * (no need to leave or close the Auto Generate modal) and returns
+     * the recomputed Live Score/badge/reasons for it — including a
+     * "Manual Override" explanation when the pick falls outside every
+     * recommended tier. Room/Days/Time are left exactly as Auto
+     * Generate produced them; only Faculty and its scoring metadata
+     * change. The row keeps is_auto_generated = true / Status
+     * 'Draft' — it's still reviewed by "Accept All & Save" like the
+     * rest of the panel, it just now reflects the Registrar's choice.
+     */
+    public function overrideFaculty(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $validated = $request->validate([
+            'faculty_id' => ['required', 'integer', 'exists:faculties,id'],
+        ]);
+
+        $subject->loadMissing(['subject', 'section.major.department']);
+
+        $faculty = Faculty::query()->where('status', 'Active')->findOrFail($validated['faculty_id']);
+
+        $scored = $this->recommendationService->scoreArbitraryFaculty(
+            $faculty,
+            $subject->subject,
+            $subject->section,
+            $subject
+        );
+
+        $meta = $subject->auto_generated_meta ?? [];
+        $meta['faculty'] = [
+            'id' => $scored['id'],
+            'name' => $scored['name'],
+            'score' => $scored['score'],
+            'confidence' => $scored['confidence'],
+            'reasons' => $scored['reasons'],
+            'tier' => $scored['tier'],
+            'badge' => $scored['badge'],
+            'manual_override' => $scored['manual_override'],
+            'override_reason' => $scored['override_reason'],
+            'selected_by_college_match' => $scored['selected_by_college_match'],
+        ];
+
+        if (isset($meta['room']['score'], $meta['time']['score'])) {
+            $meta['overall_score'] = (int) round(($scored['score'] + $meta['room']['score'] + $meta['time']['score']) / 3);
+        }
+
+        $subject->update([
+            'faculty_id' => $faculty->id,
+            'auto_generated_meta' => $meta,
+        ]);
+
+        return response()->json([
+            'section_subject_id' => $subject->id,
+            'faculty' => $scored,
+            'overall_score' => $meta['overall_score'] ?? $scored['score'],
+        ]);
+    }
+
+    /**
+     * "⚡ Auto Generate Schedule" (Prompt 8.9).
+     *
+     * Runs AutoScheduleService for every currently unscheduled subject
+     * in this Section — Faculty, Room, and Time are chosen and WRITTEN
+     * immediately (Status stays 'Draft', is_auto_generated = true) so
+     * later subjects in the same run correctly see earlier ones as
+     * conflicts via the same ScheduleConflictService the manual
+     * workspace uses. Nothing here ever touches a row that already has
+     * a Faculty/Room/Days/Time — those are left completely alone.
+     *
+     * The Registrar still reviews the result and must click
+     * "Save Schedule" to finalize it (or "Clear Generated Schedule" /
+     * "Regenerate" to discard/retry) — see updateSchedule() and
+     * batchUpdateSchedule(), which strip the is_auto_generated flag the
+     * moment a row is actually saved by hand.
+     */
+    public function autoGenerate(Section $section): JsonResponse
+    {
+        $summary = $this->autoScheduleService->generate($section);
+
+        return response()->json([
+            ...$summary,
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room'])->get(),
+        ]);
+    }
+
+    /**
+     * "Regenerate" — discards every previously Auto Generated row
+     * (never manually-assigned ones) and runs Auto Generate again from
+     * a clean slate.
+     */
+    public function regenerateSchedule(Section $section): JsonResponse
+    {
+        $summary = $this->autoScheduleService->regenerate($section);
+
+        return response()->json([
+            ...$summary,
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room'])->get(),
+        ]);
+    }
+
+    /**
+     * "Clear Generated Schedule" — reverts every Auto Generated row
+     * back to an empty schedule slot. Manually assigned rows are never
+     * touched.
+     */
+    public function clearAutoGenerated(Section $section): JsonResponse
+    {
+        $cleared = $this->autoScheduleService->clear($section);
+
+        return response()->json([
+            'cleared' => $cleared,
+            'message' => $cleared > 0
+                ? "{$cleared} auto-generated ".($cleared === 1 ? 'schedule was' : 'schedules were')." cleared."
+                : 'No auto-generated schedules to clear.',
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room'])->get(),
+        ]);
     }
 
     /**
@@ -402,6 +555,11 @@ class SectionSubjectController extends Controller
                     'end_time' => $endTime,
                     'capacity' => $capacity,
                     'status' => $status,
+                    // "Save Schedule" finalizes any Auto Generated rows
+                    // it saves — once saved they're a normal schedule,
+                    // no longer a pending suggestion to clear/regenerate.
+                    'is_auto_generated' => false,
+                    'auto_generated_meta' => null,
                 ]);
             }
 

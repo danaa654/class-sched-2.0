@@ -39,6 +39,8 @@ class SectionSubject extends Model
         'status',
         'remarks',
         'edp_code',
+        'is_auto_generated',
+        'auto_generated_meta',
     ];
 
     /**
@@ -48,6 +50,8 @@ class SectionSubject extends Model
     {
         return [
             'capacity' => 'integer',
+            'is_auto_generated' => 'boolean',
+            'auto_generated_meta' => 'array',
         ];
     }
 
