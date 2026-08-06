@@ -1646,6 +1646,12 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                                 severity="warning"
                                                                 class="!text-[0.65rem]"
                                                             />
+                                                            <Tag
+                                                                v-if="rec.selected_by_general_education_match"
+                                                                value="Selected by General Education Match"
+                                                                severity="warning"
+                                                                class="!text-[0.65rem]"
+                                                            />
                                                             <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
                                                         </div>
                                                     </div>
@@ -1965,6 +1971,12 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                 <Tag
                                     v-if="rec.selected_by_college_match"
                                     value="Selected by College Match"
+                                    severity="warning"
+                                    class="!text-[0.65rem] mt-1"
+                                />
+                                <Tag
+                                    v-if="rec.selected_by_general_education_match"
+                                    value="Selected by General Education Match"
                                     severity="warning"
                                     class="!text-[0.65rem] mt-1"
                                 />
