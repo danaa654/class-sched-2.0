@@ -6,6 +6,12 @@ import Button from 'primevue/button';
 const page = usePage();
 const user = computed(() => page.props.auth?.user);
 
+// User Management (create/edit accounts) is Administrator only —
+// Registrar, Dean, OIC and Assistant Dean never see this section, since
+// the backend also blocks them from those routes directly.
+const authRoles = computed(() => page.props.auth?.roles ?? []);
+const isAdministrator = computed(() => authRoles.value.includes('Administrator'));
+
 // Currently Active Academic Term (School Year + Semester), shared on
 // every page by HandleInertiaRequests — shown in the top header so
 // it's visible no matter where in the app the user is.
@@ -110,7 +116,7 @@ const isActive = (routeName) => {
                 </Link>
 
                 <!-- User Management (Administrator only) -->
-                <div class="pt-3">
+                <div v-if="isAdministrator" class="pt-3">
                     <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
                         User Management
                     </p>

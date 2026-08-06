@@ -49,6 +49,19 @@ class LoginRequest extends FormRequest
             ]);
         }
 
+        // Credentials were valid, but a deactivated account must never
+        // get a session. Immediately undo the login and surface the
+        // same generic failure message a bad password would give — an
+        // Inactive account shouldn't reveal that the email/password
+        // combination was otherwise correct.
+        if (Auth::user()->status === 'Inactive') {
+            Auth::logout();
+
+            throw ValidationException::withMessages([
+                'email' => 'This account has been deactivated. Please contact your Administrator.',
+            ]);
+        }
+
         RateLimiter::clear($this->throttleKey());
     }
 

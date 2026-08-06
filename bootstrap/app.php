@@ -13,6 +13,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
             \App\Http\Middleware\HandleInertiaRequests::class,
+            \App\Http\Middleware\EnsureAccountIsActive::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -24,6 +25,17 @@ return Application::configure(basePath: dirname(__DIR__))
             if (! $request->expectsJson()) {
                 return redirect(auth()->check() ? route('dashboard') : route('login'))
                     ->with('error', 'That page could not be found.');
+            }
+        });
+
+        // Admin-only pages (e.g. User Management) abort(403) for any
+        // other role that reaches them directly by URL. Redirect to the
+        // dashboard with a flash message instead of Laravel's raw
+        // "403 | FORBIDDEN" page, consistent with the 404 handling above.
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException $e, \Illuminate\Http\Request $request) {
+            if (! $request->expectsJson()) {
+                return redirect(auth()->check() ? route('dashboard') : route('login'))
+                    ->with('error', 'You do not have permission to access that page.');
             }
         });
     })->create();

@@ -10,6 +10,7 @@ import ToastService from 'primevue/toastservice';
 import Tooltip from 'primevue/tooltip';
 import Aura from '@primeuix/themes/aura';
 import 'primeicons/primeicons.css';
+import vUppercase from './directives/uppercase';
 
 const appName = import.meta.env.VITE_APP_NAME || 'CLASSLY';
 
@@ -34,6 +35,7 @@ createInertiaApp({
             })
             .use(ToastService)
             .directive('tooltip', Tooltip)
+            .directive('uppercase', vUppercase)
             .mount(el);
     },
     progress: {

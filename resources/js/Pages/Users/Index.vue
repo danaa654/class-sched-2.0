@@ -18,6 +18,13 @@ import Divider from 'primevue/divider';
 import FloatLabel from 'primevue/floatlabel';
 import Checkbox from 'primevue/checkbox';
 import Toast from 'primevue/toast';
+import Tabs from 'primevue/tabs';
+import TabList from 'primevue/tablist';
+import Tab from 'primevue/tab';
+import TabPanels from 'primevue/tabpanels';
+import TabPanel from 'primevue/tabpanel';
+import Menu from 'primevue/menu';
+import Swal from 'sweetalert2';
 
 const props = defineProps({
     users: { type: Array, default: () => [] },
@@ -30,7 +37,7 @@ const toast = useToast();
 const page = usePage();
 
 // Show a toast whenever the backend flashes a success/error message
-// (e.g. right after Create User actually saves).
+// (e.g. right after Create/Edit User actually saves).
 watch(
     () => page.props.flash?.success,
     (message) => {
@@ -50,11 +57,12 @@ watch(
 
 const search = ref('');
 
-/* ------------------------------------------------------------------ */
-/* Add User modal                                                      */
-/* ------------------------------------------------------------------ */
-
-const addUserVisible = ref(false);
+// Only Administrators get the "Manage Account" tab — everyone else on
+// this page (which is itself Administrator-only per the sidebar) still
+// only sees the Users tab.
+const authRoles = computed(() => page.props.auth?.roles ?? []);
+const isAdministrator = computed(() => authRoles.value.includes('Administrator'));
+const activeTab = ref('users');
 
 const roleOptions = [
     { label: 'Administrator', value: 'Administrator' },
@@ -74,15 +82,18 @@ const collegeOptions = computed(() =>
 );
 
 // Only show departments belonging to the selected college.
-const departmentOptions = computed(() => {
-    if (!form.college_id) {
-        return [];
-    }
-
-    return props.departments
-        .filter((department) => department.college_id === form.college_id)
+const departmentOptionsFor = (collegeId) =>
+    props.departments
+        .filter((department) => department.college_id === collegeId)
         .map((department) => ({ label: department.name, value: department.id }));
-});
+
+/* ------------------------------------------------------------------ */
+/* Add User modal                                                      */
+/* ------------------------------------------------------------------ */
+
+const addUserVisible = ref(false);
+
+const departmentOptions = computed(() => departmentOptionsFor(form.college_id));
 
 const form = useForm({
     employee_id: '',
@@ -172,6 +183,193 @@ const onCreateUser = () => {
         },
     });
 };
+
+/* ------------------------------------------------------------------ */
+/* Edit User modal                                                     */
+/* ------------------------------------------------------------------ */
+
+const editUserVisible = ref(false);
+const editingUserId = ref(null);
+
+const editForm = useForm({
+    employee_id: '',
+    role: null,
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    suffix: '',
+    email: '',
+    password: '',
+    password_confirmation: '',
+    college_id: null,
+    department_ids: [],
+    oversees_all_departments: false,
+    status: 'Active',
+});
+
+const editDepartmentOptions = computed(() => departmentOptionsFor(editForm.college_id));
+const editShowCollege = computed(() => rolesRequiringCollege.includes(editForm.role));
+const editShowDepartment = computed(
+    () => rolesRequiringDepartment.includes(editForm.role) && !editForm.oversees_all_departments,
+);
+
+const openEditUser = (user) => {
+    editingUserId.value = user.id;
+    editForm.reset();
+    editForm.clearErrors();
+    editForm.employee_id = user.employeeId;
+    editForm.role = user.role;
+    editForm.first_name = user.firstName ?? '';
+    editForm.middle_name = user.middleName ?? '';
+    editForm.last_name = user.lastName ?? '';
+    editForm.suffix = user.suffix ?? '';
+    editForm.email = user.email;
+    editForm.password = '';
+    editForm.password_confirmation = '';
+    editForm.college_id = user.collegeId ?? null;
+    editForm.department_ids = user.departmentIds ?? [];
+    editForm.oversees_all_departments =
+        user.role === 'OIC' && user.department === 'All Departments';
+    editForm.status = user.status;
+    editUserVisible.value = true;
+};
+
+const closeEditUser = () => {
+    editUserVisible.value = false;
+    editingUserId.value = null;
+    editForm.reset();
+    editForm.clearErrors();
+};
+
+const onUpdateUser = () => {
+    if (!editingUserId.value) return;
+
+    editForm.transform((data) => ({
+        ...data,
+        _method: 'put',
+    })).post(route('users.update', editingUserId.value), {
+        preserveScroll: true,
+        onSuccess: () => {
+            closeEditUser();
+        },
+        onError: () => {
+            toast.add({
+                severity: 'warn',
+                summary: 'Missing information',
+                detail: 'Please check the highlighted fields and try again.',
+                life: 3000,
+            });
+        },
+    });
+};
+
+/* ------------------------------------------------------------------ */
+/* Row actions menu — Deactivate/Activate, Delete                       */
+/* ------------------------------------------------------------------ */
+
+const currentUserId = computed(() => page.props.auth?.user?.id ?? null);
+
+const rowMenuRefs = ref({});
+const setRowMenuRef = (userId) => (el) => {
+    rowMenuRefs.value[userId] = el;
+};
+const toggleRowMenu = (userId, event) => rowMenuRefs.value[userId]?.toggle(event);
+
+const rowMenuItemsFor = (user) => {
+    const isSelf = user.id === currentUserId.value;
+
+    return [
+        {
+            label: user.status === 'Active' ? 'Deactivate' : 'Activate',
+            icon: user.status === 'Active' ? 'pi pi-ban' : 'pi pi-check-circle',
+            disabled: isSelf,
+            command: () => onToggleStatus(user),
+        },
+        {
+            separator: true,
+        },
+        {
+            label: 'Delete',
+            icon: 'pi pi-trash',
+            class: 'text-red-500',
+            disabled: isSelf,
+            command: () => onDeleteUser(user),
+        },
+    ];
+};
+
+const statusForm = useForm({});
+const onToggleStatus = async (user) => {
+    const activating = user.status !== 'Active';
+
+    const result = await Swal.fire({
+        title: activating ? 'Activate this account?' : 'Deactivate this account?',
+        text: activating
+            ? `${user.fullName} will regain access to the system.`
+            : `${user.fullName} will no longer be able to log in.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: activating ? 'Activate' : 'Deactivate',
+        confirmButtonColor: activating ? '#16A34A' : '#DC2626',
+        cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
+    statusForm.patch(route('users.status', user.id), { preserveScroll: true });
+};
+
+const deleteUserForm = useForm({});
+const onDeleteUser = async (user) => {
+    const result = await Swal.fire({
+        title: 'Delete this account?',
+        text: `${user.fullName} will be permanently removed. This cannot be undone.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Delete',
+        confirmButtonColor: '#DC2626',
+        cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
+    deleteUserForm.delete(route('users.destroy', user.id), { preserveScroll: true });
+};
+
+/* ------------------------------------------------------------------ */
+/* Manage Account tab (Administrator only)                             */
+/* ------------------------------------------------------------------ */
+
+const accountForm = useForm({
+    first_name: page.props.auth?.user?.first_name ?? '',
+    middle_name: page.props.auth?.user?.middle_name ?? '',
+    last_name: page.props.auth?.user?.last_name ?? '',
+    suffix: page.props.auth?.user?.suffix ?? '',
+    email: page.props.auth?.user?.email ?? '',
+    password: '',
+    password_confirmation: '',
+});
+
+const onUpdateAccount = () => {
+    accountForm.transform((data) => ({
+        ...data,
+        _method: 'put',
+    })).post(route('account.update'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            accountForm.password = '';
+            accountForm.password_confirmation = '';
+        },
+        onError: () => {
+            toast.add({
+                severity: 'warn',
+                summary: 'Missing information',
+                detail: 'Please check the highlighted fields and try again.',
+                life: 3000,
+            });
+        },
+    });
+};
 </script>
 
 <template>
@@ -193,67 +391,211 @@ const onCreateUser = () => {
                 </p>
             </div>
 
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #content>
-                    <!-- Top Toolbar -->
-                    <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4">
-                        <template #start>
-                            <span class="relative w-full sm:w-80">
-                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                                <InputText
-                                    v-model="search"
-                                    placeholder="Search by employee ID, name or email"
-                                    class="w-full !pl-9"
-                                />
-                            </span>
-                        </template>
-                        <template #end>
-                            <Button label="Add User" icon="pi pi-plus" @click="openAddUser" />
-                        </template>
-                    </Toolbar>
+            <Tabs v-model:value="activeTab">
+                <TabList>
+                    <Tab value="users">Users</Tab>
+                    <Tab v-if="isAdministrator" value="account">Manage Account</Tab>
+                </TabList>
 
-                    <!-- Users Table -->
-                    <DataTable
-                        :value="users"
-                        class="rounded-xl overflow-hidden"
-                        stripedRows
-                        responsiveLayout="scroll"
-                        :globalFilterFields="['employeeId', 'fullName', 'email']"
-                        :filters="{ global: { value: search, matchMode: 'contains' } }"
-                    >
-                        <template #empty>
-                            <div class="text-center py-10">
-                                <p class="text-slate-500 font-medium">No users found.</p>
-                                <p class="text-sm text-slate-400 mt-1">Create your first account.</p>
-                            </div>
-                        </template>
+                <TabPanels>
+                    <!-- Users Tab -->
+                    <TabPanel value="users">
+                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                            <template #content>
+                                <!-- Top Toolbar -->
+                                <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4">
+                                    <template #start>
+                                        <span class="relative w-full sm:w-80">
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <InputText
+                                                v-model="search"
+                                                placeholder="Search by employee ID, name or email"
+                                                class="w-full !pl-9"
+                                            />
+                                        </span>
+                                    </template>
+                                    <template #end>
+                                        <Button label="Add User" icon="pi pi-plus" @click="openAddUser" />
+                                    </template>
+                                </Toolbar>
 
-                        <Column field="employeeId" header="Employee ID" />
-                        <Column field="fullName" header="Full Name" />
-                        <Column field="email" header="Email" />
-                        <Column field="role" header="Role" />
-                        <Column field="college" header="College" />
-                        <Column field="department" header="Department" />
-                        <Column field="status" header="Status">
-                            <template #body="{ data }">
-                                <Tag
-                                    :value="data.status"
-                                    :severity="data.status === 'Active' ? 'success' : 'secondary'"
-                                />
+                                <!-- Users Table -->
+                                <DataTable
+                                    :value="users"
+                                    class="rounded-xl overflow-hidden"
+                                    stripedRows
+                                    responsiveLayout="scroll"
+                                    :globalFilterFields="['employeeId', 'fullName', 'email']"
+                                    :filters="{ global: { value: search, matchMode: 'contains' } }"
+                                >
+                                    <template #empty>
+                                        <div class="text-center py-10">
+                                            <p class="text-slate-500 font-medium">No users found.</p>
+                                            <p class="text-sm text-slate-400 mt-1">Create your first account.</p>
+                                        </div>
+                                    </template>
+
+                                    <Column field="employeeId" header="Employee ID" />
+                                    <Column field="fullName" header="Full Name" />
+                                    <Column field="email" header="Email" />
+                                    <Column field="role" header="Role" />
+                                    <Column field="college" header="College" />
+                                    <Column field="department" header="Department" />
+                                    <Column field="status" header="Status">
+                                        <template #body="{ data }">
+                                            <Tag
+                                                :value="data.status"
+                                                :severity="data.status === 'Active' ? 'success' : 'secondary'"
+                                            />
+                                        </template>
+                                    </Column>
+                                    <Column header="Actions" style="width: 9rem">
+                                        <template #body="{ data }">
+                                            <div class="flex gap-1">
+                                                <Button
+                                                    icon="pi pi-pencil"
+                                                    text
+                                                    rounded
+                                                    severity="secondary"
+                                                    size="small"
+                                                    @click="openEditUser(data)"
+                                                />
+                                                <Button
+                                                    icon="pi pi-ellipsis-v"
+                                                    text
+                                                    rounded
+                                                    severity="secondary"
+                                                    size="small"
+                                                    @click="toggleRowMenu(data.id, $event)"
+                                                />
+                                                <Menu :ref="setRowMenuRef(data.id)" :model="rowMenuItemsFor(data)" :popup="true" />
+                                            </div>
+                                        </template>
+                                    </Column>
+                                </DataTable>
                             </template>
-                        </Column>
-                        <Column header="Actions" style="width: 9rem">
-                            <template #body>
-                                <div class="flex gap-1">
-                                    <Button icon="pi pi-pencil" text rounded severity="secondary" size="small" />
-                                    <Button icon="pi pi-eye" text rounded severity="secondary" size="small" />
-                                    <Button icon="pi pi-ellipsis-v" text rounded severity="secondary" size="small" />
-                                </div>
+                        </Card>
+                    </TabPanel>
+
+                    <!-- Manage Account Tab (Administrator only) -->
+                    <TabPanel v-if="isAdministrator" value="account">
+                        <Card class="!rounded-2xl border border-slate-100 shadow-sm max-w-2xl">
+                            <template #content>
+                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Manage Account</h2>
+                                <p class="text-sm text-slate-500 mb-5">
+                                    Update your own Administrator profile and password.
+                                </p>
+
+                                <form class="pt-1" autocomplete="off" @submit.prevent="onUpdateAccount">
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                        <FloatLabel variant="on">
+                                            <InputText
+                                                id="accFirstName"
+                                                v-model="accountForm.first_name"
+                                                class="w-full"
+                                                autocomplete="off"
+                                                :invalid="!!accountForm.errors.first_name"
+                                            />
+                                            <label for="accFirstName">First Name *</label>
+                                        </FloatLabel>
+
+                                        <FloatLabel variant="on">
+                                            <InputText
+                                                id="accMiddleName"
+                                                v-model="accountForm.middle_name"
+                                                class="w-full"
+                                                autocomplete="off"
+                                            />
+                                            <label for="accMiddleName">Middle Name</label>
+                                        </FloatLabel>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
+                                        <FloatLabel variant="on">
+                                            <InputText
+                                                id="accLastName"
+                                                v-model="accountForm.last_name"
+                                                class="w-full"
+                                                autocomplete="off"
+                                                :invalid="!!accountForm.errors.last_name"
+                                            />
+                                            <label for="accLastName">Last Name *</label>
+                                        </FloatLabel>
+
+                                        <FloatLabel variant="on">
+                                            <InputText
+                                                id="accSuffix"
+                                                v-model="accountForm.suffix"
+                                                class="w-full"
+                                                autocomplete="off"
+                                            />
+                                            <label for="accSuffix">Suffix</label>
+                                        </FloatLabel>
+                                    </div>
+
+                                    <Divider class="!my-5" />
+
+                                    <div class="grid grid-cols-1 gap-5">
+                                        <FloatLabel variant="on">
+                                            <InputText
+                                                id="accEmail"
+                                                v-model="accountForm.email"
+                                                type="email"
+                                                class="w-full"
+                                                autocomplete="off"
+                                                :invalid="!!accountForm.errors.email"
+                                            />
+                                            <label for="accEmail">Email *</label>
+                                        </FloatLabel>
+                                        <small v-if="accountForm.errors.email" class="text-red-500 -mt-4">{{ accountForm.errors.email }}</small>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
+                                        <FloatLabel variant="on">
+                                            <Password
+                                                id="accPassword"
+                                                v-model="accountForm.password"
+                                                toggleMask
+                                                :feedback="true"
+                                                inputClass="w-full"
+                                                class="w-full"
+                                                autocomplete="new-password"
+                                                :invalid="!!accountForm.errors.password"
+                                            />
+                                            <label for="accPassword">New Password</label>
+                                        </FloatLabel>
+
+                                        <FloatLabel variant="on">
+                                            <Password
+                                                id="accPasswordConfirm"
+                                                v-model="accountForm.password_confirmation"
+                                                toggleMask
+                                                :feedback="false"
+                                                inputClass="w-full"
+                                                class="w-full"
+                                                autocomplete="new-password"
+                                                :invalid="!!accountForm.errors.password"
+                                            />
+                                            <label for="accPasswordConfirm">Confirm New Password</label>
+                                        </FloatLabel>
+                                    </div>
+                                    <small v-if="accountForm.errors.password" class="text-red-500">{{ accountForm.errors.password }}</small>
+                                    <p class="text-xs text-slate-400 mt-1">Leave blank to keep your current password.</p>
+
+                                    <div class="flex justify-end mt-6">
+                                        <Button
+                                            type="submit"
+                                            label="Save Changes"
+                                            icon="pi pi-check"
+                                            :loading="accountForm.processing"
+                                        />
+                                    </div>
+                                </form>
                             </template>
-                        </Column>
-                    </DataTable>
-                </template>
-            </Card>
+                        </Card>
+                    </TabPanel>
+                </TabPanels>
+            </Tabs>
         </div>
 
         <!-- Add User Modal -->
@@ -275,6 +617,7 @@ const onCreateUser = () => {
                         <InputText
                             id="employeeId"
                             v-model="form.employee_id"
+                            v-uppercase
                             class="w-full"
                             autocomplete="off"
                             :invalid="!!form.errors.employee_id"
@@ -309,6 +652,7 @@ const onCreateUser = () => {
                         <InputText
                             id="firstName"
                             v-model="form.first_name"
+                            v-uppercase
                             class="w-full"
                             autocomplete="off"
                             :invalid="!!form.errors.first_name"
@@ -320,6 +664,7 @@ const onCreateUser = () => {
                         <InputText
                             id="middleName"
                             v-model="form.middle_name"
+                            v-uppercase
                             class="w-full"
                             autocomplete="off"
                         />
@@ -333,6 +678,7 @@ const onCreateUser = () => {
                         <InputText
                             id="lastName"
                             v-model="form.last_name"
+                            v-uppercase
                             class="w-full"
                             autocomplete="off"
                             :invalid="!!form.errors.last_name"
@@ -344,6 +690,7 @@ const onCreateUser = () => {
                         <InputText
                             id="suffix"
                             v-model="form.suffix"
+                            v-uppercase
                             class="w-full"
                             autocomplete="off"
                         />
@@ -479,6 +826,236 @@ const onCreateUser = () => {
                     icon="pi pi-check"
                     :loading="form.processing"
                     @click="onCreateUser"
+                />
+            </template>
+        </Dialog>
+
+        <!-- Edit User Modal -->
+        <Dialog
+            v-model:visible="editUserVisible"
+            modal
+            :style="{ width: '800px' }"
+            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :draggable="false"
+        >
+            <template #header>
+                <span class="text-lg font-bold text-[#1E293B]">Edit System User</span>
+            </template>
+
+            <form class="pt-2" autocomplete="off" @submit.prevent="onUpdateUser">
+                <!-- Employee ID / Role -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="editEmployeeId"
+                            v-model="editForm.employee_id"
+                            v-uppercase
+                            class="w-full"
+                            autocomplete="off"
+                            :invalid="!!editForm.errors.employee_id"
+                        />
+                        <label for="editEmployeeId">Employee ID *</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <Select
+                            id="editRole"
+                            v-model="editForm.role"
+                            :options="roleOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="w-full"
+                            :invalid="!!editForm.errors.role"
+                        />
+                        <label for="editRole">Role *</label>
+                    </FloatLabel>
+                </div>
+                <small v-if="editForm.errors.role" class="text-red-500">{{ editForm.errors.role }}</small>
+                <small v-if="editForm.errors.employee_id" class="text-red-500 block">{{ editForm.errors.employee_id }}</small>
+
+                <Divider class="!my-5" />
+
+                <!-- First Name / Middle Name -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="editFirstName"
+                            v-model="editForm.first_name"
+                            v-uppercase
+                            class="w-full"
+                            autocomplete="off"
+                            :invalid="!!editForm.errors.first_name"
+                        />
+                        <label for="editFirstName">First Name *</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="editMiddleName"
+                            v-model="editForm.middle_name"
+                            v-uppercase
+                            class="w-full"
+                            autocomplete="off"
+                        />
+                        <label for="editMiddleName">Middle Name</label>
+                    </FloatLabel>
+                </div>
+
+                <!-- Last Name / Suffix -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="editLastName"
+                            v-model="editForm.last_name"
+                            v-uppercase
+                            class="w-full"
+                            autocomplete="off"
+                            :invalid="!!editForm.errors.last_name"
+                        />
+                        <label for="editLastName">Last Name *</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="editSuffix"
+                            v-model="editForm.suffix"
+                            v-uppercase
+                            class="w-full"
+                            autocomplete="off"
+                        />
+                        <label for="editSuffix">Suffix</label>
+                    </FloatLabel>
+                </div>
+
+                <Divider class="!my-5" />
+
+                <!-- Email -->
+                <div class="grid grid-cols-1 gap-5">
+                    <FloatLabel variant="on">
+                        <InputText
+                            id="editEmail"
+                            v-model="editForm.email"
+                            type="email"
+                            class="w-full"
+                            autocomplete="off"
+                            :invalid="!!editForm.errors.email"
+                        />
+                        <label for="editEmail">Email *</label>
+                    </FloatLabel>
+                    <small v-if="editForm.errors.email" class="text-red-500 -mt-4">{{ editForm.errors.email }}</small>
+                </div>
+
+                <!-- Password / Confirm Password (optional on edit) -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
+                    <FloatLabel variant="on">
+                        <Password
+                            id="editPassword"
+                            v-model="editForm.password"
+                            toggleMask
+                            :feedback="true"
+                            inputClass="w-full"
+                            class="w-full"
+                            autocomplete="new-password"
+                            :invalid="!!editForm.errors.password"
+                        />
+                        <label for="editPassword">New Password</label>
+                    </FloatLabel>
+
+                    <FloatLabel variant="on">
+                        <Password
+                            id="editConfirmPassword"
+                            v-model="editForm.password_confirmation"
+                            toggleMask
+                            :feedback="false"
+                            inputClass="w-full"
+                            class="w-full"
+                            autocomplete="new-password"
+                            :invalid="!!editForm.errors.password"
+                        />
+                        <label for="editConfirmPassword">Confirm New Password</label>
+                    </FloatLabel>
+                </div>
+                <small v-if="editForm.errors.password" class="text-red-500">{{ editForm.errors.password }}</small>
+                <p class="text-xs text-slate-400 mt-1">Leave blank to keep the current password.</p>
+
+                <template v-if="editShowCollege">
+                    <Divider class="!my-5" />
+
+                    <!-- College (Dean / OIC) / Department (OIC only) -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        <FloatLabel variant="on">
+                            <Select
+                                id="editCollege"
+                                v-model="editForm.college_id"
+                                :options="collegeOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                class="w-full"
+                                :invalid="!!editForm.errors.college_id"
+                            />
+                            <label for="editCollege">College *</label>
+                        </FloatLabel>
+
+                        <FloatLabel v-if="editShowDepartment" variant="on">
+                            <MultiSelect
+                                id="editDepartment"
+                                v-model="editForm.department_ids"
+                                :options="editDepartmentOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                display="chip"
+                                class="w-full"
+                                :disabled="!editForm.college_id"
+                                :invalid="!!editForm.errors.department_ids"
+                            />
+                            <label for="editDepartment">Department(s) *</label>
+                        </FloatLabel>
+                    </div>
+                    <small v-if="editForm.errors.department_ids" class="text-red-500">{{ editForm.errors.department_ids }}</small>
+
+                    <!-- OIC scope: whole college vs a specific subset of departments -->
+                    <div v-if="rolesRequiringDepartment.includes(editForm.role)" class="flex items-center gap-2 mt-4">
+                        <Checkbox
+                            id="editOverseesAllDepartments"
+                            v-model="editForm.oversees_all_departments"
+                            binary
+                            :disabled="!editForm.college_id"
+                        />
+                        <label for="editOverseesAllDepartments" class="text-sm text-slate-600">
+                            Oversees all departments in this college
+                        </label>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-1" v-if="editShowDepartment">
+                        Select one or more departments this OIC will cover.
+                    </p>
+                </template>
+
+                <Divider class="!my-5" />
+
+                <!-- Status -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <FloatLabel variant="on">
+                        <Select
+                            id="editStatus"
+                            v-model="editForm.status"
+                            :options="statusOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="w-full"
+                            :invalid="!!editForm.errors.status"
+                        />
+                        <label for="editStatus">Status *</label>
+                    </FloatLabel>
+                </div>
+            </form>
+
+            <template #footer>
+                <Button label="Cancel" text severity="secondary" :disabled="editForm.processing" @click="closeEditUser" />
+                <Button
+                    label="Save Changes"
+                    icon="pi pi-check"
+                    :loading="editForm.processing"
+                    @click="onUpdateUser"
                 />
             </template>
         </Dialog>

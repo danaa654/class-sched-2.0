@@ -34,6 +34,11 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'user' => $request->user(),
+                // Role names for the logged-in user, shared globally so
+                // any page/layout can gate UI (e.g. the admin-only
+                // "Manage Account" tab on User Management) without each
+                // controller having to remember to pass it separately.
+                'roles' => fn () => $request->user()?->getRoleNames() ?? [],
             ],
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),

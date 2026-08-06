@@ -41,6 +41,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('/users', [UsersController::class, 'index'])->name('users');
     Route::post('/users', [UsersController::class, 'store'])->name('users.store');
+    Route::put('/users/{user}', [UsersController::class, 'update'])->name('users.update');
+    Route::patch('/users/{user}/status', [UsersController::class, 'updateStatus'])->name('users.status');
+    Route::delete('/users/{user}', [UsersController::class, 'destroy'])->name('users.destroy');
+    Route::put('/account', [UsersController::class, 'updateAccount'])->name('account.update');
     Route::get('/academic-calendar', [AcademicCalendarController::class, 'index'])->name('academic-calendar');
     Route::post('/school-years', [SchoolYearController::class, 'store'])->name('school-years.store');
     Route::put('/school-years/{schoolYear}', [SchoolYearController::class, 'update'])->name('school-years.update');
