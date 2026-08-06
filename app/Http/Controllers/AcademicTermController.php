@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreAcademicTermRequest;
 use App\Http\Requests\UpdateAcademicTermRequest;
 use App\Models\AcademicTerm;
+use App\Models\SchoolYear;
+use App\Models\Semester;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -15,9 +17,8 @@ class AcademicTermController extends Controller
     /**
      * Display academic terms (paginated + searchable).
      *
-     * Not bound to its own route: like School Years and Semesters, the
-     * Academic Calendar page renders School Years, Semesters, and
-     * Academic Terms together in a single Inertia visit, owned by
+     * Not bound to its own route: the Academic Calendar page renders
+     * Academic Terms in a single Inertia visit, owned by
      * AcademicCalendarController@index. Kept here as the natural place
      * this query lives, and reused directly by that controller.
      */
@@ -51,22 +52,52 @@ class AcademicTermController extends Controller
     /**
      * Store a newly created academic term.
      *
-     * The single-Active-record rule is enforced in the AcademicTerm
-     * model's `saved` hook, not here.
+     * The Academic Term form is the single place School Year (Start
+     * Year/End Year), Semester, and Scheduling Preferences are all
+     * entered together. The School Year itself is found-or-created
+     * here from start_year/end_year — the form never exposes a
+     * School Year picker or a separate School Year Add/Edit screen.
+     *
+     * The single-Active-record rule for Academic Term is enforced in
+     * the AcademicTerm model's `saved` hook, not here.
      */
     public function store(StoreAcademicTermRequest $request): RedirectResponse
     {
-        AcademicTerm::create($request->validated());
+        $validated = $request->validated();
+
+        $schoolYear = $this->resolveSchoolYear($validated);
+        $semester = $this->resolveSemester($validated['semester']);
+
+        AcademicTerm::create([
+            'school_year_id' => $schoolYear->id,
+            'semester_id' => $semester->id,
+            'status' => $validated['status'],
+            'remarks' => $validated['remarks'] ?? null,
+        ]);
 
         return redirect()->route('academic-calendar')->with('success', 'Academic term created successfully.');
     }
 
     /**
      * Update the specified academic term.
+     *
+     * Mirrors store(): the School Year (and its Scheduling Preferences)
+     * behind this Academic Term is resolved/updated from the same
+     * submission, then the Academic Term itself is updated.
      */
     public function update(UpdateAcademicTermRequest $request, AcademicTerm $academicTerm): RedirectResponse
     {
-        $academicTerm->update($request->validated());
+        $validated = $request->validated();
+
+        $schoolYear = $this->resolveSchoolYear($validated);
+        $semester = $this->resolveSemester($validated['semester']);
+
+        $academicTerm->update([
+            'school_year_id' => $schoolYear->id,
+            'semester_id' => $semester->id,
+            'status' => $validated['status'],
+            'remarks' => $validated['remarks'] ?? null,
+        ]);
 
         return redirect()->route('academic-calendar')->with('success', 'Academic term updated successfully.');
     }
@@ -90,5 +121,72 @@ class AcademicTermController extends Controller
         $record->restore();
 
         return redirect()->route('academic-calendar')->with('success', 'Academic term restored successfully.');
+    }
+
+    /**
+     * Find the School Year matching the submitted Start Year/End Year
+     * (creating it — Active by default — the first time it's used),
+     * and always sync its Scheduling Preferences to whatever was just
+     * submitted on the Academic Term form. Lunch Break is always
+     * forced to the fixed 12:00 PM - 1:00 PM window regardless of
+     * input (see SchoolYear::LUNCH_BREAK_START/END).
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function resolveSchoolYear(array $validated): SchoolYear
+    {
+        $name = "{$validated['start_year']}-{$validated['end_year']}";
+
+        $schoolYear = SchoolYear::withTrashed()->where('name', $name)->first();
+
+        if (! $schoolYear) {
+            $schoolYear = new SchoolYear();
+            $schoolYear->name = $name;
+            $schoolYear->start_year = $validated['start_year'];
+            $schoolYear->end_year = $validated['end_year'];
+            $schoolYear->status = 'Active';
+        } elseif ($schoolYear->trashed()) {
+            $schoolYear->restore();
+        }
+
+        $schoolYear->class_start_time = $validated['class_start_time'];
+        $schoolYear->class_end_time = $validated['class_end_time'];
+        $schoolYear->time_interval = SchoolYear::DEFAULT_TIME_INTERVAL_MINUTES;
+        $schoolYear->available_days = $validated['available_days'];
+        $schoolYear->lunch_start = SchoolYear::LUNCH_BREAK_START;
+        $schoolYear->lunch_end = SchoolYear::LUNCH_BREAK_END;
+        $schoolYear->save();
+
+        return $schoolYear;
+    }
+
+    /**
+     * Find the Semester matching the submitted name (one of
+     * Semester::NAMES — "1st Semester", "2nd Semester", "Summer"),
+     * creating it the first time it's actually used. There's no
+     * Semester picker/CRUD screen anymore; the dropdown on the
+     * Academic Term form is a fixed list and this is where a real
+     * Semester record gets created behind the scenes on first use.
+     */
+    private function resolveSemester(string $name): Semester
+    {
+        $semester = Semester::withTrashed()->where('name', $name)->first();
+
+        if ($semester) {
+            if ($semester->trashed()) {
+                $semester->restore();
+            }
+
+            return $semester;
+        }
+
+        $defaults = Semester::defaultsFor($name);
+
+        return Semester::create([
+            'name' => $name,
+            'short_name' => $defaults['short_name'],
+            'display_order' => $defaults['display_order'],
+            'status' => 'Active',
+        ]);
     }
 }

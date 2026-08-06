@@ -6,6 +6,20 @@ import Button from 'primevue/button';
 const page = usePage();
 const user = computed(() => page.props.auth?.user);
 
+// Currently Active Academic Term (School Year + Semester), shared on
+// every page by HandleInertiaRequests — shown in the top header so
+// it's visible no matter where in the app the user is.
+const activeAcademicTerm = computed(() => page.props.activeAcademicTerm);
+const activeAcademicTermLabel = computed(() => {
+    const term = activeAcademicTerm.value;
+    if (!term) return null;
+
+    const schoolYear = term.school_year?.name;
+    const semester = term.semester?.name;
+
+    return [schoolYear, semester].filter(Boolean).join(' • ');
+});
+
 const sidebarOpen = ref(true);
 
 const menuItems = [
@@ -47,20 +61,28 @@ const isActive = (routeName) => {
 <template>
     <div class="min-h-screen bg-[#F8FAFC]">
         <!-- Top Navigation Bar -->
-        <header class="h-16 w-full bg-white shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
+        <header class="h-16 w-full bg-[#121358] shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
             <div class="flex items-center gap-4">
                 <button
                     type="button"
-                    class="text-slate-500 hover:text-slate-800 text-xl leading-none"
+                    class="text-slate-300 hover:text-white text-xl leading-none"
                     @click="sidebarOpen = !sidebarOpen"
                 >
                     ☰
                 </button>
-                <span class="text-xl font-bold tracking-tight text-[#1E293B]">CLASSLY</span>
+                <span class="text-xl font-bold tracking-tight text-white">CLASSLY</span>
+                <span
+                    v-if="activeAcademicTermLabel"
+                    class="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-emerald-300 border border-white/10"
+                    title="Currently Active Academic Term"
+                >
+                    <i class="pi pi-calendar text-[11px]"></i>
+                    {{ activeAcademicTermLabel }}
+                </span>
             </div>
 
             <div class="flex items-center gap-4">
-                <span v-if="user" class="text-sm text-slate-500">
+                <span v-if="user" class="text-sm text-slate-300">
                     {{ user.name }}
                 </span>
                 <Link :href="route('logout')" method="post" as="button">
@@ -71,7 +93,7 @@ const isActive = (routeName) => {
 
         <!-- Left Sidebar -->
         <aside
-            class="fixed top-16 left-0 bottom-0 bg-[#0F172A] text-slate-200 overflow-y-auto transition-all duration-200 z-20"
+            class="fixed top-16 left-0 bottom-0 bg-[#121358] text-slate-200 overflow-y-auto transition-all duration-200 z-20"
             :class="sidebarOpen ? 'w-[260px]' : 'w-0 overflow-hidden'"
         >
             <nav class="py-4 px-2 space-y-1 w-[260px]">

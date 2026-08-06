@@ -63,6 +63,16 @@ class SchoolYearController extends Controller
             'start_year' => $validated['start_year'],
             'end_year' => $validated['end_year'],
             'status' => $validated['status'],
+            // Scheduling Preferences — read by the Auto Schedule AI
+            // from the Active School Year. Lunch Break is always the
+            // fixed 12:00 PM - 1:00 PM window regardless of what's
+            // stored here (see SchoolYear::LUNCH_BREAK_START/END).
+            'class_start_time' => $validated['class_start_time'],
+            'class_end_time' => $validated['class_end_time'],
+            'time_interval' => $validated['time_interval'],
+            'available_days' => $validated['available_days'],
+            'lunch_start' => SchoolYear::LUNCH_BREAK_START,
+            'lunch_end' => SchoolYear::LUNCH_BREAK_END,
         ]);
 
         return redirect()->route('academic-calendar')->with('success', 'School year created successfully.');
@@ -80,6 +90,16 @@ class SchoolYearController extends Controller
             'start_year' => $validated['start_year'],
             'end_year' => $validated['end_year'],
             'status' => $validated['status'],
+            // Scheduling Preferences — read by the Auto Schedule AI
+            // from the Active School Year. Lunch Break is always the
+            // fixed 12:00 PM - 1:00 PM window regardless of what's
+            // stored here (see SchoolYear::LUNCH_BREAK_START/END).
+            'class_start_time' => $validated['class_start_time'],
+            'class_end_time' => $validated['class_end_time'],
+            'time_interval' => $validated['time_interval'],
+            'available_days' => $validated['available_days'],
+            'lunch_start' => SchoolYear::LUNCH_BREAK_START,
+            'lunch_end' => SchoolYear::LUNCH_BREAK_END,
         ]);
 
         return redirect()->route('academic-calendar')->with('success', 'School year updated successfully.');

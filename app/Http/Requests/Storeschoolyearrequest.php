@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\SchoolYear;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -27,6 +28,31 @@ class StoreSchoolYearRequest extends FormRequest
             'start_year' => ['required', 'integer'],
             'end_year' => ['required', 'integer', 'gt:start_year'],
             'status' => ['required', Rule::in(['Active', 'Inactive'])],
+
+            // Scheduling Preferences — read by the Auto Schedule AI
+            // from the Active School Year (see SchoolYear::active()).
+            'class_start_time' => ['required', 'date_format:H:i'],
+            'class_end_time' => ['required', 'date_format:H:i', 'after:class_start_time'],
+            'time_interval' => ['required', 'integer', Rule::in(SchoolYear::AVAILABLE_TIME_INTERVALS)],
+            'available_days' => ['required', 'array', 'min:1'],
+            'available_days.*' => [Rule::in(SchoolYear::ALL_DAYS)],
+        ];
+    }
+
+    /**
+     * Get custom messages for validator errors.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'class_start_time.required' => 'Class Start Time is required.',
+            'class_end_time.required' => 'Class End Time is required.',
+            'class_end_time.after' => 'Class End Time must be later than Class Start Time.',
+            'time_interval.required' => 'Time Interval is required.',
+            'available_days.required' => 'Please select at least one Class Day.',
+            'available_days.min' => 'Please select at least one Class Day.',
         ];
     }
 
@@ -54,7 +80,7 @@ class StoreSchoolYearRequest extends FormRequest
             if (is_numeric($startYear) && is_numeric($endYear)) {
                 $name = "{$startYear}-{$endYear}";
 
-                $exists = \App\Models\SchoolYear::withTrashed()->where('name', $name)->exists();
+                $exists = SchoolYear::withTrashed()->where('name', $name)->exists();
 
                 if ($exists) {
                     $validator->errors()->add('start_year', "School Year {$name} already exists.");

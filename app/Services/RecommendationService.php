@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\SchoolYear;
 use App\Models\Faculty;
 use App\Models\FacultyAvailability;
 use App\Models\Room;
@@ -42,14 +43,6 @@ class RecommendationService
         'Sat' => 'Saturday',
         'Sun' => 'Sunday',
     ];
-
-    /**
-     * Candidate start times tried for each Day pattern, earliest
-     * first, within a normal academic day.
-     *
-     * @var list<string>
-     */
-    private const START_TIMES = ['07:00', '08:00', '09:00', '10:00', '13:00', '14:00', '15:00', '16:00'];
 
     private const MAX_FACULTY_RESULTS = 5;
 
@@ -703,6 +696,13 @@ class RecommendationService
         return ($endHour * 60 + $endMinute) - ($startHour * 60 + $startMinute);
     }
 
+    private function minutesFromTime(string $time): int
+    {
+        [$hour, $minute] = array_map('intval', explode(':', substr($time, 0, 5)));
+
+        return ($hour * 60) + $minute;
+    }
+
     /**
      * Shared Recommendation Score -> Badge mapping used for Faculty,
      * Room, and Time candidates alike, so "Best Match" / "Good Match"
@@ -1185,28 +1185,45 @@ class RecommendationService
         $results = [];
         $slotIndex = 0;
 
+        // SCHEDULING PREFERENCES (Academic Calendar -> active School
+        // Year) — Class Start/End Time, the Time Interval, and the
+        // fixed Lunch Break all come from here now. Nothing in this
+        // service hardcodes a start-time list anymore.
+        $activeSchoolYear = SchoolYear::active();
+        $candidateStartTimes = $activeSchoolYear ? $activeSchoolYear->candidateStartTimes() : (new SchoolYear)->candidateStartTimes();
+        $classEndMinutes = $this->minutesFromTime($activeSchoolYear?->classEndTime() ?? SchoolYear::DEFAULT_CLASS_END_TIME);
+
         // MEETING PATTERN INTELLIGENCE (Prompt: Meeting Pattern
         // Intelligence) — which Day combinations are even considered
         // now depends on what kind of Subject this is (Lecture ->
         // 2 meetings/week, Laboratory/Special -> 1 meeting/week, never
-        // 3 unless a future config explicitly raises the cap). See
-        // MeetingPatternService for the full rule set.
+        // 3 unless a future config explicitly raises the cap) AND on
+        // the School Year's Class Days — see MeetingPatternService for
+        // the full rule set.
         $dayPatterns = $this->meetingPatternService->dayGroups($subject);
 
         foreach ($dayPatterns as $days) {
             $sessionMinutes = (int) round(($totalHours / count($days)) * 60);
 
-            foreach (self::START_TIMES as $start) {
+            foreach ($candidateStartTimes as $start) {
                 [$hour, $minute] = array_map('intval', explode(':', $start));
                 $endMinutes = ($hour * 60 + $minute) + $sessionMinutes;
 
-                // Don't recommend a session that runs past a normal
-                // 8:00 PM academic day.
-                if ($endMinutes > 20 * 60) {
+                // Never recommend a session that runs past the
+                // Academic Term's configured Class End Time.
+                if ($endMinutes > $classEndMinutes) {
                     continue;
                 }
 
                 $end = sprintf('%02d:%02d', intdiv($endMinutes, 60), $endMinutes % 60);
+
+                // LUNCH BREAK (12:00 PM - 1:00 PM) — hardcoded,
+                // non-editable, and enforced above every other check.
+                // A slot that overlaps it in any way is never a
+                // candidate, full stop.
+                if (SchoolYear::overlapsLunchBreak($start, $end)) {
+                    continue;
+                }
 
                 $hasConflict = false;
 
@@ -1338,6 +1355,20 @@ class RecommendationService
         $actualMinutes = $this->minutesBetween($startTime, $endTime);
         $fitsHours = $actualMinutes >= $expectedMinutes - 5; // small tolerance for rounding
 
+        // SCHEDULING PREFERENCES — a manually-typed time can still
+        // violate the active School Year's Class Start/End Time,
+        // Class Days, or the fixed Lunch Break. None of these block
+        // the Registrar from saving it (same "Manual Override"
+        // freedom as Faculty/Room), but they ARE surfaced as failed
+        // reasons so the Registrar sees exactly why.
+        $activeSchoolYear = SchoolYear::active();
+        $allowedDays = $this->meetingPatternService->allowedDays();
+        $daysAllowed = empty(array_diff($days, $allowedDays));
+        $withinPolicy = $activeSchoolYear
+            ? $activeSchoolYear->isWithinSchedulingPolicy($startTime, $endTime)
+            : ! SchoolYear::overlapsLunchBreak($startTime, $endTime);
+        $overlapsLunch = SchoolYear::overlapsLunchBreak($startTime, $endTime);
+
         $points = [
             'faculty_available' => $facultyConflict ? 0 : 15,
             'room_available' => $roomConflict ? 0 : 15,
@@ -1345,13 +1376,15 @@ class RecommendationService
             'fits_subject_hours' => $fitsHours ? 10 : 0,
             'preferred_slot' => $fitsPattern ? 50 : 25,
         ];
-        $score = array_sum($points);
+        $score = ($daysAllowed && $withinPolicy) ? array_sum($points) : 0;
 
         $reasons = [
             ['label' => 'Faculty Available', 'met' => ! $facultyConflict, 'type' => $facultyConflict ? 'danger' : 'success'],
             ['label' => 'Room Available', 'met' => ! $roomConflict, 'type' => $roomConflict ? 'danger' : 'success'],
             ['label' => 'Section Available', 'met' => ! $sectionConflict, 'type' => $sectionConflict ? 'danger' : 'success'],
             ['label' => $fitsHours ? 'Fits Subject Hours' : 'Shorter Than Required Hours', 'met' => $fitsHours, 'type' => $fitsHours ? 'success' : 'warning'],
+            ['label' => $daysAllowed ? 'Within Available Class Days' : 'Outside Available Class Days', 'met' => $daysAllowed, 'type' => $daysAllowed ? 'success' : 'danger'],
+            ['label' => $overlapsLunch ? 'Overlaps Lunch Break (12:00 PM - 1:00 PM)' : 'Does Not Overlap Lunch Break', 'met' => ! $overlapsLunch, 'type' => $overlapsLunch ? 'danger' : 'success'],
         ];
 
         if (! $fitsPattern) {
@@ -1363,7 +1396,7 @@ class RecommendationService
             ];
         }
 
-        $isManualOverride = $facultyConflict || $roomConflict || $sectionConflict || ! $fitsPattern || ! $fitsHours;
+        $isManualOverride = $facultyConflict || $roomConflict || $sectionConflict || ! $fitsPattern || ! $fitsHours || ! $daysAllowed || ! $withinPolicy;
 
         $overrideReason = null;
         if ($isManualOverride) {
@@ -1383,6 +1416,14 @@ class RecommendationService
             }
             if (! $fitsHours) {
                 $issues[] = 'this block is shorter than the subject\'s required weekly hours';
+            }
+            if (! $daysAllowed) {
+                $issues[] = 'one or more selected days is not an Available Class Day for the active Academic Term';
+            }
+            if ($overlapsLunch) {
+                $issues[] = 'this time overlaps the Lunch Break (12:00 PM - 1:00 PM)';
+            } elseif (! $withinPolicy) {
+                $issues[] = 'this time falls outside the active Academic Term\'s Class Start/End Time';
             }
             $overrideReason = 'This time '.implode(', ', $issues).'.';
         }

@@ -7,10 +7,74 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * A School Year also carries the Scheduling Preferences the Auto
+ * Schedule AI reads before it ever suggests a Faculty/Room/Time
+ * combination:
+ *
+ *   - Class Start Time / Class End Time — the earliest/latest a class
+ *     may be scheduled.
+ *   - Time Interval — the increment (in minutes) the engine slices
+ *     the day into when searching for candidate start times.
+ *   - Available Class Days — which days of the week the engine is
+ *     allowed to generate schedules on.
+ *   - Lunch Break (12:00 PM - 1:00 PM) — always enforced, never
+ *     editable. `lunch_start`/`lunch_end` columns exist for the
+ *     record, but the scheduling engine always uses the fixed
+ *     LUNCH_BREAK_START/END constants below, never the column values.
+ *
+ * These settings apply to the ACTIVE School Year only — see active().
+ * RecommendationService/MeetingPatternService pull from here (falling
+ * back to sensible defaults if no School Year is Active yet) so
+ * nothing in the scheduling engine hardcodes these values.
+ */
 class SchoolYear extends Model
 {
     use HasFactory;
     use SoftDeletes;
+
+    /**
+     * The Lunch Break window. Hardcoded and never user-editable — the
+     * Auto Schedule AI must never assign a class that overlaps this
+     * period, regardless of what else is configured.
+     */
+    public const LUNCH_BREAK_START = '12:00';
+
+    public const LUNCH_BREAK_END = '13:00';
+
+    /**
+     * Every Day token the "Class Days" checkboxes can offer, in
+     * calendar order. Sunday is included (unchecked by default) so it
+     * becomes available automatically the moment it's checked —
+     * nothing else needs to change for that to work.
+     *
+     * @var list<string>
+     */
+    public const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    /**
+     * Class Days default — Monday through Friday.
+     *
+     * @var list<string>
+     */
+    public const DEFAULT_CLASS_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+
+    /**
+     * Every Time Interval value considered valid. Fixed at 30 Minutes
+     * only — the Academic Term form no longer exposes a Time Interval
+     * choice; it's shown as a locked information row and always saved
+     * as DEFAULT_TIME_INTERVAL_MINUTES (see
+     * AcademicTermController@resolveSchoolYear).
+     *
+     * @var list<int>
+     */
+    public const AVAILABLE_TIME_INTERVALS = [30];
+
+    public const DEFAULT_TIME_INTERVAL_MINUTES = 30;
+
+    public const DEFAULT_CLASS_START_TIME = '07:00';
+
+    public const DEFAULT_CLASS_END_TIME = '17:00';
 
     /**
      * The attributes that are mass assignable.
@@ -22,6 +86,12 @@ class SchoolYear extends Model
         'start_year',
         'end_year',
         'status',
+        'class_start_time',
+        'class_end_time',
+        'time_interval',
+        'available_days',
+        'lunch_start',
+        'lunch_end',
     ];
 
     /**
@@ -32,6 +102,8 @@ class SchoolYear extends Model
     protected $casts = [
         'start_year' => 'integer',
         'end_year' => 'integer',
+        'time_interval' => 'integer',
+        'available_days' => 'array',
     ];
 
     /**
@@ -40,6 +112,156 @@ class SchoolYear extends Model
     public function academicTerms(): HasMany
     {
         return $this->hasMany(AcademicTerm::class);
+    }
+
+    /**
+     * The single Active School Year, if one exists. This is the
+     * global scheduling policy source for the Auto Schedule AI —
+     * RecommendationService/MeetingPatternService call this (rather
+     * than reading columns directly) so a missing Active School Year
+     * always degrades gracefully to the built-in defaults above.
+     */
+    public static function active(): ?self
+    {
+        return static::query()->where('status', 'Active')->first();
+    }
+
+    /**
+     * Class Start Time as "H:i" (e.g. "07:00"), always present even
+     * when no School Year is Active yet.
+     */
+    public function classStartTime(): string
+    {
+        return $this->formatTime($this->class_start_time) ?? self::DEFAULT_CLASS_START_TIME;
+    }
+
+    /**
+     * Class End Time as "H:i".
+     */
+    public function classEndTime(): string
+    {
+        return $this->formatTime($this->class_end_time) ?? self::DEFAULT_CLASS_END_TIME;
+    }
+
+    /**
+     * Scheduling Time Interval, in minutes.
+     */
+    public function intervalMinutes(): int
+    {
+        $interval = (int) ($this->time_interval ?: self::DEFAULT_TIME_INTERVAL_MINUTES);
+
+        return in_array($interval, self::AVAILABLE_TIME_INTERVALS, true) ? $interval : self::DEFAULT_TIME_INTERVAL_MINUTES;
+    }
+
+    /**
+     * The Day tokens (Mon/Tue/.../Sun) the Auto Schedule AI is allowed
+     * to schedule on. Falls back to DEFAULT_CLASS_DAYS if the School
+     * Year has no days configured (e.g. legacy rows created before
+     * this feature existed).
+     *
+     * @return list<string>
+     */
+    public function allowedDays(): array
+    {
+        $days = is_array($this->available_days) ? array_values(array_intersect(self::ALL_DAYS, $this->available_days)) : [];
+
+        return ! empty($days) ? $days : self::DEFAULT_CLASS_DAYS;
+    }
+
+    /**
+     * Whether a given Day token is currently schedulable.
+     */
+    public function isDayAllowed(string $day): bool
+    {
+        return in_array($day, $this->allowedDays(), true);
+    }
+
+    /**
+     * Every candidate start time (sliced at the configured Time
+     * Interval) between Class Start Time and Class End Time, as "H:i"
+     * strings, earliest first. This is the single source of truth for
+     * "what times can a class even start at" — RecommendationService
+     * no longer hardcodes a start-time list.
+     *
+     * @return list<string>
+     */
+    public function candidateStartTimes(): array
+    {
+        $interval = $this->intervalMinutes();
+        $startMinutes = $this->toMinutes($this->classStartTime());
+        $endMinutes = $this->toMinutes($this->classEndTime());
+
+        $times = [];
+        for ($minutes = $startMinutes; $minutes < $endMinutes; $minutes += $interval) {
+            $times[] = $this->fromMinutes($minutes);
+        }
+
+        return $times;
+    }
+
+    /**
+     * Whether a proposed Start/End Time falls entirely within
+     * [Class Start Time, Class End Time] and does NOT overlap the
+     * fixed Lunch Break window. This is the rule the Auto Schedule AI
+     * (and manual Registrar overrides) must never violate.
+     */
+    public function isWithinSchedulingPolicy(string $startTime, string $endTime): bool
+    {
+        $start = $this->toMinutes($startTime);
+        $end = $this->toMinutes($endTime);
+
+        if ($start >= $end) {
+            return false;
+        }
+
+        if ($start < $this->toMinutes($this->classStartTime()) || $end > $this->toMinutes($this->classEndTime())) {
+            return false;
+        }
+
+        return ! self::overlapsLunchBreak($startTime, $endTime);
+    }
+
+    /**
+     * Whether a Start/End Time range overlaps the fixed Lunch Break
+     * (12:00 PM - 1:00 PM) in any way — including a class that starts
+     * before lunch and runs into it, one that starts during lunch, or
+     * one that fully contains the lunch window.
+     */
+    public static function overlapsLunchBreak(string $startTime, string $endTime): bool
+    {
+        $lunchStart = self::minutesFromTime(self::LUNCH_BREAK_START);
+        $lunchEnd = self::minutesFromTime(self::LUNCH_BREAK_END);
+
+        $start = self::minutesFromTime($startTime);
+        $end = self::minutesFromTime($endTime);
+
+        return $start < $lunchEnd && $end > $lunchStart;
+    }
+
+    private function formatTime(?string $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+
+        return substr($value, 0, 5);
+    }
+
+    private function toMinutes(string $time): int
+    {
+        return self::minutesFromTime($time);
+    }
+
+    private static function minutesFromTime(string $time): int
+    {
+        [$hour, $minute] = array_map('intval', explode(':', substr($time, 0, 5)));
+
+        return ($hour * 60) + $minute;
+    }
+
+    private function fromMinutes(int $minutes): string
+    {
+        return sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
     }
 
     /**

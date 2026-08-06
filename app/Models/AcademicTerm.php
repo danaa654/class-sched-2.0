@@ -7,6 +7,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * An Academic Term is a School Year + Semester combination.
+ *
+ * The Global Scheduling Settings the Auto Schedule AI reads (Class
+ * Start/End Time, Time Interval, Available Class Days, Lunch Break)
+ * live on the School Year this term belongs to — see
+ * SchoolYear::active() and schoolYear(). They are intentionally not
+ * duplicated here.
+ */
 class AcademicTerm extends Model
 {
     use HasFactory;
@@ -38,6 +47,14 @@ class AcademicTerm extends Model
     public function semester(): BelongsTo
     {
         return $this->belongsTo(Semester::class);
+    }
+
+    /**
+     * The single Active Academic Term, if one exists.
+     */
+    public static function active(): ?self
+    {
+        return static::query()->where('status', 'Active')->first();
     }
 
     /**

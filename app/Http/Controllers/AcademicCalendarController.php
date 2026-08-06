@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\AcademicTerm;
 use App\Models\SchoolYear;
-use App\Models\Semester;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -12,46 +11,20 @@ use Inertia\Response;
 class AcademicCalendarController extends Controller
 {
     /**
-     * Display the Academic Calendar page (School Years, Semesters,
-     * Academic Terms tabs).
+     * Display the Academic Calendar page.
      *
-     * Owns the /academic-calendar route, so it's responsible for loading
-     * all data the page needs. School Years, Semesters, and Academic
-     * Terms each have an equivalent query on their own controller's
-     * index() (unrouted) — this is where those queries actually get run
-     * and passed as props.
+     * School Years and Semesters are no longer managed as separate
+     * tabs on this page — everything (School Year via Start/End Year,
+     * Semester, Status, Remarks, and Scheduling Preferences) is
+     * entered in one place: the Add/Edit Academic Term dialog. The
+     * School Year and Semester tables themselves are untouched and
+     * still power the rest of the app (Sections, Faculty Loading,
+     * Subject Offerings, Planning Term, etc.) — see
+     * AcademicTermController@resolveSchoolYear for how a School Year
+     * gets created/updated from this form.
      */
     public function index(Request $request): Response
     {
-        $schoolYearSearch = trim((string) $request->query('school_year_search', ''));
-
-        $schoolYears = SchoolYear::query()
-            ->withTrashed()
-            ->when($schoolYearSearch !== '', function ($query) use ($schoolYearSearch) {
-                $query->where(function ($inner) use ($schoolYearSearch) {
-                    $inner->where('name', 'like', "%{$schoolYearSearch}%")
-                        ->orWhere('start_year', 'like', "%{$schoolYearSearch}%")
-                        ->orWhere('end_year', 'like', "%{$schoolYearSearch}%");
-                });
-            })
-            ->orderByDesc('start_year')
-            ->paginate(10, ['*'], 'school_year_page')
-            ->withQueryString();
-
-        $semesterSearch = trim((string) $request->query('semester_search', ''));
-
-        $semesters = Semester::query()
-            ->withTrashed()
-            ->when($semesterSearch !== '', function ($query) use ($semesterSearch) {
-                $query->where(function ($inner) use ($semesterSearch) {
-                    $inner->where('name', 'like', "%{$semesterSearch}%")
-                        ->orWhere('short_name', 'like', "%{$semesterSearch}%");
-                });
-            })
-            ->orderBy('display_order')
-            ->paginate(10, ['*'], 'semester_page')
-            ->withQueryString();
-
         $academicTermSearch = trim((string) $request->query('academic_term_search', ''));
 
         $academicTerms = AcademicTerm::query()
@@ -71,28 +44,28 @@ class AcademicCalendarController extends Controller
             ->paginate(10, ['*'], 'academic_term_page')
             ->withQueryString();
 
-        // Dropdown sources for the Academic Term Add/Edit dialog — only
-        // Active School Years and Active Semesters are selectable.
-        $activeSchoolYears = SchoolYear::query()
-            ->where('status', 'Active')
-            ->orderByDesc('start_year')
-            ->get(['id', 'name']);
-
-        $activeSemesters = Semester::query()
-            ->where('status', 'Active')
-            ->orderBy('display_order')
-            ->get(['id', 'name', 'short_name']);
+        // Semester dropdown source for the Academic Term form is
+        // hardcoded on the frontend (Semester::NAMES) — no query
+        // needed here. AcademicTermController@resolveSemester creates
+        // the matching Semester record behind the scenes the first
+        // time each one is actually used, so nothing needs seeding.
 
         return Inertia::render('AcademicCalendar/Index', [
-            'schoolYears' => $schoolYears,
-            'semesters' => $semesters,
             'academicTerms' => $academicTerms,
-            'activeSchoolYears' => $activeSchoolYears,
-            'activeSemesters' => $activeSemesters,
             'filters' => [
-                'school_year_search' => $schoolYearSearch,
-                'semester_search' => $semesterSearch,
                 'academic_term_search' => $academicTermSearch,
+            ],
+            // Scheduling Preferences options/defaults for the
+            // Academic Term Add/Edit dialog — kept here so the
+            // frontend never has to hardcode the Lunch Break window,
+            // the Day list, or the Time Interval choices.
+            'schedulingSettingsOptions' => [
+                'days' => SchoolYear::ALL_DAYS,
+                'default_days' => SchoolYear::DEFAULT_CLASS_DAYS,
+                'default_class_start_time' => SchoolYear::DEFAULT_CLASS_START_TIME,
+                'default_class_end_time' => SchoolYear::DEFAULT_CLASS_END_TIME,
+                'lunch_break_start' => SchoolYear::LUNCH_BREAK_START,
+                'lunch_break_end' => SchoolYear::LUNCH_BREAK_END,
             ],
         ]);
     }

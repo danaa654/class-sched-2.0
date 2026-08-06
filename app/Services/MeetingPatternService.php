@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\SchoolYear;
 use App\Models\Subject;
 
 /**
@@ -172,6 +173,14 @@ class MeetingPatternService
      * combination turns out to conflict — the existing "Smart Search"
      * fallback behavior is unchanged, only which patterns are offered.
      *
+     * Every combination is additionally filtered against the active
+     * Academic Term's Available Class Days (Global Scheduling
+     * Settings) — a Day combination is only offered if EVERY Day in
+     * it is currently checked. If Saturday is unchecked, no
+     * combination containing Sat is ever returned; if Sunday is
+     * checked later, Sunday-containing combinations become available
+     * automatically without any code change here.
+     *
      * @return list<list<string>>
      */
     public function dayGroups(Subject $subject): array
@@ -179,11 +188,31 @@ class MeetingPatternService
         $meetings = $this->meetingsPerWeek($subject);
 
         $configured = config("scheduling.meeting_patterns.day_groups.{$meetings}");
-        if (is_array($configured) && ! empty($configured)) {
-            return $configured;
-        }
+        $candidates = (is_array($configured) && ! empty($configured))
+            ? $configured
+            : (self::DEFAULT_DAY_GROUPS[$meetings] ?? [['Mon']]);
 
-        return self::DEFAULT_DAY_GROUPS[$meetings] ?? [['Mon']];
+        $allowedDays = $this->allowedDays();
+
+        $filtered = array_values(array_filter(
+            $candidates,
+            fn (array $days) => empty(array_diff($days, $allowedDays))
+        ));
+
+        return ! empty($filtered) ? $filtered : [];
+    }
+
+    /**
+     * The Day tokens the active School Year currently allows the
+     * Auto Generate engine to schedule on (Scheduling Preferences ->
+     * Class Days). Falls back to SchoolYear's built-in default when
+     * no School Year is Active yet.
+     *
+     * @return list<string>
+     */
+    public function allowedDays(): array
+    {
+        return SchoolYear::active()?->allowedDays() ?? SchoolYear::DEFAULT_CLASS_DAYS;
     }
 
     /**
