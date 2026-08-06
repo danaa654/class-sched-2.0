@@ -32,9 +32,20 @@ class UpdateRoomRequest extends FormRequest
             'building' => ['required', 'string', 'max:255'],
             'floor' => ['nullable', 'string', 'max:50'],
             'room_type' => ['required', Rule::in(StoreRoomRequest::ROOM_TYPES)],
-            'room_category' => ['required', Rule::in(RoomCategories::LIST)],
-            'department_id' => ['nullable', 'exists:departments,id'],
+            // See StoreRoomRequest — optional for the same reason.
+            'room_category' => ['nullable', Rule::in(RoomCategories::LIST)],
+            // See StoreRoomRequest for the College/Department rules —
+            // department_id, when given, must belong to the selected
+            // college_id (null college_id = "All Colleges", so no
+            // Department restriction is checked in that case).
             'college_id' => ['nullable', 'exists:colleges,id'],
+            'department_id' => [
+                'nullable',
+                Rule::exists('departments', 'id')->when(
+                    $this->filled('college_id'),
+                    fn ($rule) => $rule->where('college_id', $this->input('college_id'))
+                ),
+            ],
             'capacity' => ['required', 'integer', 'min:1'],
             'status' => ['required', Rule::in(['Active', 'Inactive'])],
             'remarks' => ['nullable', 'string'],

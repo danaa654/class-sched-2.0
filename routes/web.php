@@ -114,6 +114,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/scheduling/section-subjects/{section}/{subject}/recommend', [SectionSubjectController::class, 'recommend'])->name('scheduling.section-subjects.recommend');
     Route::get('/scheduling/section-subjects/{section}/{subject}/faculty-options', [SectionSubjectController::class, 'facultyOptions'])->name('scheduling.section-subjects.faculty-options');
     Route::post('/scheduling/section-subjects/{section}/{subject}/faculty-override', [SectionSubjectController::class, 'overrideFaculty'])->name('scheduling.section-subjects.faculty-override');
+    Route::get('/scheduling/section-subjects/{section}/{subject}/room-options', [SectionSubjectController::class, 'roomOptions'])->name('scheduling.section-subjects.room-options');
+    Route::post('/scheduling/section-subjects/{section}/{subject}/room-override', [SectionSubjectController::class, 'overrideRoom'])->name('scheduling.section-subjects.room-override');
 
     // ⚡ Auto Generate Schedule (Prompt 8.9).
     Route::post('/scheduling/section-subjects/{section}/auto-generate', [SectionSubjectController::class, 'autoGenerate'])->name('scheduling.section-subjects.auto-generate');

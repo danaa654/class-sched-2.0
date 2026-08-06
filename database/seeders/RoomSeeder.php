@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Models\College;
+use App\Models\Department;
 use App\Models\Room;
 use Illuminate\Database\Seeder;
 
@@ -14,11 +16,22 @@ class RoomSeeder extends Seeder
      * floor). The source's own "Lecture" / "Laboratory" split matches the
      * Room Master's room_type options directly, so it's used as-is.
      *
-     * The source also grouped rooms by the program(s) that use them
-     * (BSED, BSIT, BSHM, BSTM, COC, General). Room-to-program matching
-     * isn't part of the schema yet, so that's preserved as a note in
-     * `remarks` for now rather than dropped — wire it into a real
-     * relationship once that feature exists.
+     * Rooms are now wired to real `colleges` / `departments` records
+     * (seeded by CollegeSeeder / DepartmentSeeder, which must run before
+     * this seeder — see DatabaseSeeder) instead of a free-text remark.
+     *
+     * Mapping used:
+     *   BSED    -> College of Teacher Education (CTE)            / BSED
+     *   BSIT    -> College of Computer Studies (CCS)              / BSIT
+     *   BSHM    -> School of Hospitality and Tourism Mgmt (SHTM)  / BSHM
+     *   BSTM    -> School of Hospitality and Tourism Mgmt (SHTM)  / BSTM
+     *   COC     -> College of Criminology (COC), department left
+     *              null — the source doesn't say which of the 4
+     *              BSCRIM specializations (BSCRIMQD/FI/FB/LD) owns
+     *              the room, so it's scoped to the college only
+     *              ("all programs" within Criminology).
+     *   General -> college_id / department_id both left null
+     *              ("All Colleges" / "All Programs").
      *
      * "building" isn't in the source list — every row uses "Main Building"
      * as a placeholder. Update the BUILDING constant below once the real
@@ -28,6 +41,19 @@ class RoomSeeder extends Seeder
     private const BUILDING = 'Main Building';
 
     private const DEFAULT_CAPACITY = 40;
+
+    /**
+     * Program note -> department code (from DepartmentSeeder::DEPARTMENTS).
+     * 'General' and 'COC' are handled separately (see resolveScope()).
+     *
+     * @var array<string, string>
+     */
+    private const PROGRAM_DEPARTMENT_CODES = [
+        'BSED' => 'CTE-BSED',
+        'BSIT' => 'CCS-BSIT',
+        'BSHM' => 'SHTM-BSHM',
+        'BSTM' => 'SHTM-BSTM',
+    ];
 
     public function run(): void
     {
@@ -73,6 +99,8 @@ class RoomSeeder extends Seeder
         ];
 
         foreach ($rooms as $data) {
+            [$collegeId, $departmentId, $remarks] = $this->resolveScope($data['programs']);
+
             Room::updateOrCreate(
                 ['room_code' => $data['room_code']],
                 [
@@ -83,11 +111,45 @@ class RoomSeeder extends Seeder
                     'building' => self::BUILDING,
                     'floor' => $data['floor'],
                     'room_type' => $data['room_type'],
+                    'college_id' => $collegeId,
+                    'department_id' => $departmentId,
                     'capacity' => self::DEFAULT_CAPACITY,
                     'status' => 'Active',
-                    'remarks' => 'Program(s): '.implode(', ', $data['programs']),
+                    'remarks' => $remarks,
                 ]
             );
         }
+    }
+
+    /**
+     * Resolve a room's program note(s) into a [college_id, department_id, remarks] tuple.
+     *
+     * - 'General' -> no college, no department ("All Colleges" / "All Programs").
+     * - 'COC'     -> College of Criminology, no specific department (which of
+     *                the 4 BSCRIM specializations isn't specified by the source).
+     * - Anything else (BSED/BSIT/BSHM/BSTM) -> resolved via
+     *   PROGRAM_DEPARTMENT_CODES to its department, and that department's college.
+     *
+     * @param  list<string>  $programs
+     * @return array{0: ?int, 1: ?int, 2: ?string}
+     */
+    private function resolveScope(array $programs): array
+    {
+        $program = $programs[0] ?? 'General';
+
+        if ($program === 'General') {
+            return [null, null, null];
+        }
+
+        if ($program === 'COC') {
+            $college = College::where('code', 'COC')->first();
+
+            return [$college?->id, null, 'All Programs (College of Criminology — specialization not specified)'];
+        }
+
+        $departmentCode = self::PROGRAM_DEPARTMENT_CODES[$program] ?? null;
+        $department = $departmentCode ? Department::where('code', $departmentCode)->first() : null;
+
+        return [$department?->college_id, $department?->id, null];
     }
 }

@@ -735,32 +735,55 @@ class RecommendationService
     }
 
     /**
-     * ROOM RECOMMENDATION SCORE (100 points) — Prompt 8.8.
+     * INTELLIGENT ROOM ASSIGNMENT — hierarchical strategy.
      *
-     *   1. Preferred Room Category matches the Subject ... 40 pts
-     *      e.g. "Computer Programming" -> "Computer Laboratory",
-     *      "PE" -> "Gymnasium". Falls back to the coarse
-     *      Lecture/Laboratory room_type match when either the
-     *      Subject or the Room hasn't been given a fine-grained
-     *      category yet, so older data doesn't just score zero.
-     *   2. Room capacity is sufficient for the Section ...... 25 pts
-     *   3. Room is currently available (no conflict) ........ 20 pts
-     *   4. Same College or Department as the Section ........ 10 pts
-     *   5. Closest capacity match (avoids oversized rooms) ... 5 pts
+     * A room only ever appears in the returned list if it clears three
+     * hard requirements, evaluated in this order:
      *
-     * Only Active rooms are considered. Never assigns anything —
-     * this only ranks and explains; the Registrar always clicks
-     * Apply (or doesn't) themselves.
+     *   Priority 1 — Room Type MUST match the Subject (Lecture subjects
+     *                only get Lecture rooms, Laboratory subjects only
+     *                get Laboratory rooms). No match, no candidacy.
+     *   Priority 5 — Capacity MUST be >= the estimated headcount.
+     *   Priority 6 — Availability: the room must have no scheduling
+     *                conflict at the row's current Day/Time (skipped
+     *                — treated as neutral — when the row has no
+     *                Day/Time yet, same as before).
+     *
+     * Rooms that fail any of the three are excluded outright — never
+     * scored down, never shown ("do not recommend that room").
+     *
+     * Among the rooms that clear all three, a room is only a valid
+     * candidate if it is scoped to the Section's own Program, the
+     * Section's own College, or is a fully Shared room (no College/
+     * Department at all). A room scoped to a *different* College is
+     * excluded too — it was never meant for this Section. Candidates
+     * are then tiered (Priorities 2–4):
+     *
+     *   Program tier (exact Department match) ......... base + 16 pts
+     *   College tier  (same College, any Program) ...... base + 8 pts
+     *   Shared tier   (no College/Department at all) ... base + 0 pts
+     *
+     * where base = Room Type (34) + Capacity (30) + Availability (20)
+     * = 84, always earned in full since those three are hard filters
+     * — every returned room already satisfies them. Score is therefore
+     * 84 (Shared) / 92 (College) / 100 (Program).
+     *
+     * Kept modular: ROOM_POINTS_* constants and resolveRoomScopeTier()
+     * are the only places that would need to change to add future
+     * criteria (equipment, building proximity, air conditioning,
+     * etc.) without touching the hard-filter or ranking logic.
      */
-    private const ROOM_POINTS_CATEGORY_MATCH = 40;
+    private const ROOM_POINTS_TYPE_MATCH = 34;
 
-    private const ROOM_POINTS_CAPACITY_OK = 25;
+    private const ROOM_POINTS_CAPACITY_OK = 30;
 
     private const ROOM_POINTS_AVAILABLE = 20;
 
-    private const ROOM_POINTS_SAME_DEPARTMENT_OR_COLLEGE = 10;
+    private const ROOM_POINTS_SCOPE_PROGRAM = 16;
 
-    private const ROOM_POINTS_CLOSEST_CAPACITY = 5;
+    private const ROOM_POINTS_SCOPE_COLLEGE = 8;
+
+    private const ROOM_POINTS_SCOPE_SHARED = 0;
 
     public function recommendRooms(Subject $subject, Section $section, ?SectionSubject $current = null): array
     {
@@ -768,89 +791,109 @@ class RecommendationService
 
         $wantsLaboratory = (int) $subject->laboratory_hours > 0;
         $preferredType = $wantsLaboratory ? 'Laboratory' : 'Lecture';
-        $preferredCategory = $subject->preferred_room_category;
 
         $sectionDepartmentId = $section->major?->department_id;
         $sectionCollegeId = $section->major?->department?->college_id;
 
         $capacityNeeded = $current?->capacity ?? $section->estimated_students ?? 0;
 
-        $rooms = Room::query()->where('status', 'Active')->with(['department', 'college'])->get();
+        $allRooms = Room::query()->where('status', 'Active')->with(['department', 'college'])->get();
 
-        if ($rooms->isEmpty()) {
-            return ['recommendations' => [], 'message' => 'No active rooms found.'];
+        if ($allRooms->isEmpty()) {
+            return ['recommendations' => [], 'message' => 'No active rooms found.', 'reasons' => ['No active rooms are configured in the Room Master.']];
         }
 
-        // Used for the Closest Capacity Match tie-breaker — the room
-        // whose capacity is nearest to (but never under) what's
-        // needed gets the full 5 points; every other qualifying room
-        // is scaled down from there so a needlessly huge room never
-        // outranks a right-sized one.
-        $eligibleCapacities = $rooms
-            ->filter(fn (Room $room) => ! $capacityNeeded || $room->capacity >= $capacityNeeded)
-            ->pluck('capacity');
-        $closestCapacity = $eligibleCapacities->isNotEmpty() ? $eligibleCapacities->min() : null;
+        // --- Hard filters (Priorities 1, 5, 6) -----------------------
+        // A room that fails any of these is never a candidate, no
+        // matter how well it scopes to the Section — it simply isn't
+        // usable for this Subject at this time.
+        $typeExcluded = 0;
+        $capacityExcluded = 0;
+        $conflictExcluded = 0;
+        $scopeExcluded = 0;
 
-        $ranked = $rooms->map(function (Room $room) use (
-            $preferredType,
-            $preferredCategory,
-            $sectionDepartmentId,
-            $sectionCollegeId,
-            $capacityNeeded,
-            $closestCapacity,
-            $current,
+        $eligible = $allRooms->filter(function (Room $room) use (
+            $preferredType, $capacityNeeded, $current, $sectionDepartmentId, $sectionCollegeId,
+            &$typeExcluded, &$capacityExcluded, &$conflictExcluded, &$scopeExcluded,
         ) {
-            // 1. Category match — prefer the fine-grained category;
-            // fall back to the coarse Lecture/Laboratory room_type
-            // when either side hasn't set a category yet.
-            if ($preferredCategory && $room->room_category) {
-                $categoryMatch = $room->room_category === $preferredCategory;
-            } else {
-                $categoryMatch = $room->room_type === $preferredType;
+            if ($room->room_type !== $preferredType) {
+                $typeExcluded++;
+
+                return false;
             }
 
-            // 2. Capacity sufficient
-            $capacityOk = $capacityNeeded ? $room->capacity >= $capacityNeeded : true;
+            if ($capacityNeeded && $room->capacity < $capacityNeeded) {
+                $capacityExcluded++;
 
-            // 3. Availability (no conflict)
-            $conflictCount = $this->roomConflictCount($room, $current);
-            $available = $conflictCount === 0;
-
-            // 4. Same College or Department as the Section
-            $sameDepartment = $sectionDepartmentId && $room->department_id
-                && $room->department_id === $sectionDepartmentId;
-            $sameCollege = $sectionCollegeId && $room->college_id
-                && $room->college_id === $sectionCollegeId;
-            $sameDepartmentOrCollege = $sameDepartment || $sameCollege;
-
-            // 5. Closest capacity match — only meaningful among rooms
-            // that already satisfy criterion 2.
-            $closestCapacityPoints = 0;
-            if ($capacityOk && $closestCapacity !== null && $room->capacity > 0) {
-                // Full points at the closest capacity, linearly
-                // tapering to 0 as the room gets proportionally larger
-                // than necessary — an 800-seat hall for a 30-seat
-                // class scores near 0 here even though it "fits".
-                $ratio = $closestCapacity / $room->capacity;
-                $closestCapacityPoints = (int) round(self::ROOM_POINTS_CLOSEST_CAPACITY * $ratio);
+                return false;
             }
+
+            if ($this->roomConflictCount($room, $current) > 0) {
+                $conflictExcluded++;
+
+                return false;
+            }
+
+            if ($this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId) === null) {
+                // Scoped to a different College/Program entirely —
+                // never a valid candidate for this Section.
+                $scopeExcluded++;
+
+                return false;
+            }
+
+            return true;
+        })->values();
+
+        if ($eligible->isEmpty()) {
+            return [
+                'recommendations' => [],
+                'message' => 'No suitable room available.',
+                'reasons' => $this->noRoomReasons($preferredType, $typeExcluded, $capacityExcluded, $conflictExcluded, $scopeExcluded),
+            ];
+        }
+
+        // Used for the Closest Capacity Match tie-breaker among rooms
+        // that already cleared the hard capacity filter — the room
+        // whose capacity is nearest to what's needed sorts first
+        // among equally-scored candidates, so a needlessly huge room
+        // never outranks a right-sized one.
+        $closestCapacity = $eligible->pluck('capacity')->min();
+
+        $ranked = $eligible->map(function (Room $room) use (
+            $sectionDepartmentId, $sectionCollegeId, $closestCapacity, $current,
+        ) {
+            $tier = $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId);
+
+            $scopePoints = match ($tier) {
+                'program' => self::ROOM_POINTS_SCOPE_PROGRAM,
+                'college' => self::ROOM_POINTS_SCOPE_COLLEGE,
+                default => self::ROOM_POINTS_SCOPE_SHARED,
+            };
 
             $points = [
-                'category_match' => $categoryMatch ? self::ROOM_POINTS_CATEGORY_MATCH : 0,
-                'capacity_ok' => $capacityOk ? self::ROOM_POINTS_CAPACITY_OK : 0,
-                'available' => $available ? self::ROOM_POINTS_AVAILABLE : 0,
-                'same_department_or_college' => $sameDepartmentOrCollege ? self::ROOM_POINTS_SAME_DEPARTMENT_OR_COLLEGE : 0,
-                'closest_capacity' => $closestCapacityPoints,
+                'room_type_match' => self::ROOM_POINTS_TYPE_MATCH,
+                'capacity_ok' => self::ROOM_POINTS_CAPACITY_OK,
+                'available' => self::ROOM_POINTS_AVAILABLE,
+                'scope' => $scopePoints,
             ];
 
             $score = array_sum($points);
 
-            $reasons = [
-                ['label' => $categoryMatch ? 'Correct Room Type' : 'Wrong Room Type', 'met' => $categoryMatch],
-                ['label' => 'Enough Capacity', 'met' => $capacityOk],
-                ['label' => 'Available', 'met' => $available],
-                ['label' => 'Same Department', 'met' => $sameDepartmentOrCollege],
-            ];
+            $reasons = [['label' => 'Correct Room Type', 'met' => true, 'type' => 'success']];
+
+            if ($tier === 'program') {
+                $reasons[] = ['label' => 'Same Program', 'met' => true, 'type' => 'success'];
+                $reasons[] = ['label' => 'Same College', 'met' => true, 'type' => 'success'];
+            } elseif ($tier === 'college') {
+                $reasons[] = ['label' => 'Same College', 'met' => true, 'type' => 'success'];
+                $reasons[] = ['label' => 'Shared by all programs', 'met' => true, 'type' => 'warning'];
+            } else {
+                $reasons[] = ['label' => 'Shared Room', 'met' => true, 'type' => 'success'];
+            }
+
+            $reasons[] = ['label' => 'Capacity OK', 'met' => true, 'type' => 'success'];
+            $reasons[] = ['label' => 'Available', 'met' => true, 'type' => 'success'];
 
             return [
                 'id' => $room->id,
@@ -860,10 +903,12 @@ class RecommendationService
                 'department' => $room->department?->name,
                 'college' => $room->college?->name,
                 'capacity' => $room->capacity,
-                'category_match' => $categoryMatch,
-                'capacity_ok' => $capacityOk,
-                'same_department_or_college' => $sameDepartmentOrCollege,
-                'conflict_count' => $conflictCount,
+                'match_tier' => $tier,
+                'badge' => match ($tier) {
+                    'program' => 'Program Match',
+                    'college' => 'College Match',
+                    default => 'Shared Room',
+                },
                 'score' => $score,
                 'score_max' => 100,
                 'score_breakdown' => $points,
@@ -871,14 +916,14 @@ class RecommendationService
             ];
         })->values()->all();
 
-        usort($ranked, function (array $a, array $b) {
+        usort($ranked, function (array $a, array $b) use ($closestCapacity) {
             if ($a['score'] !== $b['score']) {
                 return $b['score'] <=> $a['score'];
             }
 
-            // Prefer the room whose capacity is closest to (but not
-            // under) what's needed, over one that's needlessly huge.
-            return $a['capacity'] <=> $b['capacity'];
+            // Tie-break: capacity closest to what's needed wins over a
+            // needlessly larger room.
+            return abs($a['capacity'] - $closestCapacity) <=> abs($b['capacity'] - $closestCapacity);
         });
 
         $ranked = array_slice($ranked, 0, self::MAX_ROOM_RESULTS);
@@ -888,7 +933,242 @@ class RecommendationService
         }
         unset($item);
 
-        return ['recommendations' => $ranked, 'message' => null];
+        return ['recommendations' => $ranked, 'message' => null, 'reasons' => []];
+    }
+
+    /**
+     * ROOM RECOMMENDATION SELECTOR.
+     *
+     * Powers the interactive Room selector on the Auto Generate review
+     * panel, mirroring facultyOptionsForSelector(). Returns the same
+     * ranked, hard-filtered recommendation list recommendRooms()
+     * produces (so "recommended first, AI pick defaulted" always
+     * matches what Auto Generate itself chose), plus — when the
+     * Registrar types into the search box — a global search across
+     * every Active room regardless of Type/College/Capacity/
+     * Availability, each scored via scoreArbitraryRoom() so the
+     * dropdown can show a live Recommendation Score (and a clear
+     * "why this isn't ideal" explanation) even for a room the hard
+     * filters would normally exclude — the Registrar always keeps
+     * full manual override freedom.
+     */
+    public function roomOptionsForSelector(Subject $subject, Section $section, ?SectionSubject $current, ?string $search = null): array
+    {
+        $recommended = $this->recommendRooms($subject, $section, $current);
+
+        $searchResults = [];
+
+        if ($search !== null && trim($search) !== '') {
+            $recommendedIds = collect($recommended['recommendations'])->pluck('id')->all();
+
+            $matches = Room::query()
+                ->where('status', 'Active')
+                ->where(function ($q) use ($search) {
+                    $q->where('room_code', 'like', "%{$search}%")
+                        ->orWhere('room_name', 'like', "%{$search}%");
+                })
+                ->whereNotIn('id', $recommendedIds)
+                ->with(['department', 'college'])
+                ->limit(20)
+                ->get();
+
+            $searchResults = $matches
+                ->map(fn (Room $room) => $this->scoreArbitraryRoom($room, $subject, $section, $current))
+                ->sortByDesc('score')
+                ->values()
+                ->all();
+        }
+
+        return [
+            'recommended' => $recommended['recommendations'],
+            'message' => $recommended['message'],
+            'search_results' => $searchResults,
+        ];
+    }
+
+    /**
+     * Score ANY single Active room against a Subject/Section — used
+     * both for global search results and for recomputing the Live
+     * Score the instant the Registrar manually overrides the
+     * AI-selected room with one outside the recommended pool (e.g.
+     * searching "Room 108" directly by code).
+     *
+     * Unlike recommendRooms()'s hard filters, nothing here excludes a
+     * room — every check that would normally disqualify it (Wrong
+     * Room Type, Capacity Too Small, Occupied, Different College) is
+     * instead surfaced as a failed (✗) reason and an explanatory
+     * override_reason, exactly like scoreArbitraryFaculty() does for
+     * Manual Override faculty picks. The Registrar always keeps full
+     * freedom to pick it anyway.
+     */
+    public function scoreArbitraryRoom(Room $room, Subject $subject, Section $section, ?SectionSubject $current = null): array
+    {
+        $section->loadMissing('major.department');
+        $room->loadMissing(['department', 'college']);
+
+        $wantsLaboratory = (int) $subject->laboratory_hours > 0;
+        $preferredType = $wantsLaboratory ? 'Laboratory' : 'Lecture';
+        $typeMatch = $room->room_type === $preferredType;
+
+        $capacityNeeded = $current?->capacity ?? $section->estimated_students ?? 0;
+        $capacityOk = $capacityNeeded ? $room->capacity >= $capacityNeeded : true;
+
+        $conflictCount = $this->roomConflictCount($room, $current);
+        $available = $conflictCount === 0;
+
+        $sectionDepartmentId = $section->major?->department_id;
+        $sectionCollegeId = $section->major?->department?->college_id;
+        $tier = $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId) ?? 'mismatch';
+
+        $points = [
+            'room_type_match' => $typeMatch ? self::ROOM_POINTS_TYPE_MATCH : 0,
+            'capacity_ok' => $capacityOk ? self::ROOM_POINTS_CAPACITY_OK : 0,
+            'available' => $available ? self::ROOM_POINTS_AVAILABLE : 0,
+            'scope' => match ($tier) {
+                'program' => self::ROOM_POINTS_SCOPE_PROGRAM,
+                'college' => self::ROOM_POINTS_SCOPE_COLLEGE,
+                'shared' => self::ROOM_POINTS_SCOPE_SHARED,
+                default => 0,
+            },
+        ];
+
+        $score = array_sum($points);
+
+        $reasons = [
+            ['label' => $typeMatch ? 'Correct Room Type' : 'Wrong Room Type', 'met' => $typeMatch, 'type' => $typeMatch ? 'success' : 'danger'],
+        ];
+
+        if ($tier === 'program') {
+            $reasons[] = ['label' => 'Same Program', 'met' => true, 'type' => 'success'];
+            $reasons[] = ['label' => 'Same College', 'met' => true, 'type' => 'success'];
+        } elseif ($tier === 'college') {
+            $reasons[] = ['label' => 'Same College', 'met' => true, 'type' => 'success'];
+            $reasons[] = ['label' => 'Shared by all programs', 'met' => true, 'type' => 'warning'];
+        } elseif ($tier === 'shared') {
+            $reasons[] = ['label' => 'Shared Room', 'met' => true, 'type' => 'success'];
+        } else {
+            $reasons[] = ['label' => 'Different College', 'met' => false, 'type' => 'danger'];
+        }
+
+        $reasons[] = ['label' => $capacityOk ? 'Capacity OK' : 'Capacity Too Small', 'met' => $capacityOk, 'type' => $capacityOk ? 'success' : 'danger'];
+        $reasons[] = ['label' => $available ? 'Available' : 'Occupied at this time', 'met' => $available, 'type' => $available ? 'success' : 'danger'];
+
+        $isManualOverride = ! $typeMatch || ! $capacityOk || ! $available || $tier === 'mismatch';
+
+        $badge = match (true) {
+            $isManualOverride => 'Manual Override',
+            $tier === 'program' => 'Program Match',
+            $tier === 'college' => 'College Match',
+            default => 'Shared Room',
+        };
+
+        $overrideReason = null;
+        if ($isManualOverride) {
+            $issues = [];
+            if (! $typeMatch) {
+                $issues[] = "requires a {$preferredType} room";
+            }
+            if (! $capacityOk) {
+                $issues[] = "needs seating for at least {$capacityNeeded} students";
+            }
+            if (! $available) {
+                $issues[] = 'is already booked at this day/time';
+            }
+            if ($tier === 'mismatch') {
+                $issues[] = "belongs to a different College than this Section";
+            }
+            $overrideReason = 'This room '.implode(', ', $issues).'.';
+        }
+
+        return [
+            'id' => $room->id,
+            'name' => "{$room->room_code} — {$room->room_name}",
+            'room_type' => $room->room_type,
+            'room_category' => $room->room_category,
+            'department' => $room->department?->name,
+            'college' => $room->college?->name,
+            'capacity' => $room->capacity,
+            'match_tier' => $tier,
+            'score' => $score,
+            'score_max' => 100,
+            'score_breakdown' => $points,
+            'reasons' => $reasons,
+            'confidence' => $this->confidenceFromScore($score),
+            'badge' => $badge,
+            'manual_override' => $isManualOverride,
+            'override_reason' => $overrideReason,
+        ];
+    }
+
+    /**
+     * Resolve which scoping tier a Room falls into for a given
+     * Section, or null if the Room belongs to a College/Department
+     * that ISN'T the Section's own — i.e. not a valid candidate at
+     * all (Priorities 2–4 of the Intelligent Room Assignment spec).
+     *
+     *   'program' — Room's Department is exactly the Section's own.
+     *   'college'  — Room has no Department (or a different one) but
+     *                its College matches the Section's College.
+     *   'shared'   — Room has no College and no Department — usable
+     *                by any Section.
+     *   null       — Room is scoped to a College the Section doesn't
+     *                belong to (or a Department without a College
+     *                match) — never recommended.
+     */
+    private function resolveRoomScopeTier(Room $room, ?int $sectionDepartmentId, ?int $sectionCollegeId): ?string
+    {
+        if (! $room->college_id && ! $room->department_id) {
+            return 'shared';
+        }
+
+        if ($sectionDepartmentId && $room->department_id === $sectionDepartmentId) {
+            return 'program';
+        }
+
+        if ($sectionCollegeId && $room->college_id === $sectionCollegeId) {
+            return 'college';
+        }
+
+        return null;
+    }
+
+    /**
+     * Build the itemized "No suitable room available" reasons the
+     * spec calls for, based on exactly which hard filter(s) emptied
+     * the candidate pool.
+     *
+     * @return list<string>
+     */
+    private function noRoomReasons(
+        string $preferredType,
+        int $typeExcluded,
+        int $capacityExcluded,
+        int $conflictExcluded,
+        int $scopeExcluded,
+    ): array {
+        $reasons = [];
+
+        if ($typeExcluded > 0 && $capacityExcluded === 0 && $conflictExcluded === 0 && $scopeExcluded === 0) {
+            $reasons[] = "No available {$preferredType} room found.";
+        }
+
+        if ($capacityExcluded > 0) {
+            $reasons[] = 'The available rooms are too small for the estimated number of students.';
+        }
+
+        if ($conflictExcluded > 0) {
+            $reasons[] = 'All matching rooms are occupied during this time.';
+        }
+
+        if ($scopeExcluded > 0 && $typeExcluded === 0) {
+            $reasons[] = 'No room belonging to this Program, College, or a Shared room, is currently free.';
+        }
+
+        if (empty($reasons)) {
+            $reasons[] = "No {$preferredType} room is currently available for this Section.";
+        }
+
+        return $reasons;
     }
 
     /**

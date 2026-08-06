@@ -1,6 +1,6 @@
 <script setup>
 import { Head, useForm, usePage, router } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import Swal from 'sweetalert2';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -24,6 +24,8 @@ const props = defineProps({
         default: () => ({ room_search: '' }),
     },
     roomTypes: { type: Array, default: () => [] },
+    colleges: { type: Array, default: () => [] },
+    departments: { type: Array, default: () => [] },
 });
 
 const toast = useToast();
@@ -97,6 +99,21 @@ const statusOptions = [
     { label: 'Inactive', value: 'Inactive' },
 ];
 
+// College & Department/Program Assignment (Room Management enhancement).
+//
+// college_id = null  -> "All Colleges" — a shared room every college may use.
+// department_id = null -> "All Programs" — open to every program within the
+//                          selected college (or, if college is also null,
+//                          the room is fully shared with no restriction at all).
+//
+// This only prepares the data (see Room::department()/college() relations,
+// already used elsewhere by the scheduling engine's Room recommendation
+// scoring) — no AI/Auto Scheduler logic is touched here.
+const ALL_COLLEGES_OPTION = { id: null, name: 'All Colleges' };
+const ALL_PROGRAMS_OPTION = { id: null, name: 'All Programs' };
+
+const collegeOptions = [ALL_COLLEGES_OPTION, ...props.colleges];
+
 const addRoomVisible = ref(false);
 const editingRoom = ref(null); // null => Add mode, otherwise the Room being edited
 
@@ -106,10 +123,33 @@ const roomForm = useForm({
     building: '',
     floor: '',
     room_type: null,
+    college_id: null,
+    department_id: null,
     capacity: 1,
     status: 'Active',
     remarks: '',
 });
+
+// Department/Program options depend on the selected College — only
+// that College's programs are offered, plus "All Programs".
+const departmentOptions = computed(() => {
+    if (!roomForm.college_id) {
+        return [ALL_PROGRAMS_OPTION];
+    }
+
+    return [
+        ALL_PROGRAMS_OPTION,
+        ...props.departments.filter((department) => department.college_id === roomForm.college_id),
+    ];
+});
+
+// Selecting "All Colleges" (or switching Colleges) makes the previous
+// Department/Program choice invalid, so it's cleared here — but only
+// on a user-driven change; openEdit()/openAdd() set both fields
+// programmatically and must not have this clear them.
+const onCollegeChange = () => {
+    roomForm.department_id = null;
+};
 
 const openAdd = () => {
     editingRoom.value = null;
@@ -126,6 +166,8 @@ const openEdit = (room) => {
     roomForm.building = room.building;
     roomForm.floor = room.floor ?? '';
     roomForm.room_type = room.room_type;
+    roomForm.college_id = room.college_id ?? null;
+    roomForm.department_id = room.department_id ?? null;
     roomForm.capacity = room.capacity;
     roomForm.status = room.status;
     roomForm.remarks = room.remarks ?? '';
@@ -284,6 +326,16 @@ const onDeleteRoom = (room) => {
                                 {{ data.room_type }}
                             </template>
                         </Column>
+                        <Column header="College" style="width: 14rem">
+                            <template #body="{ data }">
+                                {{ data.college?.name ?? 'All Colleges' }}
+                            </template>
+                        </Column>
+                        <Column header="Department / Program" style="width: 13rem">
+                            <template #body="{ data }">
+                                {{ data.department?.name ?? 'All Programs' }}
+                            </template>
+                        </Column>
                         <Column header="Capacity" style="width: 8rem">
                             <template #body="{ data }">
                                 {{ data.capacity }}
@@ -418,6 +470,50 @@ const onDeleteRoom = (room) => {
                     />
                     <small v-if="roomForm.errors.room_type" class="text-red-500">
                         {{ roomForm.errors.room_type }}
+                    </small>
+                </div>
+
+                <!-- College -->
+                <div class="flex flex-col gap-1">
+                    <label for="college_id" class="text-sm font-medium text-slate-700">College</label>
+                    <Select
+                        id="college_id"
+                        v-model="roomForm.college_id"
+                        :options="collegeOptions"
+                        optionLabel="name"
+                        optionValue="id"
+                        placeholder="All Colleges"
+                        showClear
+                        :invalid="!!roomForm.errors.college_id"
+                        class="w-full"
+                        @update:modelValue="onCollegeChange"
+                    />
+                    <small class="text-slate-400">Leave as "All Colleges" for a room shared by everyone.</small>
+                    <small v-if="roomForm.errors.college_id" class="text-red-500">
+                        {{ roomForm.errors.college_id }}
+                    </small>
+                </div>
+
+                <!-- Department / Program -->
+                <div class="flex flex-col gap-1">
+                    <label for="department_id" class="text-sm font-medium text-slate-700">Department / Program</label>
+                    <Select
+                        id="department_id"
+                        v-model="roomForm.department_id"
+                        :options="departmentOptions"
+                        optionLabel="name"
+                        optionValue="id"
+                        placeholder="All Programs"
+                        showClear
+                        :disabled="!roomForm.college_id"
+                        :invalid="!!roomForm.errors.department_id"
+                        class="w-full"
+                    />
+                    <small class="text-slate-400">
+                        {{ roomForm.college_id ? 'Leave as "All Programs" to open this room to every program in the selected College.' : 'Select a College first to assign a specific Program.' }}
+                    </small>
+                    <small v-if="roomForm.errors.department_id" class="text-red-500">
+                        {{ roomForm.errors.department_id }}
                     </small>
                 </div>
 

@@ -394,6 +394,86 @@ class SectionSubjectController extends Controller
     }
 
     /**
+     * Room Recommendation Selector — options list (recommended pool +
+     * global search, scored via RecommendationService::roomOptionsForSelector()).
+     */
+    public function roomOptions(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $subject->loadMissing(['subject', 'section.major.department']);
+
+        return response()->json($this->recommendationService->roomOptionsForSelector(
+            $subject->subject,
+            $subject->section,
+            $subject,
+            $request->query('search')
+        ));
+    }
+
+    /**
+     * Room Recommendation Selector — Manual Override.
+     *
+     * Applies the Registrar's room pick to this row IMMEDIATELY (no
+     * need to leave or close the Auto Generate modal) and returns the
+     * recomputed Live Score/badge/reasons for it — including a
+     * "Manual Override" explanation when the pick falls outside the
+     * hard-filtered recommended pool (wrong type, too small, occupied,
+     * or a different College). Faculty/Days/Time are left exactly as
+     * Auto Generate produced them; only Room and its scoring metadata
+     * change. The row keeps is_auto_generated = true / Status 'Draft'
+     * — it's still reviewed by "Accept All & Save" like the rest of
+     * the panel, it just now reflects the Registrar's choice.
+     */
+    public function overrideRoom(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $validated = $request->validate([
+            'room_id' => ['required', 'integer', 'exists:rooms,id'],
+        ]);
+
+        $subject->loadMissing(['subject', 'section.major.department']);
+
+        $room = Room::query()->where('status', 'Active')->findOrFail($validated['room_id']);
+
+        $scored = $this->recommendationService->scoreArbitraryRoom(
+            $room,
+            $subject->subject,
+            $subject->section,
+            $subject
+        );
+
+        $meta = $subject->auto_generated_meta ?? [];
+        $meta['room'] = [
+            'id' => $scored['id'],
+            'name' => $scored['name'],
+            'score' => $scored['score'],
+            'confidence' => $scored['confidence'],
+            'reasons' => $scored['reasons'],
+            'match_tier' => $scored['match_tier'],
+            'badge' => $scored['badge'],
+            'manual_override' => $scored['manual_override'],
+            'override_reason' => $scored['override_reason'],
+        ];
+
+        if (isset($meta['faculty']['score'], $meta['time']['score'])) {
+            $meta['overall_score'] = (int) round(($meta['faculty']['score'] + $scored['score'] + $meta['time']['score']) / 3);
+        }
+
+        $subject->update([
+            'room_id' => $room->id,
+            'auto_generated_meta' => $meta,
+        ]);
+
+        return response()->json([
+            'section_subject_id' => $subject->id,
+            'room' => $scored,
+            'overall_score' => $meta['overall_score'] ?? $scored['score'],
+        ]);
+    }
+
+    /**
      * "⚡ Auto Generate Schedule" (Prompt 8.9).
      *
      * Runs AutoScheduleService for every currently unscheduled subject

@@ -174,7 +174,10 @@ class AutoScheduleService
         $roomCandidates = $roomRec['recommendations'];
 
         if (empty($roomCandidates)) {
-            return $this->unresolved($sectionSubject, 'No available room of the correct type was found for this subject.');
+            $reasons = $roomRec['reasons'] ?? [];
+            $detail = $reasons ? implode(' ', $reasons) : 'No available room of the correct type was found for this subject.';
+
+            return $this->unresolved($sectionSubject, $detail, $reasons);
         }
 
         foreach (array_slice($facultyCandidates, 0, self::CANDIDATE_FACULTY) as $facultyCandidate) {
@@ -309,7 +312,16 @@ class AutoScheduleService
         ];
     }
 
-    private function unresolved(SectionSubject $sectionSubject, string $reason): array
+    /**
+     * @param  list<string>  $reasonDetails  Itemized bullet reasons (e.g. from
+     *                                       RecommendationService::recommendRooms()'s
+     *                                       'reasons' key) for the frontend's
+     *                                       "⚠ No suitable room available" panel.
+     *                                       Empty when the single $reason string
+     *                                       already says everything (faculty/time
+     *                                       cases untouched by this task).
+     */
+    private function unresolved(SectionSubject $sectionSubject, string $reason, array $reasonDetails = []): array
     {
         return [
             'success' => false,
@@ -318,6 +330,7 @@ class AutoScheduleService
                 'subject_code' => $sectionSubject->subject->subject_code,
                 'subject_title' => $sectionSubject->subject->subject_title,
                 'reason' => $reason,
+                'reason_details' => $reasonDetails,
             ],
         ];
     }
