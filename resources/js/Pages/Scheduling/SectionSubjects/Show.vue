@@ -27,6 +27,7 @@ import ProgressBar from 'primevue/progressbar';
 import Divider from 'primevue/divider';
 import FacultyRecommendationSelector from '@/Components/Scheduling/FacultyRecommendationSelector.vue';
 import RoomRecommendationSelector from '@/Components/Scheduling/RoomRecommendationSelector.vue';
+import TimeRecommendationSelector from '@/Components/Scheduling/TimeRecommendationSelector.vue';
 
 const props = defineProps({
     section: { type: Object, required: true },
@@ -974,6 +975,25 @@ const onRoomOverride = (result, { room, overall_score }) => {
     if (row) {
         row.room_id = room.id;
         if (row.room) row.room = { ...row.room, id: room.id, room_code: room.name?.split(' — ')[0] ?? row.room.room_code };
+    }
+};
+
+// Time Recommendation Selector — same instant-refresh pattern as
+// onFacultyOverride()/onRoomOverride() above; the override is already
+// persisted server-side, this just syncs the review panel's in-memory
+// Time block + Overall Score so the Live Score updates with no modal
+// close and no re-fetch of the whole panel.
+const onTimeOverride = (result, { time, overall_score }) => {
+    result.time = time;
+    if (overall_score !== undefined && overall_score !== null) {
+        result.overall_score = overall_score;
+    }
+
+    const row = rows.value.find((r) => r.id === result.section_subject_id);
+    if (row) {
+        row.days = time.days.join(',');
+        row.start_time = time.start_time;
+        row.end_time = time.end_time;
     }
 };
 
@@ -2317,33 +2337,14 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                 />
                             </div>
 
-                            <!-- Time -->
+                            <!-- Time — interactive recommendation selector, same click-to-edit flow as Faculty/Room -->
                             <div>
-                                <div class="flex items-center justify-between mb-1">
-                                    <span class="text-xs font-medium text-slate-500 uppercase">Time</span>
-                                    <span class="text-xs font-semibold" :style="{ color: scoreColor(result.time.score) }">
-                                        {{ result.time.score }}%
-                                    </span>
-                                </div>
-                                <p class="text-sm font-medium text-slate-800 mb-1">
-                                    {{ formatDays(result.time.days) }} · {{ formatTimeRange(result.time.start_time, result.time.end_time) }}
-                                </p>
-                                <ProgressBar
-                                    :value="result.time.score"
-                                    :showValue="false"
-                                    style="height: 6px"
-                                    :pt="{ value: { style: `background:${scoreColor(result.time.score)}` } }"
+                                <TimeRecommendationSelector
+                                    :section-id="section.id"
+                                    :section-subject-id="result.section_subject_id"
+                                    :model-value="result.time"
+                                    @updated="onTimeOverride(result, $event)"
                                 />
-                                <ul class="mt-2 space-y-0.5">
-                                    <li
-                                        v-for="(reason, idx) in result.time.reasons"
-                                        :key="idx"
-                                        class="text-xs flex items-center gap-1"
-                                        :class="reason.met ? 'text-green-600' : 'text-slate-400'"
-                                    >
-                                        <i :class="reason.met ? 'pi pi-check' : 'pi pi-minus'"></i>{{ reason.label }}
-                                    </li>
-                                </ul>
                             </div>
                         </div>
                     </div>

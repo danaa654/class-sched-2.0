@@ -474,6 +474,75 @@ class SectionSubjectController extends Controller
     }
 
     /**
+     * Time Recommendation Selector — Manual Override.
+     *
+     * Applies the Registrar's Days/Start/End pick to this row
+     * IMMEDIATELY (no need to leave or close the Auto Generate modal)
+     * and returns the recomputed Live Score/reasons for it — same
+     * "click to edit, apply instantly" flow Faculty/Room already have.
+     * A conflicting or off-pattern (e.g. 3x/week when the subject
+     * expects 2x/week) time is never silently rejected here — it's
+     * still applied and flagged as a Manual Override, exactly like an
+     * out-of-pool Faculty/Room pick, so the Registrar stays in
+     * control and can see why it's flagged before deciding to keep it.
+     * Faculty/Room are left exactly as Auto Generate produced them;
+     * only Days/Start/End and the Time scoring metadata change.
+     */
+    public function overrideTime(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $validated = $request->validate([
+            'days' => ['required', 'array', 'min:1', 'max:3'],
+            'days.*' => ['required', 'string', 'in:Mon,Tue,Wed,Thu,Fri,Sat,Sun'],
+            'start_time' => ['required', 'date_format:H:i'],
+            'end_time' => ['required', 'date_format:H:i', 'after:start_time'],
+        ]);
+
+        $subject->loadMissing(['subject', 'section.major.department']);
+
+        $scored = $this->recommendationService->scoreArbitraryTime(
+            $validated['days'],
+            $validated['start_time'],
+            $validated['end_time'],
+            $subject->subject,
+            $subject->section,
+            $subject->faculty_id,
+            $subject->room_id,
+            $subject
+        );
+
+        $meta = $subject->auto_generated_meta ?? [];
+        $meta['time'] = [
+            'days' => $scored['days'],
+            'start_time' => $scored['start_time'],
+            'end_time' => $scored['end_time'],
+            'score' => $scored['score'],
+            'confidence' => $scored['confidence'],
+            'reasons' => $scored['reasons'],
+            'manual_override' => $scored['manual_override'],
+            'override_reason' => $scored['override_reason'],
+        ];
+
+        if (isset($meta['faculty']['score'], $meta['room']['score'])) {
+            $meta['overall_score'] = (int) round(($meta['faculty']['score'] + $meta['room']['score'] + $scored['score']) / 3);
+        }
+
+        $subject->update([
+            'days' => implode(',', $scored['days']),
+            'start_time' => $scored['start_time'],
+            'end_time' => $scored['end_time'],
+            'auto_generated_meta' => $meta,
+        ]);
+
+        return response()->json([
+            'section_subject_id' => $subject->id,
+            'time' => $scored,
+            'overall_score' => $meta['overall_score'] ?? $scored['score'],
+        ]);
+    }
+
+    /**
      * "⚡ Auto Generate Schedule" (Prompt 8.9).
      *
      * Runs AutoScheduleService for every currently unscheduled subject

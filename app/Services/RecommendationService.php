@@ -44,20 +44,6 @@ class RecommendationService
     ];
 
     /**
-     * Day-combination patterns tried when hunting for an open Time
-     * slot, tried in order. Mirrors the workspace's own dayPresets.
-     *
-     * @var list<list<string>>
-     */
-    private const DAY_PATTERNS = [
-        ['Mon', 'Wed', 'Fri'],
-        ['Tue', 'Thu'],
-        ['Mon', 'Wed'],
-        ['Wed', 'Fri'],
-        ['Sat'],
-    ];
-
-    /**
      * Candidate start times tried for each Day pattern, earliest
      * first, within a normal academic day.
      *
@@ -71,8 +57,10 @@ class RecommendationService
 
     private const MAX_TIME_RESULTS = 5;
 
-    public function __construct(private readonly ScheduleConflictService $conflictService)
-    {
+    public function __construct(
+        private readonly ScheduleConflictService $conflictService,
+        private readonly MeetingPatternService $meetingPatternService,
+    ) {
     }
 
     /**
@@ -1197,7 +1185,15 @@ class RecommendationService
         $results = [];
         $slotIndex = 0;
 
-        foreach (self::DAY_PATTERNS as $days) {
+        // MEETING PATTERN INTELLIGENCE (Prompt: Meeting Pattern
+        // Intelligence) — which Day combinations are even considered
+        // now depends on what kind of Subject this is (Lecture ->
+        // 2 meetings/week, Laboratory/Special -> 1 meeting/week, never
+        // 3 unless a future config explicitly raises the cap). See
+        // MeetingPatternService for the full rule set.
+        $dayPatterns = $this->meetingPatternService->dayGroups($subject);
+
+        foreach ($dayPatterns as $days) {
             $sessionMinutes = (int) round(($totalHours / count($days)) * 60);
 
             foreach (self::START_TIMES as $start) {
@@ -1256,6 +1252,8 @@ class RecommendationService
                         'days' => $days,
                         'start_time' => $start,
                         'end_time' => $end,
+                        'meetings_per_week' => count($days),
+                        'subject_type' => $this->meetingPatternService->label($subject),
                         'score' => array_sum($points),
                         'score_max' => 100,
                         'score_breakdown' => $points,
@@ -1286,6 +1284,123 @@ class RecommendationService
         unset($item);
 
         return ['recommendations' => $results, 'message' => null];
+    }
+
+    /**
+     * Time Recommendation Selector — Manual Override support.
+     *
+     * Scores a Registrar-picked Days/Start/End combination the exact
+     * same way recommendTimes() scores its own suggestions — reusing
+     * ScheduleConflictService for the Faculty/Room/Section overlap
+     * checks — so a manually-typed time can never disagree with what
+     * happens when "Accept All & Save" / "Save Schedule" actually
+     * commits it. Unlike recommendTimes() this scores exactly the one
+     * slot the Registrar picked rather than searching for the best
+     * one, and it never rejects a conflicting slot outright — it
+     * reports the conflict as a "Manual Override" so the Registrar can
+     * still see and decide, the same freedom Faculty/Room overrides
+     * already give.
+     *
+     * @param  list<string>  $days  Short Day tokens (Mon/Tue/Wed/...).
+     */
+    public function scoreArbitraryTime(
+        array $days,
+        string $startTime,
+        string $endTime,
+        Subject $subject,
+        Section $section,
+        ?int $facultyId,
+        ?int $roomId,
+        ?SectionSubject $current = null
+    ): array {
+        $excludingId = $current?->id ?? 0;
+
+        $sectionConflict = $section->id
+            ? (bool) $this->conflictService->findSectionConflict($section->id, $excludingId, $days, $startTime, $endTime)
+            : false;
+
+        $facultyConflict = $facultyId
+            ? (bool) $this->conflictService->findFacultyConflict($facultyId, $excludingId, $days, $startTime, $endTime)
+            : false;
+
+        $roomConflict = $roomId
+            ? (bool) $this->conflictService->findRoomConflict($roomId, $excludingId, $days, $startTime, $endTime)
+            : false;
+
+        $expectedMeetings = $this->meetingPatternService->meetingsPerWeek($subject);
+        $fitsPattern = count($days) === $expectedMeetings;
+
+        $totalHours = (int) $subject->lecture_hours + (int) $subject->laboratory_hours;
+        if ($totalHours <= 0) {
+            $totalHours = 3;
+        }
+        $expectedMinutes = (int) round(($totalHours / max(count($days), 1)) * 60);
+        $actualMinutes = $this->minutesBetween($startTime, $endTime);
+        $fitsHours = $actualMinutes >= $expectedMinutes - 5; // small tolerance for rounding
+
+        $points = [
+            'faculty_available' => $facultyConflict ? 0 : 15,
+            'room_available' => $roomConflict ? 0 : 15,
+            'section_available' => $sectionConflict ? 0 : 10,
+            'fits_subject_hours' => $fitsHours ? 10 : 0,
+            'preferred_slot' => $fitsPattern ? 50 : 25,
+        ];
+        $score = array_sum($points);
+
+        $reasons = [
+            ['label' => 'Faculty Available', 'met' => ! $facultyConflict, 'type' => $facultyConflict ? 'danger' : 'success'],
+            ['label' => 'Room Available', 'met' => ! $roomConflict, 'type' => $roomConflict ? 'danger' : 'success'],
+            ['label' => 'Section Available', 'met' => ! $sectionConflict, 'type' => $sectionConflict ? 'danger' : 'success'],
+            ['label' => $fitsHours ? 'Fits Subject Hours' : 'Shorter Than Required Hours', 'met' => $fitsHours, 'type' => $fitsHours ? 'success' : 'warning'],
+        ];
+
+        if (! $fitsPattern) {
+            $label = $this->meetingPatternService->label($subject);
+            $reasons[] = [
+                'label' => "{$label} subjects normally meet {$expectedMeetings}x/week",
+                'met' => false,
+                'type' => 'warning',
+            ];
+        }
+
+        $isManualOverride = $facultyConflict || $roomConflict || $sectionConflict || ! $fitsPattern || ! $fitsHours;
+
+        $overrideReason = null;
+        if ($isManualOverride) {
+            $issues = [];
+            if ($facultyConflict) {
+                $issues[] = 'the selected faculty is already booked at this day/time';
+            }
+            if ($roomConflict) {
+                $issues[] = 'the selected room is already booked at this day/time';
+            }
+            if ($sectionConflict) {
+                $issues[] = 'this section already has another subject at this day/time';
+            }
+            if (! $fitsPattern) {
+                $label = $this->meetingPatternService->label($subject);
+                $issues[] = "{$label} subjects normally meet {$expectedMeetings}x/week, not ".count($days).'x';
+            }
+            if (! $fitsHours) {
+                $issues[] = 'this block is shorter than the subject\'s required weekly hours';
+            }
+            $overrideReason = 'This time '.implode(', ', $issues).'.';
+        }
+
+        return [
+            'days' => $days,
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'meetings_per_week' => count($days),
+            'subject_type' => $this->meetingPatternService->label($subject),
+            'score' => $score,
+            'score_max' => 100,
+            'score_breakdown' => $points,
+            'reasons' => $reasons,
+            'confidence' => $this->confidenceFromScore($score),
+            'manual_override' => $isManualOverride,
+            'override_reason' => $overrideReason,
+        ];
     }
 
     /**
