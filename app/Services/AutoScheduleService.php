@@ -45,6 +45,7 @@ class AutoScheduleService
     public function __construct(
         private readonly RecommendationService $recommendationService,
         private readonly ScheduleConflictService $conflictService,
+        private readonly FacultyWorkloadService $workloadService,
     ) {
     }
 
@@ -187,7 +188,7 @@ class AutoScheduleService
             // ranked candidate. RecommendationService already scores
             // load, but scoring alone doesn't stop an overload; this
             // is the hard block the spec asks for.
-            if (! $this->withinTeachingLoad($facultyCandidate, $subject)) {
+            if (! $this->withinTeachingLoad($facultyCandidate, $subject, $sectionSubject)) {
                 continue;
             }
 
@@ -241,19 +242,27 @@ class AutoScheduleService
     }
 
     /**
-     * Faculty's current committed load (Scheduled + already
-     * auto-generated rows) plus this subject's units must not exceed
-     * their max_teaching_units.
+     * FACULTY WORKLOAD VALIDATION — STEP 3 ("Remove faculty exceeding
+     * workload"). Faculty's current committed load (Scheduled + Draft,
+     * active semester only) plus this subject's load must not exceed
+     * their Maximum Teaching Load. Delegates to FacultyWorkloadService
+     * — the same hard-cap math Manual Assignment and Save Schedule
+     * enforce — so Auto Generate can never produce a placement that
+     * "Save Schedule" would turn around and reject.
+     *
+     * Auto Generate never offers an override: an Administrator can
+     * only override the cap through Manual Assignment / Save Schedule,
+     * never through the bulk generator.
      */
-    private function withinTeachingLoad(array $facultyCandidate, Subject $subject): bool
+    private function withinTeachingLoad(array $facultyCandidate, Subject $subject, SectionSubject $sectionSubject): bool
     {
-        if (! $facultyCandidate['max_teaching_units']) {
-            return true;
+        $faculty = \App\Models\Faculty::find($facultyCandidate['id']);
+
+        if (! $faculty) {
+            return false;
         }
 
-        $projectedLoad = $facultyCandidate['current_load'] + ($subject->units ?? 0);
-
-        return $projectedLoad <= $facultyCandidate['max_teaching_units'];
+        return ! $this->workloadService->wouldExceed($faculty, $subject, $sectionSubject->id);
     }
 
     /**

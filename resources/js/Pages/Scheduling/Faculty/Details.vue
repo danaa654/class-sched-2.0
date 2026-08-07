@@ -23,6 +23,7 @@ import Tab from 'primevue/tab';
 import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Toast from 'primevue/toast';
+import ProgressBar from 'primevue/progressbar';
 
 const props = defineProps({
     faculty: { type: Object, required: true },
@@ -75,11 +76,21 @@ const facultyForm = useForm({
     employment_type: props.faculty.employment_type,
     college_id: props.faculty.college_id,
     max_teaching_units: props.faculty.max_teaching_units,
+    workload_type: props.faculty.workload_type ?? 'units',
+    max_weekly_hours: props.faculty.max_weekly_hours,
     status: props.faculty.status,
     email: props.faculty.email,
     contact_number: props.faculty.contact_number,
     remarks: props.faculty.remarks,
 });
+
+// Whichever workload measurement the institution uses — 'units'
+// (default, checked against Max Teaching Units) or 'hours' (checked
+// against Max Weekly Hours instead). See FacultyWorkloadService.
+const workloadTypeOptions = [
+    { label: 'Teaching Units', value: 'units' },
+    { label: 'Weekly Hours', value: 'hours' },
+];
 
 // Faculty ID, name, suffix, contact number, and remarks are always
 // stored/displayed in caps (matches the table); Email is left as
@@ -106,6 +117,8 @@ const openEdit = () => {
     facultyForm.employment_type = props.faculty.employment_type;
     facultyForm.college_id = props.faculty.college_id;
     facultyForm.max_teaching_units = props.faculty.max_teaching_units;
+    facultyForm.workload_type = props.faculty.workload_type ?? 'units';
+    facultyForm.max_weekly_hours = props.faculty.max_weekly_hours;
     facultyForm.status = props.faculty.status;
     facultyForm.email = props.faculty.email;
     facultyForm.contact_number = props.faculty.contact_number;
@@ -318,18 +331,57 @@ const onDeleteAvailability = (record) => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Workload tab                                                        */
+/* Workload tab — FACULTY WORKLOAD VALIDATION SYSTEM.                  */
+/* `faculty.workload` is computed server-side by FacultyWorkloadService */
+/* (FacultyController@show) — the same engine Auto Generate/Recommend  */
+/* Faculty/Manual Assignment/Save Schedule all use — so this tab can    */
+/* never disagree with what the scheduling engine actually enforces.   */
 /* ------------------------------------------------------------------ */
 
-const assignedUnits = computed(() =>
+const workload = computed(() => props.faculty.workload ?? null);
+
+const workloadPercent = computed(() => {
+    if (!workload.value) return 0;
+    return Math.min(100, Math.max(0, workload.value.percent ?? 0));
+});
+
+const workloadStatusMeta = computed(() => {
+    switch (workload.value?.status) {
+        case 'overloaded':
+            return { emoji: '🔴', label: 'Overloaded', class: 'text-red-600 bg-red-50 border-red-200' };
+        case 'high':
+            return { emoji: '🟡', label: 'Approaching Limit', class: 'text-amber-600 bg-amber-50 border-amber-200' };
+        default:
+            return { emoji: '🟢', label: 'Healthy', class: 'text-emerald-600 bg-emerald-50 border-emerald-200' };
+    }
+});
+
+// Kept for the "qualified subjects" reference figure still shown
+// beneath the main workload cards (how many units this faculty member
+// is qualified to teach in total, regardless of whether scheduled).
+const qualifiedUnits = computed(() =>
     (props.faculty.subjects ?? []).reduce((sum, subject) => sum + Number(subject.units || 0), 0),
 );
 
-const workloadPercent = computed(() => {
-    const max = Number(props.faculty.max_teaching_units || 0);
-    if (max <= 0) return 0;
-    return Math.min(100, Math.round((assignedUnits.value / max) * 100));
-});
+// The actual Subjects/Sections making up the "Current Load" number
+// above — same 'Scheduled'/'Draft', active-semester placements,
+// straight from FacultyWorkloadService::assignedPlacements() via
+// FacultyController@show (evaluate(..., includePlacements: true)).
+const assignedPlacements = computed(() => workload.value?.assigned_placements ?? []);
+
+// Reuses the formatTime(time) declared above (Availability tab) —
+// same 'HH:mm'/'HH:mm:ss' -> 12-hour am/pm formatting applies here.
+
+const placementStatusSeverity = (status) => {
+    switch (status) {
+        case 'Scheduled':
+            return 'success';
+        case 'Draft':
+            return 'warn';
+        default:
+            return 'secondary';
+    }
+};
 </script>
 
 <template>
@@ -585,26 +637,127 @@ const workloadPercent = computed(() => {
 
                             <!-- WORKLOAD -->
                             <TabPanel value="workload">
-                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                                    <div class="rounded-xl border border-slate-100 p-4">
-                                        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Max Teaching Units</p>
-                                        <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ faculty.max_teaching_units }}</p>
+                                <div
+                                    class="mb-6 flex items-center justify-between rounded-xl border p-4"
+                                    :class="workloadStatusMeta.class"
+                                >
+                                    <div>
+                                        <p class="text-xs font-semibold tracking-wide uppercase opacity-70">Current Load</p>
+                                        <p class="mt-1 text-2xl font-bold">
+                                            {{ workload?.current ?? 0 }} / {{ workload?.max ?? 0 }} {{ workload?.unit_label ?? 'Units' }}
+                                        </p>
                                     </div>
-                                    <div class="rounded-xl border border-slate-100 p-4">
-                                        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Assigned Units (Qualified)</p>
-                                        <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ assignedUnits }}</p>
-                                    </div>
-                                    <div class="rounded-xl border border-slate-100 p-4">
-                                        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Load Utilization</p>
-                                        <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ workloadPercent }}%</p>
+                                    <div class="text-right">
+                                        <p class="text-3xl leading-none">{{ workloadStatusMeta.emoji }}</p>
+                                        <p class="mt-1 text-sm font-semibold">{{ workloadStatusMeta.label }} — {{ workloadPercent }}%</p>
                                     </div>
                                 </div>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+                                    <div class="rounded-xl border border-slate-100 p-4">
+                                        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Maximum Load</p>
+                                        <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ workload?.max ?? 0 }}</p>
+                                    </div>
+                                    <div class="rounded-xl border border-slate-100 p-4">
+                                        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Current Assigned</p>
+                                        <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ workload?.current ?? 0 }}</p>
+                                    </div>
+                                    <div class="rounded-xl border border-slate-100 p-4">
+                                        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Remaining</p>
+                                        <p
+                                            class="mt-1 text-2xl font-bold"
+                                            :class="(workload?.remaining ?? 0) < 0 ? 'text-red-600' : 'text-[#1E293B]'"
+                                        >
+                                            {{ workload?.remaining ?? 0 }}
+                                        </p>
+                                    </div>
+                                    <div class="rounded-xl border border-slate-100 p-4">
+                                        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Assigned Subjects</p>
+                                        <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ workload?.assigned_subjects ?? 0 }}</p>
+                                    </div>
+                                </div>
+
+                                <ProgressBar
+                                    :value="workloadPercent"
+                                    :showValue="false"
+                                    class="mb-6 h-2"
+                                    :pt="{
+                                        value: {
+                                            class:
+                                                workload?.status === 'overloaded'
+                                                    ? '!bg-red-500'
+                                                    : workload?.status === 'high'
+                                                      ? '!bg-amber-500'
+                                                      : '!bg-emerald-500',
+                                        },
+                                    }"
+                                />
+
                                 <p class="text-xs text-slate-400">
                                     <i class="pi pi-info-circle mr-1"></i>
-                                    This reflects the units of subjects this faculty member is qualified to teach, not their
-                                    actual scheduled load. Actual teaching load will be available once schedules are finalized
-                                    by the scheduling engine.
+                                    Current Load reflects every 'Scheduled' or 'Draft' subject this faculty member is actually
+                                    assigned to teach in the active semester (Auto Generate + manually saved schedules alike),
+                                    measured in {{ workload?.unit_label ?? 'Units' }} — the same figure Auto Generate Schedule,
+                                    Recommend Faculty, Manual Assignment, and Save Schedule all validate against. Reference:
+                                    qualified to teach {{ qualifiedUnits }} unit(s) worth of subjects in total (Teaching
+                                    Qualifications tab).
                                 </p>
+
+                                <!-- Assigned Subjects list — what actually makes up Current Load -->
+                                <div class="mt-8">
+                                    <h3 class="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">
+                                        Assigned Subjects — {{ assignedPlacements.length }}
+                                    </h3>
+
+                                    <DataTable
+                                        v-if="assignedPlacements.length"
+                                        :value="assignedPlacements"
+                                        dataKey="id"
+                                        class="text-sm"
+                                        stripedRows
+                                    >
+                                        <Column field="edp_code" header="EDP Code">
+                                            <template #body="{ data }">
+                                                <span class="font-mono text-xs text-slate-600">{{ data.edp_code || '—' }}</span>
+                                            </template>
+                                        </Column>
+                                        <Column field="subject_code" header="Subject">
+                                            <template #body="{ data }">
+                                                <div class="font-semibold text-[#1E293B]">{{ data.subject_code }}</div>
+                                                <div class="text-xs text-slate-500">{{ data.subject_title }}</div>
+                                            </template>
+                                        </Column>
+                                        <Column field="section_code" header="Section">
+                                            <template #body="{ data }">{{ data.section_code || '—' }}</template>
+                                        </Column>
+                                        <Column header="Schedule">
+                                            <template #body="{ data }">
+                                                <span v-if="data.days">
+                                                    {{ data.days }} &middot; {{ formatTime(data.start_time) }}–{{ formatTime(data.end_time) }}
+                                                </span>
+                                                <span v-else class="text-slate-400">Not yet scheduled</span>
+                                            </template>
+                                        </Column>
+                                        <Column field="room_name" header="Room">
+                                            <template #body="{ data }">{{ data.room_name || '—' }}</template>
+                                        </Column>
+                                        <Column header="Load">
+                                            <template #body="{ data }">{{ data.load }} {{ workload?.unit_label ?? 'Units' }}</template>
+                                        </Column>
+                                        <Column field="status" header="Status">
+                                            <template #body="{ data }">
+                                                <Tag :value="data.status" :severity="placementStatusSeverity(data.status)" />
+                                            </template>
+                                        </Column>
+                                    </DataTable>
+
+                                    <div
+                                        v-else
+                                        class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400"
+                                    >
+                                        No subjects assigned to this faculty member in the active semester yet.
+                                    </div>
+                                </div>
                             </TabPanel>
                         </TabPanels>
                     </Tabs>
@@ -693,6 +846,33 @@ const workloadPercent = computed(() => {
                         inputClass="w-full"
                     />
                     <small v-if="facultyForm.errors.max_teaching_units" class="text-red-500">{{ facultyForm.errors.max_teaching_units }}</small>
+                </div>
+
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-medium text-slate-700">Workload Measurement</label>
+                    <Select
+                        v-model="facultyForm.workload_type"
+                        :options="workloadTypeOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        :invalid="!!facultyForm.errors.workload_type"
+                        class="w-full"
+                    />
+                    <p class="text-xs text-slate-400">Whichever the institution uses to cap this faculty member's load.</p>
+                </div>
+
+                <div v-if="facultyForm.workload_type === 'hours'" class="flex flex-col gap-1">
+                    <label class="text-sm font-medium text-slate-700">Maximum Weekly Hours</label>
+                    <InputNumber
+                        v-model="facultyForm.max_weekly_hours"
+                        :min="0"
+                        showButtons
+                        buttonLayout="horizontal"
+                        :invalid="!!facultyForm.errors.max_weekly_hours"
+                        class="w-full"
+                        inputClass="w-full"
+                    />
+                    <small v-if="facultyForm.errors.max_weekly_hours" class="text-red-500">{{ facultyForm.errors.max_weekly_hours }}</small>
                 </div>
 
                 <div class="flex flex-col gap-1">

@@ -118,7 +118,7 @@ watch(
 const rowState = reactive({});
 const stateFor = (rowId) => {
     if (!rowState[rowId]) {
-        rowState[rowId] = { errors: {}, capacityConfirmed: false };
+        rowState[rowId] = { errors: {}, capacityConfirmed: false, workloadConfirmed: false };
     }
     return rowState[rowId];
 };
@@ -671,6 +671,9 @@ const markDirty = (row, field) => {
 const onFacultyChange = (row, value) => {
     row.faculty_id = value;
     markDirty(row, 'faculty_id');
+    // A new Faculty means any previous Teaching Load Limit
+    // confirmation no longer applies — must be re-confirmed.
+    stateFor(row.id).workloadConfirmed = false;
 };
 const onRoomChange = (row, value) => {
     row.room_id = value;
@@ -787,18 +790,20 @@ const saveSchedule = async () => {
 
     savingSchedule.value = true;
 
-    const payloadRows = rows.value.map((row) => ({
-        id: row.id,
-        faculty_id: row.faculty_id || null,
-        room_id: row.room_id || null,
-        days: row.days ?? [],
-        start_time: row.start_time || null,
-        end_time: row.end_time || null,
-        capacity: row.capacity || null,
-        capacity_confirmed: Boolean(stateFor(row.id).capacityConfirmed),
-    }));
+    const buildPayload = () =>
+        rows.value.map((row) => ({
+            id: row.id,
+            faculty_id: row.faculty_id || null,
+            room_id: row.room_id || null,
+            days: row.days ?? [],
+            start_time: row.start_time || null,
+            end_time: row.end_time || null,
+            capacity: row.capacity || null,
+            capacity_confirmed: Boolean(stateFor(row.id).capacityConfirmed),
+            workload_confirmed: Boolean(stateFor(row.id).workloadConfirmed),
+        }));
 
-    try {
+    const submit = async () => {
         const response = await fetch(route('scheduling.section-subjects.schedule.batch', props.section.id), {
             method: 'POST',
             headers: {
@@ -806,10 +811,56 @@ const saveSchedule = async () => {
                 Accept: 'application/json',
                 'X-XSRF-TOKEN': csrfToken(),
             },
-            body: JSON.stringify({ rows: payloadRows }),
+            body: JSON.stringify({ rows: buildPayload() }),
         });
 
-        const data = await response.json();
+        return { response, data: await response.json() };
+    };
+
+    try {
+        let { response, data } = await submit();
+
+        // FACULTY WORKLOAD VALIDATION — "Save Schedule Validation".
+        // The server rejects with 409 and lists every faculty member
+        // who'd exceed their Maximum Teaching Load. Only an
+        // Administrator can acknowledge and resubmit with
+        // workload_confirmed=true per affected row.
+        if (response.status === 409 && data.workload_warnings) {
+            const warnings = Object.values(data.workload_warnings);
+            const canOverride = Boolean(data.can_override);
+
+            const result = await Swal.fire({
+                icon: 'warning',
+                title: '⚠ Teaching Load Limit Exceeded',
+                html:
+                    '<div class="text-left text-sm space-y-2">' +
+                    warnings
+                        .map(
+                            (w) =>
+                                `<div><strong>${w.faculty_name}</strong><br/>Current: ${w.current} / ${w.max} ${w.unit_label} &rarr; assigning ${w.subject_code} would bring it to ${w.projected} / ${w.max} ${w.unit_label}.</div>`,
+                        )
+                        .join('') +
+                    (canOverride
+                        ? '<p class="mt-2">Please resolve these conflicts or override manually.</p>'
+                        : '<p class="mt-2 text-red-600">Only an Administrator may override this validation.</p>') +
+                    '</div>',
+                showCancelButton: canOverride,
+                confirmButtonText: canOverride ? 'Override & Save' : 'OK',
+                cancelButtonText: 'Cancel',
+                confirmButtonColor: '#dc2626',
+            });
+
+            if (!canOverride || !result.isConfirmed) {
+                savingSchedule.value = false;
+                return;
+            }
+
+            Object.keys(data.workload_warnings).forEach((rowId) => {
+                stateFor(Number(rowId)).workloadConfirmed = true;
+            });
+
+            ({ response, data } = await submit());
+        }
 
         if (!response.ok) {
             // Errors are keyed by SectionSubject id — map each back to

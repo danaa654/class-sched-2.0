@@ -16,6 +16,7 @@ use App\Models\SectionSubject;
 use App\Models\Subject;
 use App\Services\AutoScheduleService;
 use App\Services\EDPCodeService;
+use App\Services\FacultyWorkloadService;
 use App\Services\RecommendationService;
 use App\Services\ScheduleConflictService;
 use Illuminate\Http\JsonResponse;
@@ -31,8 +32,59 @@ class SectionSubjectController extends Controller
         private readonly EDPCodeService $edpCodeService,
         private readonly ScheduleConflictService $conflictService,
         private readonly RecommendationService $recommendationService,
-        private readonly AutoScheduleService $autoScheduleService
+        private readonly AutoScheduleService $autoScheduleService,
+        private readonly FacultyWorkloadService $workloadService
     ) {
+    }
+
+    /**
+     * FACULTY WORKLOAD VALIDATION — "Manual Assignment Validation" /
+     * "Save Schedule Validation".
+     *
+     * Evaluates one row's Faculty assignment against
+     * FacultyWorkloadService and returns a "⚠ Teaching Load Limit
+     * Exceeded" warning payload when it would push the Faculty member
+     * past their Maximum Teaching Load — or null when the assignment
+     * is within limits (nothing to warn about).
+     *
+     * This is deliberately NOT folded into ScheduleConflictService::validate():
+     * a workload overage is not a hard, non-negotiable conflict the
+     * way a double-booked Faculty/Room/Section is — per spec, an
+     * Administrator may explicitly "Override & Save" it. Hard
+     * conflicts can never be overridden; this can, and only by an
+     * Administrator (see UsersController's use of the same role gate).
+     */
+    private function workloadWarningFor(?int $facultyId, ?\App\Models\Subject $subject, int $excludingId): ?array
+    {
+        if (! $facultyId || ! $subject) {
+            return null;
+        }
+
+        $faculty = \App\Models\Faculty::find($facultyId);
+        if (! $faculty) {
+            return null;
+        }
+
+        $evaluation = $this->workloadService->evaluate($faculty, $subject, $excludingId);
+
+        if (! $evaluation['exceeds']) {
+            return null;
+        }
+
+        return [
+            'faculty_id' => $faculty->id,
+            'faculty_name' => $faculty->full_name,
+            'subject_code' => $subject->subject_code,
+            'unit_label' => $evaluation['unit_label'],
+            'current' => $evaluation['current'],
+            'additional' => $evaluation['additional'],
+            'projected' => $evaluation['projected'],
+            'max' => $evaluation['max'],
+            'message' => "{$faculty->full_name} is currently at {$evaluation['current']} / {$evaluation['max']} "
+                .strtolower($evaluation['unit_label'])." — assigning {$subject->subject_code} "
+                ."({$evaluation['additional']} {$evaluation['unit_label']}) would bring their load to "
+                ."{$evaluation['projected']} / {$evaluation['max']}, exceeding their allowable teaching load.",
+        ];
     }
 
     /**
@@ -266,6 +318,29 @@ class SectionSubjectController extends Controller
             return response()->json(['errors' => $errors], 422);
         }
 
+        // MANUAL ASSIGNMENT VALIDATION — Faculty Workload. Not a hard
+        // conflict (see workloadWarningFor()'s docblock): the Registrar
+        // gets a 409 "Teaching Load Limit Exceeded" warning the first
+        // time, and only an Administrator can resubmit with
+        // workload_confirmed=true to Override & Save.
+        $subject->loadMissing('subject');
+        $workloadWarning = $this->workloadWarningFor($facultyId, $subject->subject, $subject->id);
+
+        if ($workloadWarning) {
+            $canOverride = (bool) $request->user()?->hasRole('Administrator');
+            $confirmed = $request->boolean('workload_confirmed');
+
+            if (! $canOverride || ! $confirmed) {
+                return response()->json([
+                    'workload_warning' => $workloadWarning,
+                    'can_override' => $canOverride,
+                    'message' => $canOverride
+                        ? 'This assignment exceeds the faculty\'s allowable workload. Proceed anyway?'
+                        : 'This assignment exceeds the faculty\'s allowable workload. Only an Administrator may override this validation.',
+                ], 409);
+            }
+        }
+
         $status = 'Draft';
         if ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
             $status = 'Scheduled';
@@ -284,6 +359,8 @@ class SectionSubjectController extends Controller
             // touch what the Registrar just chose themselves.
             'is_auto_generated' => false,
             'auto_generated_meta' => null,
+            'is_workload_override' => (bool) $workloadWarning,
+            'workload_override_by' => $workloadWarning ? $request->user()?->id : null,
         ]);
 
         return response()->json([
@@ -638,12 +715,15 @@ class SectionSubjectController extends Controller
         }
 
         $errors = [];
+        $workloadWarnings = [];
+        $isAdministrator = (bool) $request->user()?->hasRole('Administrator');
 
         DB::beginTransaction();
 
         try {
             foreach ($rows as $rowData) {
                 $subject = SectionSubject::query()->where('id', $rowData['id'])->lockForUpdate()->first();
+                $subject->loadMissing('subject');
 
                 $facultyId = $rowData['faculty_id'] ?? null;
                 $roomId = $rowData['room_id'] ?? null;
@@ -691,6 +771,28 @@ class SectionSubjectController extends Controller
                     continue;
                 }
 
+                // SAVE SCHEDULE VALIDATION — Faculty Workload. A final
+                // pass for every assigned faculty before this batch
+                // commits. Not folded into the hard-conflict $errors
+                // list above — per spec, an Administrator may
+                // "Override & Save" — so it's tracked separately and
+                // only blocks the row when nobody has confirmed it (or
+                // the confirming user isn't an Administrator).
+                $workloadWarning = $this->workloadWarningFor($facultyId, $subject->subject, $subject->id);
+                $isWorkloadOverride = false;
+
+                if ($workloadWarning) {
+                    $confirmed = ! empty($rowData['workload_confirmed']);
+
+                    if (! $isAdministrator || ! $confirmed) {
+                        $workloadWarnings[$subject->id] = $workloadWarning;
+
+                        continue;
+                    }
+
+                    $isWorkloadOverride = true;
+                }
+
                 $status = 'Draft';
                 if ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
                     $status = 'Scheduled';
@@ -709,6 +811,8 @@ class SectionSubjectController extends Controller
                     // no longer a pending suggestion to clear/regenerate.
                     'is_auto_generated' => false,
                     'auto_generated_meta' => null,
+                    'is_workload_override' => $isWorkloadOverride,
+                    'workload_override_by' => $isWorkloadOverride ? $request->user()?->id : null,
                 ]);
             }
 
@@ -719,6 +823,18 @@ class SectionSubjectController extends Controller
                     'errors' => $errors,
                     'message' => 'Some rows have scheduling conflicts. Nothing was saved — fix the highlighted rows and try again.',
                 ], 422);
+            }
+
+            if (! empty($workloadWarnings)) {
+                DB::rollBack();
+
+                return response()->json([
+                    'workload_warnings' => $workloadWarnings,
+                    'can_override' => $isAdministrator,
+                    'message' => $isAdministrator
+                        ? 'Cannot save schedule. One or more faculty exceed their teaching load. Resolve these conflicts or override manually.'
+                        : 'Cannot save schedule. One or more faculty exceed their teaching load. Only an Administrator may override this validation.',
+                ], 409);
             }
 
             DB::commit();

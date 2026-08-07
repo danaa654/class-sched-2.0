@@ -348,6 +348,18 @@ const fullName = (faculty) => {
                                 {{ data.max_teaching_units }}
                             </template>
                         </Column>
+                        <Column header="Teaching Load" style="width: 11rem">
+                            <template #body="{ data }">
+                                <div v-if="data.workload" class="flex items-center gap-1.5">
+                                    <span>
+                                        {{ data.workload.status === 'overloaded' ? '🔴' : data.workload.status === 'high' ? '🟡' : '🟢' }}
+                                    </span>
+                                    <span class="text-sm text-slate-700">
+                                        {{ data.workload.current }} / {{ data.workload.max }} {{ data.workload.unit_label }}
+                                    </span>
+                                </div>
+                            </template>
+                        </Column>
                         <Column header="Status" style="width: 9rem">
                             <template #body="{ data }">
                                 <Tag

@@ -64,6 +64,7 @@ class RecommendationService
     public function __construct(
         private readonly ScheduleConflictService $conflictService,
         private readonly MeetingPatternService $meetingPatternService,
+        private readonly FacultyWorkloadService $workloadService,
     ) {
     }
 
@@ -531,6 +532,10 @@ class RecommendationService
         $ranked = $candidates->map(function (Faculty $faculty) use ($subject, $current, $hasSchedule, $isTeachingQualification, $isGenEdMatch, $tier, $availableMax, $noConflictMax, $lowLoadMax, $fullTimeMax) {
             $currentLoad = $this->currentTeachingLoad($faculty, $current);
             $loadRatio = $faculty->max_teaching_units > 0 ? $currentLoad / $faculty->max_teaching_units : 0;
+            $wouldExceedLoad = $this->workloadService->wouldExceed($faculty, $subject, $current?->id);
+            $remainingLoad = $this->workloadService->maxLoad($faculty) > 0
+                ? $this->workloadService->maxLoad($faculty) - $currentLoad
+                : null;
 
             [$available, $conflictCount] = $this->facultyAvailabilityAndConflicts($faculty, $current);
 
@@ -584,6 +589,16 @@ class RecommendationService
                 $reasons[] = ['label' => 'Preferred Teaching Block', 'met' => $preferredBlock];
             }
 
+            // Teaching Load Limit — surfaced as a reason (not a point
+            // criterion; it's a hard-cap flag, not a scoring nudge) so
+            // the Registrar sees "✗ Higher Teaching Load" exactly like
+            // the recommendation card spec, even though ranking itself
+            // never fully excludes an overloaded candidate here — the
+            // hard reject/remove happens in AutoScheduleService (Auto
+            // Generate) and SectionSubjectController (Manual/Save),
+            // which both call FacultyWorkloadService directly.
+            $reasons[] = ['label' => $wouldExceedLoad ? 'Higher Teaching Load' : 'Within Teaching Load Limit', 'met' => ! $wouldExceedLoad];
+
             $score = array_sum($points);
 
             return [
@@ -594,6 +609,8 @@ class RecommendationService
                 'is_full_time' => $isFullTime,
                 'current_load' => $currentLoad,
                 'max_teaching_units' => $faculty->max_teaching_units,
+                'remaining_load' => $remainingLoad,
+                'exceeds_max_load' => $wouldExceedLoad,
                 'load_ratio' => $loadRatio,
                 'available' => $available,
                 'conflict_count' => $conflictCount,
@@ -647,6 +664,10 @@ class RecommendationService
 
         $currentLoad = $this->currentTeachingLoad($faculty, $current);
         $loadRatio = $faculty->max_teaching_units > 0 ? $currentLoad / $faculty->max_teaching_units : 0;
+        $wouldExceedLoad = $this->workloadService->wouldExceed($faculty, $subject, $current?->id);
+        $remainingLoad = $this->workloadService->maxLoad($faculty) > 0
+            ? $this->workloadService->maxLoad($faculty) - $currentLoad
+            : null;
 
         [$available, $conflictCount] = $this->facultyAvailabilityAndConflicts($faculty, $current);
 
@@ -685,6 +706,8 @@ class RecommendationService
             $reasons[] = ['label' => 'Preferred Teaching Block', 'met' => $preferredBlock];
         }
 
+        $reasons[] = ['label' => $wouldExceedLoad ? 'Higher Teaching Load' : 'Within Teaching Load Limit', 'met' => ! $wouldExceedLoad];
+
         $score = array_sum($points);
 
         return [
@@ -695,6 +718,8 @@ class RecommendationService
             'is_full_time' => $isFullTime,
             'current_load' => $currentLoad,
             'max_teaching_units' => $faculty->max_teaching_units,
+            'remaining_load' => $remainingLoad,
+            'exceeds_max_load' => $wouldExceedLoad,
             'load_ratio' => $loadRatio,
             'available' => $available,
             'conflict_count' => $conflictCount,
@@ -713,6 +738,18 @@ class RecommendationService
      * for the "Lowest Teaching Load" ranking criterion and as the hard
      * teaching-load cap AutoScheduleService enforces.
      *
+     * Delegates to FacultyWorkloadService — the single source of truth
+     * for workload math shared by Auto Generate, Recommend Faculty,
+     * Manual Assignment, Save Schedule, and the Faculty Master's
+     * Workload tab/Dashboard Indicators — rather than summing here
+     * directly, so this number can never drift out of sync with the
+     * one those other integration points compute.
+     *
+     * Scoped to the currently ACTIVE School Year + Semester only (per
+     * FacultyWorkloadService/ScheduleConflictService::activeSemesterSectionIds()):
+     * a Faculty member's load from a past or future semester never
+     * counts against their current-term Maximum Teaching Load.
+     *
      * Counts both 'Scheduled' AND 'Draft' rows — never 'Conflict'.
      * Draft is included deliberately: Auto Schedule's generateOne()
      * persists each accepted assignment with status = 'Draft' (it only
@@ -728,13 +765,7 @@ class RecommendationService
      */
     private function currentTeachingLoad(Faculty $faculty, ?SectionSubject $current): int
     {
-        return SectionSubject::query()
-            ->where('faculty_id', $faculty->id)
-            ->whereIn('status', ['Scheduled', 'Draft'])
-            ->when($current?->id, fn ($q) => $q->where('id', '!=', $current->id))
-            ->with('subject:id,units')
-            ->get()
-            ->sum(fn (SectionSubject $ss) => $ss->subject->units ?? 0);
+        return $this->workloadService->currentLoad($faculty, $current?->id);
     }
 
     /**

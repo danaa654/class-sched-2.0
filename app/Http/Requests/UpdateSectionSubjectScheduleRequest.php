@@ -45,6 +45,13 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             // lets the save proceed despite the warning. See
             // SectionSubjectController::updateSchedule().
             'capacity_confirmed' => ['sometimes', 'boolean'],
+            // Set true once an Administrator has explicitly acknowledged
+            // a Teaching Load Limit warning ("⚠ Teaching Load Limit
+            // Exceeded") — lets the save proceed despite the faculty
+            // member being over their Maximum Teaching Load. Only
+            // honored when the authenticated user has the Administrator
+            // role — see SectionSubjectController::workloadWarningFor().
+            'workload_confirmed' => ['sometimes', 'boolean'],
         ];
     }
 

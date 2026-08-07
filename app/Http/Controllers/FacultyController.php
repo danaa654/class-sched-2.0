@@ -7,6 +7,7 @@ use App\Http\Requests\UpdateFacultyRequest;
 use App\Models\College;
 use App\Models\Faculty;
 use App\Models\Subject;
+use App\Services\FacultyWorkloadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -14,6 +15,11 @@ use Inertia\Response;
 
 class FacultyController extends Controller
 {
+    public function __construct(
+        private readonly FacultyWorkloadService $workloadService
+    ) {
+    }
+
     /**
      * Display the Faculty Master page.
      *
@@ -48,6 +54,20 @@ class FacultyController extends Controller
             ->paginate(10, ['*'], 'faculty_page')
             ->withQueryString();
 
+        // FACULTY WORKLOAD VALIDATION — "Dashboard Indicators". Each
+        // row gets its real current/max/remaining load (Scheduled +
+        // Draft placements, active semester only) and a 🟢/🟡/🔴
+        // status so the roster doubles as an at-a-glance overload
+        // report, computed via FacultyWorkloadService — the same
+        // engine Auto Generate/Recommend/Manual Assignment/Save
+        // Schedule use — so this can never disagree with those.
+        $faculties->getCollection()->transform(function (Faculty $faculty) {
+            $evaluation = $this->workloadService->evaluate($faculty);
+            $faculty->setAttribute('workload', $evaluation);
+
+            return $faculty;
+        });
+
         return Inertia::render('Scheduling/Faculty/Index', [
             'faculties' => $faculties,
             'filters' => ['faculty_search' => $search, 'faculty_category' => $category],
@@ -70,6 +90,13 @@ class FacultyController extends Controller
             'subjects' => fn ($query) => $query->orderBy('subject_code'),
             'availabilities',
         ]);
+
+        // Real assigned workload (Scheduled + Draft placements, active
+        // semester only) — see FacultyController@index docblock above.
+        // includePlacements: true here (and only here) so the Workload
+        // tab can list *which* subjects/sections make up the load
+        // figure, not just the summary numbers.
+        $faculty->setAttribute('workload', $this->workloadService->evaluate($faculty, includePlacements: true));
 
         return Inertia::render('Scheduling/Faculty/Details', [
             'faculty' => $faculty,

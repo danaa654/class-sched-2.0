@@ -34,6 +34,12 @@ class StoreFacultyRequest extends FormRequest
             // them Department Faculty. See Faculty::getFacultyCategoryAttribute().
             'college_id' => ['nullable', 'exists:colleges,id'],
             'max_teaching_units' => ['required', 'integer', 'min:0', 'max:255'],
+            // Whichever workload measurement the institution uses.
+            // 'units' (default) checks against max_teaching_units;
+            // 'hours' checks against max_weekly_hours instead. See
+            // FacultyWorkloadService.
+            'workload_type' => ['nullable', Rule::in(['units', 'hours'])],
+            'max_weekly_hours' => ['nullable', 'integer', 'min:0', 'max:168'],
             'status' => ['required', Rule::in(['Active', 'Inactive'])],
             'email' => ['nullable', 'email', 'max:255'],
             'contact_number' => ['nullable', 'string', 'max:20'],

@@ -36,6 +36,8 @@ class Faculty extends Model
         'employment_type',
         'college_id',
         'max_teaching_units',
+        'workload_type',
+        'max_weekly_hours',
         'status',
         'email',
         'contact_number',
@@ -51,6 +53,32 @@ class Faculty extends Model
      * @var list<string>
      */
     protected $appends = ['faculty_category'];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'max_teaching_units' => 'integer',
+            'max_weekly_hours' => 'integer',
+        ];
+    }
+
+    /**
+     * Every schedule placement (across every Section/College) this
+     * Faculty member has ever been assigned to. Used by
+     * FacultyWorkloadService — prefer that service's
+     * currentLoad()/evaluate() over querying this relation directly,
+     * since the service is what applies the "active semester only, no
+     * Conflict status" workload scope.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<SectionSubject>
+     */
+    public function sectionSubjects(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(SectionSubject::class);
+    }
 
     /**
      * The college this faculty member belongs to.
