@@ -28,14 +28,11 @@ class SchedulingController extends Controller
 
         // Sections/SectionSubjects don't carry a foreign key to
         // AcademicTerm — they're scoped by the plain academic_year /
-        // semester strings (see SectionController), which match the
-        // Active term's School Year / Semester names when one exists.
-        $sectionsQuery = Section::query();
-        if ($activeTerm) {
-            $sectionsQuery
-                ->where('academic_year', $activeTerm->schoolYear?->name)
-                ->where('semester', $activeTerm->semester?->name);
-        }
+        // semester strings, matched via AcademicTerm::matchingSectionsQuery()
+        // rather than a raw string compare (Sections spell Semester
+        // "First Semester"/"Second Semester"; the Semester model spells
+        // it "1st Semester"/"2nd Semester" — see that method's docblock).
+        $sectionsQuery = $activeTerm ? $activeTerm->matchingSectionsQuery() : Section::query();
 
         $sectionIds = (clone $sectionsQuery)->pluck('id');
 

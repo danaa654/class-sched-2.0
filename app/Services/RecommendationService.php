@@ -1285,6 +1285,36 @@ class RecommendationService
      * when the Registrar actually tries to save. Returns the first
      * available options, best (earliest, most standard) first.
      */
+    /**
+     * Maximum lecture-only teaching hours the Section Daily Load
+     * Optimizer allows on a single day before it starts penalizing
+     * the candidate for student fatigue.
+     */
+    private const MAX_DAILY_LECTURE_MINUTES = 6 * 60;
+
+    /**
+     * Maximum teaching hours allowed on a day that includes at least
+     * one Laboratory meeting (labs run longer, so the ceiling is
+     * raised, never removed).
+     */
+    private const MAX_DAILY_LAB_MINUTES = 8 * 60;
+
+    /**
+     * An idle gap between two of the Section's meetings on the same
+     * day longer than this is flagged as a "long vacant period" the
+     * spec asks the optimizer to avoid.
+     */
+    private const LONG_IDLE_GAP_MINUTES = 120;
+
+    /** A gap this long or longer is a severe penalty, not just a warning. */
+    private const SEVERE_IDLE_GAP_MINUTES = 240;
+
+    /**
+     * More than this many back-to-back (zero-gap) meetings in a row
+     * on the same day counts as "excessive consecutive class hours."
+     */
+    private const MAX_CONSECUTIVE_MEETINGS = 3;
+
     public function recommendTimes(
         Subject $subject,
         Section $section,
@@ -1296,10 +1326,10 @@ class RecommendationService
         if ($totalHours <= 0) {
             $totalHours = 3;
         }
+        $subjectHasLab = (int) $subject->laboratory_hours > 0;
 
         $excludingId = $current?->id ?? 0;
         $results = [];
-        $slotIndex = 0;
 
         // SCHEDULING PREFERENCES (Academic Calendar -> active School
         // Year) — Class Start/End Time, the Time Interval, and the
@@ -1317,6 +1347,14 @@ class RecommendationService
         // the School Year's Class Days — see MeetingPatternService for
         // the full rule set.
         $dayPatterns = $this->meetingPatternService->dayGroups($subject);
+
+        // SECTION DAILY LOAD OPTIMIZATION — snapshot of every OTHER
+        // meeting this Section already has, per Day, gathered ONCE
+        // before the search loop (not re-queried per candidate) so
+        // scoring every candidate slot stays cheap. See
+        // sectionScheduleSnapshot() / scoreSectionDailyLoad().
+        $sectionSnapshot = $section->id ? $this->sectionScheduleSnapshot($section->id, $excludingId) : [];
+        $allowedDays = $activeSchoolYear ? $activeSchoolYear->allowedDays() : SchoolYear::DEFAULT_CLASS_DAYS;
 
         foreach ($dayPatterns as $days) {
             $sessionMinutes = (int) round(($totalHours / count($days)) * 60);
@@ -1359,66 +1397,76 @@ class RecommendationService
                     );
                 }
 
-                if (! $hasConflict) {
-                    // TIME RECOMMENDATION SCORE (100 points) — the four
-                    // checks the spec calls out (Faculty Availability,
-                    // Room Availability, Section Availability, Fits
-                    // Subject Hours) are all satisfied by construction
-                    // once a slot survives the conflict checks above,
-                    // so each is awarded its fixed share of the score.
-                    // The remaining share is a Preferred Day Combination
-                    // bonus straight from MeetingPatternService's
-                    // priority table (Prompt 8.15 — Intelligent Day &
-                    // Time Combination Engine), plus a small
-                    // Student-Friendly-Time bonus that favors earlier
-                    // slots over evening ones.
-                    $tier = $this->meetingPatternService->priorityTier($days);
-                    $dayPatternBonus = (int) round((($tier['priority'] ?? 50) / 100) * 35);
-                    $isEvening = $this->minutesFromTime($start) >= (17 * 60);
-                    $studentFriendlyBonus = $isEvening ? 0 : 15;
-
-                    $points = [
-                        'faculty_available' => 15,
-                        'room_available' => 15,
-                        'section_available' => 10,
-                        'fits_subject_hours' => 10,
-                        'preferred_day_combination' => $dayPatternBonus,
-                        'student_friendly_time' => $studentFriendlyBonus,
-                    ];
-
-                    $reasons = [
-                        ['label' => 'Faculty Available', 'met' => true, 'type' => 'success'],
-                        ['label' => 'Room Available', 'met' => true, 'type' => 'success'],
-                        ['label' => 'Section Available', 'met' => true, 'type' => 'success'],
-                        ['label' => 'Fits Subject Hours', 'met' => true, 'type' => 'success'],
-                        $tier && $tier['tier'] === 'Preferred'
-                            ? ['label' => 'Preferred Day Combination', 'met' => true, 'type' => 'success']
-                            : ['label' => ($tier['tier'] ?? 'Non-preferred').' Day Combination', 'met' => false, 'type' => 'warning'],
-                    ];
-
-                    if ($isEvening) {
-                        $reasons[] = ['label' => 'Evening Schedule', 'met' => false, 'type' => 'warning'];
-                    } else {
-                        $reasons[] = ['label' => 'Student-Friendly Time', 'met' => true, 'type' => 'success'];
-                    }
-
-                    $results[] = [
-                        'days' => $days,
-                        'start_time' => $start,
-                        'end_time' => $end,
-                        'meetings_per_week' => count($days),
-                        'subject_type' => $this->meetingPatternService->label($subject),
-                        'day_pattern_name' => $tier['name'] ?? implode('/', $days),
-                        'score' => array_sum($points),
-                        'score_max' => 100,
-                        'score_breakdown' => $points,
-                        'reasons' => $reasons,
-                    ];
-
-                    $slotIndex++;
+                if ($hasConflict) {
+                    continue;
                 }
 
-                if (count($results) >= self::MAX_TIME_RESULTS) {
+                // TIME RECOMMENDATION SCORE (100 points). The engine no
+                // longer stops at the first conflict-free slot — every
+                // candidate is fully scored, then ranked, so Auto
+                // Generate / Regenerate / Recommend Time / Recommend
+                // Schedule all pick the highest-QUALITY conflict-free
+                // slot rather than merely the first one found.
+                //
+                //   Faculty Available            10
+                //   Room Available                10
+                //   Section Available             10
+                //   Fits Subject Hours            10
+                //   Preferred Day Combination     20
+                //   Smart Time Preference         15
+                //   Section Daily Load Balance    25  (NEW — see below)
+                //   -------------------------------
+                //   Total                        100
+                $tier = $this->meetingPatternService->priorityTier($days);
+                $dayPatternBonus = (int) round((($tier['priority'] ?? 50) / 100) * 20);
+
+                [$timePreferenceBonus, $timePreferenceLabel] = $this->scoreTimePreference($start);
+
+                [$loadScore, $loadReasons] = $this->scoreSectionDailyLoad(
+                    $sectionSnapshot, $allowedDays, $days, $start, $end, $subjectHasLab
+                );
+
+                $points = [
+                    'faculty_available' => 10,
+                    'room_available' => 10,
+                    'section_available' => 10,
+                    'fits_subject_hours' => 10,
+                    'preferred_day_combination' => $dayPatternBonus,
+                    'smart_time_preference' => $timePreferenceBonus,
+                    'section_daily_load_balance' => $loadScore,
+                ];
+
+                $reasons = [
+                    ['label' => 'Faculty Available', 'met' => true, 'type' => 'success'],
+                    ['label' => 'Room Available', 'met' => true, 'type' => 'success'],
+                    ['label' => 'Section Available', 'met' => true, 'type' => 'success'],
+                    ['label' => 'Fits Subject Hours', 'met' => true, 'type' => 'success'],
+                    $tier && $tier['tier'] === 'Preferred'
+                        ? ['label' => 'Preferred Day Combination', 'met' => true, 'type' => 'success']
+                        : ['label' => ($tier['tier'] ?? 'Non-preferred').' Day Combination', 'met' => false, 'type' => 'warning'],
+                    ['label' => $timePreferenceLabel, 'met' => $timePreferenceBonus >= 12, 'type' => $timePreferenceBonus >= 12 ? 'success' : 'warning'],
+                    ...$loadReasons,
+                ];
+
+                $results[] = [
+                    'days' => $days,
+                    'start_time' => $start,
+                    'end_time' => $end,
+                    'meetings_per_week' => count($days),
+                    'subject_type' => $this->meetingPatternService->label($subject),
+                    'day_pattern_name' => $tier['name'] ?? implode('/', $days),
+                    'score' => array_sum($points),
+                    'score_max' => 100,
+                    'score_breakdown' => $points,
+                    'reasons' => $reasons,
+                ];
+
+                // Unlike the old "first conflict-free slot wins" search,
+                // the optimizer needs a wide enough pool of candidates
+                // to actually have something to rank — so it keeps
+                // gathering well past MAX_TIME_RESULTS and only trims
+                // down to the top N after sorting by score below.
+                if (count($results) >= self::MAX_TIME_RESULTS * 6) {
                     break 2;
                 }
             }
@@ -1428,13 +1476,16 @@ class RecommendationService
             return ['recommendations' => [], 'message' => 'No available time slot found without conflicts.'];
         }
 
-        // The AI should choose the highest-scoring combination first —
-        // sort by score, then prefer earlier start times as the
-        // tiebreaker (same "best slot first" ordering as before).
+        // SMART EVALUATION — always choose the highest quality-scoring
+        // schedule, never simply the first one found. Ties broken by
+        // earlier start time (a small, stable, student-friendly
+        // tiebreaker) so results stay deterministic.
         usort($results, function (array $a, array $b) {
             return $b['score'] <=> $a['score']
                 ?: strcmp($a['start_time'], $b['start_time']);
         });
+
+        $results = array_slice($results, 0, self::MAX_TIME_RESULTS);
 
         foreach ($results as &$item) {
             $item['confidence'] = $this->confidenceFromScore($item['score']);
@@ -1442,6 +1493,211 @@ class RecommendationService
         unset($item);
 
         return ['recommendations' => $results, 'message' => null];
+    }
+
+    /**
+     * SMART TIME PREFERENCE — Morning slots are preferred, then Early
+     * Afternoon, then Late Afternoon; Evening is only ever a fallback
+     * once nothing better scores higher. Returns [bonus points (0-15),
+     * a short reason label] for the given Start Time.
+     *
+     * @return array{0: int, 1: string}
+     */
+    private function scoreTimePreference(string $start): array
+    {
+        $minutes = $this->minutesFromTime($start);
+
+        if ($minutes < 11 * 60 + 30) {
+            return [15, 'Morning Schedule (Preferred)'];
+        }
+
+        if ($minutes < 16 * 60) {
+            return [12, 'Early Afternoon Schedule'];
+        }
+
+        if ($minutes < 18 * 60) {
+            return [6, 'Late Afternoon Schedule'];
+        }
+
+        return [0, 'Evening Schedule'];
+    }
+
+    /**
+     * SECTION DAILY LOAD OPTIMIZATION (Smart Scheduling).
+     *
+     * Every OTHER meeting this Section already has (across every
+     * other Subject already scheduled/auto-generated for it),
+     * grouped by Day, as `[['start' => minutes, 'end' => minutes,
+     * 'has_lab' => bool], ...]` sorted by start time.
+     *
+     * Gathered once per recommendTimes() call — never re-queried per
+     * candidate slot — since the Section's own schedule doesn't
+     * change mid-search.
+     *
+     * @return array<string, list<array{start:int,end:int,has_lab:bool}>>
+     */
+    private function sectionScheduleSnapshot(int $sectionId, int $excludingId): array
+    {
+        $rows = SectionSubject::query()
+            ->where('section_id', $sectionId)
+            ->where('id', '!=', $excludingId)
+            ->whereNotNull('days')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->with('subject:id,laboratory_hours')
+            ->get();
+
+        $byDay = [];
+
+        foreach ($rows as $row) {
+            $hasLab = (int) ($row->subject?->laboratory_hours ?? 0) > 0;
+            $start = $this->minutesFromTime($row->start_time);
+            $end = $this->minutesFromTime($row->end_time);
+
+            foreach (array_filter(explode(',', (string) $row->days)) as $day) {
+                $byDay[$day][] = ['start' => $start, 'end' => $end, 'has_lab' => $hasLab];
+            }
+        }
+
+        foreach ($byDay as &$meetings) {
+            usort($meetings, fn ($a, $b) => $a['start'] <=> $b['start']);
+        }
+        unset($meetings);
+
+        return $byDay;
+    }
+
+    /**
+     * Scores a candidate slot against the Section's existing schedule
+     * for daily workload balance, idle-time, consecutive-class limits,
+     * and even weekly distribution — the four pillars of Section
+     * Daily Load Optimization. Returns [score out of 25, list of
+     * reason rows] so the caller can merge both straight into the
+     * existing score/reasons shape.
+     *
+     * @param  array<string, list<array{start:int,end:int,has_lab:bool}>>  $snapshot
+     * @param  list<string>  $allowedDays
+     * @param  list<string>  $days
+     * @return array{0:int, 1:list<array>}
+     */
+    private function scoreSectionDailyLoad(
+        array $snapshot,
+        array $allowedDays,
+        array $days,
+        string $start,
+        string $end,
+        bool $subjectHasLab
+    ): array {
+        $startMin = $this->minutesFromTime($start);
+        $endMin = $this->minutesFromTime($end);
+
+        // Even Weekly Distribution baseline — how many meetings the
+        // Section already has on each allowed day, so a candidate that
+        // lands on an already-busy day scores lower than one that
+        // fills in a quiet/empty day.
+        $countsByDay = [];
+        foreach ($allowedDays as $day) {
+            $countsByDay[$day] = count($snapshot[$day] ?? []);
+        }
+        $maxDayCount = ! empty($countsByDay) ? max($countsByDay) : 0;
+
+        $dailyBudget = 25 / max(count($days), 1);
+        $total = 0.0;
+        $worstDailyHoursPenalty = 0;
+        $worstIdlePenalty = 0;
+        $worstConsecutivePenalty = 0;
+        $distributionPenalty = 0;
+
+        foreach ($days as $day) {
+            $existing = $snapshot[$day] ?? [];
+            $dayHasLab = $subjectHasLab || collect($existing)->contains('has_lab', true);
+            $dailyLimit = $dayHasLab ? self::MAX_DAILY_LAB_MINUTES : self::MAX_DAILY_LECTURE_MINUTES;
+
+            // Build the day's full meeting list WITH the candidate
+            // slot inserted, sorted, to evaluate gaps/consecutiveness/
+            // total load exactly as the Section's timetable would
+            // actually look if this candidate were chosen.
+            $meetings = $existing;
+            $meetings[] = ['start' => $startMin, 'end' => $endMin, 'has_lab' => $subjectHasLab];
+            usort($meetings, fn ($a, $b) => $a['start'] <=> $b['start']);
+
+            $dayScore = $dailyBudget;
+
+            // Daily Class Hour Limit — total instructional minutes for
+            // the day, including this candidate, must stay within the
+            // 6hr lecture / 8hr lab-inclusive ceiling.
+            $dayTotalMinutes = array_sum(array_map(fn ($m) => $m['end'] - $m['start'], $meetings));
+            if ($dayTotalMinutes > $dailyLimit) {
+                $overBy = $dayTotalMinutes - $dailyLimit;
+                $penalty = min($dailyBudget * 0.6, $dailyBudget * 0.6 * ($overBy / $dailyLimit));
+                $dayScore -= $penalty;
+                $worstDailyHoursPenalty = max($worstDailyHoursPenalty, (int) round($penalty));
+            }
+
+            // Idle Time / Consecutive Class Limit — walk the sorted
+            // meeting list once, tracking both the size of each gap
+            // between meetings and how many meetings in a row have
+            // (effectively) no gap between them.
+            $consecutiveRun = 1;
+            for ($i = 1; $i < count($meetings); $i++) {
+                $gap = $meetings[$i]['start'] - $meetings[$i - 1]['end'];
+
+                if ($gap >= self::SEVERE_IDLE_GAP_MINUTES) {
+                    $dayScore -= $dailyBudget * 0.35;
+                    $worstIdlePenalty = max($worstIdlePenalty, (int) round($dailyBudget * 0.35));
+                    $consecutiveRun = 1;
+                } elseif ($gap >= self::LONG_IDLE_GAP_MINUTES) {
+                    $dayScore -= $dailyBudget * 0.2;
+                    $worstIdlePenalty = max($worstIdlePenalty, (int) round($dailyBudget * 0.2));
+                    $consecutiveRun = 1;
+                } elseif ($gap <= 0) {
+                    // Back-to-back, no break at all.
+                    $consecutiveRun++;
+                    if ($consecutiveRun > self::MAX_CONSECUTIVE_MEETINGS) {
+                        $penalty = $dailyBudget * 0.25;
+                        $dayScore -= $penalty;
+                        $worstConsecutivePenalty = max($worstConsecutivePenalty, (int) round($penalty));
+                    }
+                } else {
+                    // A short, natural break — resets the consecutive
+                    // run without any idle-gap penalty.
+                    $consecutiveRun = 1;
+                }
+            }
+
+            // Even Weekly Distribution — landing on the Section's
+            // currently busiest day (when a quieter allowed day is
+            // available) is penalized proportionally.
+            $currentCount = $countsByDay[$day] ?? 0;
+            if ($maxDayCount > 0 && $currentCount >= $maxDayCount && $maxDayCount > 1) {
+                $penalty = $dailyBudget * 0.15;
+                $dayScore -= $penalty;
+                $distributionPenalty = max($distributionPenalty, (int) round($penalty));
+            }
+
+            $total += max(0, $dayScore);
+        }
+
+        $score = (int) round(max(0, min(25, $total)));
+
+        $reasons = [];
+        $reasons[] = $worstDailyHoursPenalty > 0
+            ? ['label' => 'Daily Hour Limit Exceeded', 'met' => false, 'type' => 'warning']
+            : ['label' => 'Balanced Daily Hours', 'met' => true, 'type' => 'success'];
+
+        $reasons[] = $worstIdlePenalty > 0
+            ? ['label' => 'Long Idle Gap Between Classes', 'met' => false, 'type' => 'warning']
+            : ['label' => 'Minimal Idle Time', 'met' => true, 'type' => 'success'];
+
+        $reasons[] = $worstConsecutivePenalty > 0
+            ? ['label' => 'Excessive Consecutive Classes', 'met' => false, 'type' => 'warning']
+            : ['label' => 'Reasonable Class Blocks', 'met' => true, 'type' => 'success'];
+
+        $reasons[] = $distributionPenalty > 0
+            ? ['label' => 'Concentrates Load on a Busy Day', 'met' => false, 'type' => 'warning']
+            : ['label' => 'Even Weekly Distribution', 'met' => true, 'type' => 'success'];
+
+        return [$score, $reasons];
     }
 
     /**

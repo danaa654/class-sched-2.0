@@ -58,6 +58,65 @@ class AcademicTerm extends Model
     }
 
     /**
+     * The Section.semester enum value ("First Semester" / "Second
+     * Semester" / "Summer") this term's Semester corresponds to.
+     *
+     * Sections store Semester as "First Semester"/"Second Semester"/
+     * "Summer" (see the sections table enum) while the Semester model
+     * this term belongs to stores "1st Semester"/"2nd Semester"/
+     * "Summer" (see Semester::NAMES) — the two parts of the app spell
+     * the same Semester differently, so an exact string compare
+     * between them silently matches NOTHING. Every place that needs
+     * to find the Sections belonging to this term's Semester (dashboard
+     * stats, global Faculty/Room conflict scoping, etc.) must go
+     * through this method instead of comparing the names directly, so
+     * that mismatch can never quietly reappear in a second place.
+     *
+     * Returns null when the Semester name doesn't recognizably match
+     * either convention (e.g. semester relation missing) — callers
+     * should treat null as "can't scope by semester" and fail safe
+     * (typically: don't filter by semester at all) rather than
+     * matching zero or all Sections by accident.
+     */
+    public function sectionSemesterValue(): ?string
+    {
+        $name = strtolower(trim((string) $this->semester?->name));
+
+        return match (true) {
+            $name === '' => null,
+            str_contains($name, 'summer') => 'Summer',
+            str_starts_with($name, '1st') || str_starts_with($name, 'first') => 'First Semester',
+            str_starts_with($name, '2nd') || str_starts_with($name, 'second') => 'Second Semester',
+            default => null,
+        };
+    }
+
+    /**
+     * Every Section belonging to this Academic Term's School Year +
+     * Semester, matched via sectionSemesterValue() rather than a raw
+     * string compare. Falls back to "every Section" (rather than
+     * "no Sections") when this term's School Year or Semester can't
+     * be resolved, so callers never silently filter everything out
+     * because of incomplete setup or a naming mismatch.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<Section>
+     */
+    public function matchingSectionsQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        $this->loadMissing(['schoolYear:id,name', 'semester:id,name']);
+
+        $query = Section::query();
+        $semesterValue = $this->sectionSemesterValue();
+
+        if ($this->schoolYear && $semesterValue) {
+            $query->where('academic_year', $this->schoolYear->name)
+                ->where('semester', $semesterValue);
+        }
+
+        return $query;
+    }
+
+    /**
      * Enforce the "only one Active Academic Term at a time" rule.
      *
      * Mirrors SchoolYear::booted(): when an Academic Term is saved as

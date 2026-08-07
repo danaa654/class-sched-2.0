@@ -428,16 +428,48 @@ const blockingConflictRowIds = computed(
 );
 
 const rowHasBlockingConflict = (rowId) => blockingConflictRowIds.value.has(rowId);
+
+// A row counts as "in conflict" for red-highlight/click-to-resolve
+// purposes if EITHER the client-side same-table check (Faculty/Room/
+// Section overlap against another row in this section) fired, OR the
+// server rejected it (e.g. outside allowed class hours, lunch break,
+// or a Faculty/Room clash against a *different* section that this
+// workspace can't see client-side). Capacity Warnings are excluded —
+// those are confirmable, not a hard conflict.
+const rowIsInConflict = (row) => rowHasBlockingConflict(row.id) || hasActiveConflict(row);
+
+// Row-click-to-resolve should only fire when the Registrar clicks
+// empty space on a conflicted row (e.g. the EDP Code / Subject Title
+// area) — never when they're actually interacting with one of the
+// row's own Faculty/Room/Days/Time/Recommend/Delete controls, or the
+// click would fight with those controls' own handlers.
+const isInteractiveTarget = (target) =>
+    Boolean(target?.closest?.('button, a, input, textarea, .p-select, .p-multiselect, .p-datepicker, .p-popover, [role="button"]'));
+
+const onRowClick = (event) => {
+    if (!rowIsInConflict(event.data)) return;
+    if (isInteractiveTarget(event.originalEvent?.target)) return;
+    openRecommendDrawer(event.data);
+};
 const facultyConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'faculty').flatMap((c) => c.rowIds)));
 const roomConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'room').flatMap((c) => c.rowIds)));
 const sectionConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'section').flatMap((c) => c.rowIds)));
 const rowHasCapacityWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'capacity' && c.rowIds.includes(rowId));
 
-const conflictTooltip = (rowId) =>
-    tableConflicts.value
+const conflictTooltip = (rowId) => {
+    const clientMessages = tableConflicts.value
         .filter((c) => c.rowIds.includes(rowId))
-        .map((c) => `${c.label}: ${c.detail}`)
-        .join('\n');
+        .map((c) => `${c.label}: ${c.detail}`);
+
+    // Server-side errors (outside class hours, lunch break, or a
+    // Faculty/Room clash against a section this workspace never
+    // loaded) don't have a `tableConflicts` entry — surface them too
+    // so the tooltip/click-to-resolve always reflects everything that
+    // is actually blocking this row.
+    const serverMessages = Object.values(stateFor(rowId).errors ?? {});
+
+    return [...clientMessages, ...serverMessages].join('\n');
+};
 
 // Real-time display status — overrides the last-saved `status` value so
 // the badge reflects the *current* (unsaved) local edit immediately.
@@ -1357,14 +1389,15 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         class="rounded-xl overflow-hidden schedule-table"
                         :rowClass="
                             (row) =>
-                                rowHasBlockingConflict(row.id)
-                                    ? '!bg-red-50'
+                                rowIsInConflict(row)
+                                    ? '!bg-red-50 conflict-row-clickable'
                                     : rowHasCapacityWarning(row.id)
                                       ? '!bg-amber-50'
                                       : dirtyRowIds.has(row.id)
                                         ? '!bg-amber-50'
                                         : undefined
                         "
+                        @row-click="onRowClick"
                         stripedRows
                         responsiveLayout="scroll"
                         scrollable
@@ -1428,11 +1461,18 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Clear Generated Schedule to discard it."
                                                 />
                                                 <i
-                                                    v-if="rowHasBlockingConflict(data.id) || rowHasCapacityWarning(data.id) || hasActiveConflict(data)"
+                                                    v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id)"
                                                     class="pi pi-exclamation-triangle"
-                                                    :class="rowHasBlockingConflict(data.id) || hasActiveConflict(data) ? 'text-red-500' : 'text-amber-500'"
-                                                    :title="conflictTooltip(data.id) || 'Unresolved scheduling conflict'"
+                                                    :class="rowIsInConflict(data) ? 'text-red-500' : 'text-amber-500'"
+                                                    :title="rowIsInConflict(data) ? (conflictTooltip(data.id) || 'Conflict — click the row to find the best schedule') : (conflictTooltip(data.id) || 'Unresolved scheduling conflict')"
                                                 ></i>
+                                                <span
+                                                    v-if="rowIsInConflict(data)"
+                                                    class="text-[0.65rem] text-red-500 underline decoration-dotted cursor-pointer"
+                                                    @click.stop="openRecommendDrawer(data)"
+                                                >
+                                                    Click to find best schedule
+                                                </span>
                                             </div>
                                         </div>
                                         <div class="min-w-[6rem]">
@@ -2408,6 +2448,15 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 </template>
 
 <style scoped>
+/* Conflicted rows (red) are click-to-resolve — opens the Smart
+   Schedule Recommendation drawer for that row (see openRecommendDrawer). */
+.schedule-table :deep(.conflict-row-clickable) {
+    cursor: pointer;
+}
+.schedule-table :deep(.conflict-row-clickable:hover) {
+    background-color: rgb(254 226 226) !important; /* red-100 */
+}
+
 .schedule-table :deep(.p-select),
 .schedule-table :deep(.p-multiselect),
 .schedule-table :deep(.p-datepicker-input) {
