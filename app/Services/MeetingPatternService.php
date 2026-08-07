@@ -76,39 +76,127 @@ class MeetingPatternService
     ];
 
     /**
-     * Fallback ordered Day-combination candidates, keyed by meetings
-     * per week. Every inner array's length MUST equal its key.
+     * MEETING PATTERN TABLE — the data-driven source of truth for
+     * which Day combination goes with which meeting frequency, and
+     * how strongly each is preferred. This is the "Pattern / Meetings
+     * / Priority" table from the spec: adding, removing, or
+     * re-ranking a Day combination is a one-line change here, never a
+     * change to the scoring/search code in this service or in
+     * RecommendationService.
      *
-     * Two-meeting patterns deliberately list the non-consecutive
-     * Mon/Wed and Tue/Thu pairings first (per the Registrar's
-     * "preferred day pairings" spec) and only fall back to a
-     * consecutive-ish pairing (Wed/Fri) if nothing else is free.
+     * `priority` is an arbitrary 0-100 scale, higher = more
+     * preferred. dayGroups() sorts candidates by this value
+     * (descending) before returning them, and RecommendationService
+     * uses it directly to score/label a combination as "Preferred
+     * Day Combination" vs progressively lower tiers.
+     *
+     * @var list<array{name: string, days: list<string>, meetings: int, priority: int}>
+     */
+    private const MEETING_PATTERN_TABLE = [
+        // 2 meetings/week — lecture subjects.
+        ['name' => 'MW', 'days' => ['Mon', 'Wed'], 'meetings' => 2, 'priority' => 100],
+        ['name' => 'TTH', 'days' => ['Tue', 'Thu'], 'meetings' => 2, 'priority' => 100],
+        ['name' => 'TF', 'days' => ['Tue', 'Fri'], 'meetings' => 2, 'priority' => 90],
+        ['name' => 'WS', 'days' => ['Wed', 'Sat'], 'meetings' => 2, 'priority' => 85],
+        ['name' => 'MT', 'days' => ['Mon', 'Tue'], 'meetings' => 2, 'priority' => 80],
+        ['name' => 'WH', 'days' => ['Wed', 'Thu'], 'meetings' => 2, 'priority' => 75],
+        ['name' => 'MF', 'days' => ['Mon', 'Fri'], 'meetings' => 2, 'priority' => 60],
+        ['name' => 'TW', 'days' => ['Tue', 'Wed'], 'meetings' => 2, 'priority' => 60],
+
+        // 1 meeting/week — laboratory / special subjects. Listed in
+        // the Registrar's preferred day order (Mon -> Sun); Sat/Sun
+        // are automatically dropped by dayGroups() unless the active
+        // School Year's Class Days has them checked.
+        ['name' => 'Monday', 'days' => ['Mon'], 'meetings' => 1, 'priority' => 95],
+        ['name' => 'Tuesday', 'days' => ['Tue'], 'meetings' => 1, 'priority' => 95],
+        ['name' => 'Wednesday', 'days' => ['Wed'], 'meetings' => 1, 'priority' => 95],
+        ['name' => 'Thursday', 'days' => ['Thu'], 'meetings' => 1, 'priority' => 95],
+        ['name' => 'Friday', 'days' => ['Fri'], 'meetings' => 1, 'priority' => 100],
+        ['name' => 'Saturday', 'days' => ['Sat'], 'meetings' => 1, 'priority' => 80],
+        ['name' => 'Sunday', 'days' => ['Sun'], 'meetings' => 1, 'priority' => 70],
+
+        // 3 meetings/week — future-proofing only (per the spec's
+        // "Future Compatibility" section). Never reached unless a
+        // future config raises max_meetings_per_week to 3+.
+        ['name' => 'MWF', 'days' => ['Mon', 'Wed', 'Fri'], 'meetings' => 3, 'priority' => 100],
+        ['name' => 'TTHS', 'days' => ['Tue', 'Thu', 'Sat'], 'meetings' => 3, 'priority' => 90],
+    ];
+
+    /**
+     * Fallback ordered Day-combination candidates, keyed by meetings
+     * per week — derived from MEETING_PATTERN_TABLE (kept as a
+     * generated constant, not authored by hand, so the table above
+     * stays the single source of truth). Every inner array's length
+     * MUST equal its key.
      *
      * @var array<int, list<list<string>>>
      */
-    private const DEFAULT_DAY_GROUPS = [
-        1 => [
-            ['Fri'],
-            ['Sat'],
-            ['Mon'],
-            ['Tue'],
-            ['Wed'],
-            ['Thu'],
-        ],
-        2 => [
-            ['Mon', 'Wed'],
-            ['Tue', 'Thu'],
-            ['Wed', 'Fri'],
-            ['Mon', 'Fri'],
-        ],
-        // 3-meetings/week is intentionally defined here (future-proofing
-        // per the spec) but is NEVER reached unless a future config
-        // raises max_meetings_per_week to 3+ — see dayGroups() below.
-        3 => [
-            ['Mon', 'Wed', 'Fri'],
-            ['Tue', 'Thu', 'Sat'],
-        ],
-    ];
+    private static ?array $defaultDayGroupsCache = null;
+
+    /**
+     * Builds the DEFAULT_DAY_GROUPS-equivalent array from
+     * MEETING_PATTERN_TABLE, sorted by priority (highest first)
+     * within each meetings-per-week bucket. Cached per-request since
+     * the table itself is a class constant.
+     *
+     * @return array<int, list<list<string>>>
+     */
+    private static function defaultDayGroups(): array
+    {
+        if (self::$defaultDayGroupsCache !== null) {
+            return self::$defaultDayGroupsCache;
+        }
+
+        $byMeetings = [];
+        foreach (self::MEETING_PATTERN_TABLE as $pattern) {
+            $byMeetings[$pattern['meetings']][] = $pattern;
+        }
+
+        foreach ($byMeetings as $meetings => $patterns) {
+            usort($patterns, fn (array $a, array $b) => $b['priority'] <=> $a['priority']);
+            $byMeetings[$meetings] = array_map(fn (array $p) => $p['days'], $patterns);
+        }
+
+        return self::$defaultDayGroupsCache = $byMeetings;
+    }
+
+    /**
+     * Looks up a Day combination's entry in MEETING_PATTERN_TABLE
+     * (order-insensitive — ['Thu', 'Tue'] matches ['Tue', 'Thu']),
+     * used by RecommendationService to label/score a combination by
+     * its preference tier rather than a flat yes/no.
+     *
+     * Returns null for a combination that isn't in the table at all
+     * (e.g. a fully arbitrary manual override like Mon+Thu).
+     *
+     * @param  list<string>  $days
+     * @return array{name: string, priority: int, tier: string}|null
+     */
+    public function priorityTier(array $days): ?array
+    {
+        $sorted = $days;
+        sort($sorted);
+
+        foreach (self::MEETING_PATTERN_TABLE as $pattern) {
+            $patternDays = $pattern['days'];
+            sort($patternDays);
+
+            if ($patternDays === $sorted) {
+                return [
+                    'name' => $pattern['name'],
+                    'priority' => $pattern['priority'],
+                    'tier' => match (true) {
+                        $pattern['priority'] >= 95 => 'Preferred',
+                        $pattern['priority'] >= 80 => 'Second Priority',
+                        $pattern['priority'] >= 65 => 'Third Priority',
+                        default => 'Lowest Priority',
+                    },
+                ];
+            }
+        }
+
+        return null;
+    }
 
     /**
      * Classify a Subject into Lecture / Laboratory / Special so the
@@ -190,7 +278,7 @@ class MeetingPatternService
         $configured = config("scheduling.meeting_patterns.day_groups.{$meetings}");
         $candidates = (is_array($configured) && ! empty($configured))
             ? $configured
-            : (self::DEFAULT_DAY_GROUPS[$meetings] ?? [['Mon']]);
+            : (self::defaultDayGroups()[$meetings] ?? [['Mon']]);
 
         $allowedDays = $this->allowedDays();
 

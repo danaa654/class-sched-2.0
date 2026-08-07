@@ -477,9 +477,6 @@ const fetchRecommendations = async (row, force = false) => {
     }
 };
 
-const expandedRows = ref({});
-const onRowExpand = (event) => fetchRecommendations(event.data);
-
 const confidenceSeverity = (label) => {
     switch (label) {
         case 'Best Match':
@@ -518,6 +515,9 @@ const applyTimeRecommendation = (row, rec) => {
 /* their own dropdown; Time gets the same one-click treatment here      */
 /* instead of requiring the Registrar to expand the row's full panel.   */
 
+const helpPopover = ref(null);
+const toggleHelp = (event) => helpPopover.value?.toggle(event);
+
 const timePopover = ref(null);
 const timePopoverRow = ref(null);
 
@@ -530,6 +530,35 @@ const toggleTimeSuggestions = (event, row) => {
 const applyTimeRecommendationFromPopover = (row, rec) => {
     applyTimeRecommendation(row, rec);
     timePopover.value?.hide();
+};
+
+/* --- Inline "Recommended" popovers (Faculty / Room columns) --------- */
+/* Same one-click treatment as the Time popover above, so Faculty and   */
+/* Room get the same sparkle-triggered quick-pick instead of requiring  */
+/* the row's old expand panel.                                          */
+
+const facultyPopover = ref(null);
+const facultyPopoverRow = ref(null);
+const toggleFacultySuggestions = (event, row) => {
+    facultyPopoverRow.value = row;
+    fetchRecommendations(row);
+    facultyPopover.value?.toggle(event);
+};
+const applyFacultyRecommendationFromPopover = (row, rec) => {
+    applyFacultyRecommendation(row, rec);
+    facultyPopover.value?.hide();
+};
+
+const roomPopover = ref(null);
+const roomPopoverRow = ref(null);
+const toggleRoomSuggestions = (event, row) => {
+    roomPopoverRow.value = row;
+    fetchRecommendations(row);
+    roomPopover.value?.toggle(event);
+};
+const applyRoomRecommendationFromPopover = (row, rec) => {
+    applyRoomRecommendation(row, rec);
+    roomPopover.value?.hide();
 };
 
 /* ------------------------------------------------------------------ */
@@ -1182,16 +1211,29 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             <!-- Page Title -->
             <div class="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">
+                    <h1 class="text-2xl font-bold tracking-tight text-[#1E293B] flex items-center gap-2">
                         {{ section.section_code }} — {{ section.section_name }}
+                        <Button
+                            icon="pi pi-info-circle"
+                            text
+                            rounded
+                            size="small"
+                            severity="secondary"
+                            class="!p-1.5 !text-slate-400"
+                            aria-label="How this page works"
+                            title="How this page works"
+                            @click="toggleHelp"
+                        />
                     </h1>
-                    <p class="mt-1 text-slate-500">
+                </div>
+                <Popover ref="helpPopover">
+                    <p class="w-80 max-w-[85vw] text-sm text-slate-600 leading-relaxed">
                         Build this section's subject list and assign Faculty, Room, Days, and Time directly in the
                         table, or click "Auto Generate Schedule" to let the recommendation engine propose the best
                         Faculty, Room, and Time for every unscheduled subject. Review the result, then click
                         "Save Schedule" to save everything at once.
                     </p>
-                </div>
+                </Popover>
                 <div class="flex items-center gap-3 shrink-0">
                     <span v-if="hasUnsavedChanges" class="text-sm text-amber-600 font-medium whitespace-nowrap">
                         <i class="pi pi-circle-fill text-[6px] align-middle mr-1"></i>Unsaved changes
@@ -1312,8 +1354,6 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         :value="rows"
                         :loading="loading"
                         dataKey="id"
-                        v-model:expandedRows="expandedRows"
-                        @rowExpand="onRowExpand"
                         class="rounded-xl overflow-hidden schedule-table"
                         :rowClass="
                             (row) =>
@@ -1348,460 +1388,319 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             </div>
                         </template>
 
-                        <Column expander style="width: 3rem" />
-
-                        <Column header="EDP Code" style="min-width: 8rem">
+                        <Column style="width: 100%">
                             <template #body="{ data }">
-                                <span v-if="data.edp_code" class="font-mono text-xs font-semibold text-indigo-700">
-                                    {{ data.edp_code }}
-                                </span>
-                                <Tag v-else value="Pending" severity="secondary" />
-                            </template>
-                        </Column>
-                        <Column header="Subject Code" style="min-width: 9rem">
-                            <template #body="{ data }">
-                                <span class="font-medium text-slate-700">{{ data.subject?.subject_code }}</span>
-                            </template>
-                        </Column>
-                        <Column header="Subject Title" style="min-width: 13rem">
-                            <template #body="{ data }">
-                                {{ data.subject?.subject_title }}
-                            </template>
-                        </Column>
-                        <Column header="Category" style="min-width: 9rem">
-                            <template #body="{ data }">
-                                <Tag :value="data.subject?.category" :severity="categorySeverity(data.subject?.category)" />
-                            </template>
-                        </Column>
-                        <Column header="Units" style="width: 5rem">
-                            <template #body="{ data }">
-                                {{ data.subject?.units }}
-                            </template>
-                        </Column>
-
-                        <!-- Faculty -->
-                        <Column header="Faculty" style="min-width: 14rem">
-                            <template #body="{ data }">
-                                <Select
-                                    v-model="data.faculty_id"
-                                    :options="facultyGroupsFor(data)"
-                                    optionLabel="label"
-                                    optionValue="value"
-                                    optionGroupLabel="label"
-                                    optionGroupChildren="items"
-                                    filter
-                                    showClear
-                                    placeholder="Select faculty"
-                                    class="w-full"
-                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id) }"
-                                    emptyMessage="No active faculty"
-                                    emptyFilterMessage="No matching faculty"
-                                    @update:modelValue="(v) => onFacultyChange(data, v)"
-                                    @show="fetchRecommendations(data)"
-                                >
-                                    <template #optiongroup="{ option }">
-                                        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
-                                    </template>
-                                    <template #option="{ option }">
-                                        <span>{{ option.label }}</span>
-                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
-                                    </template>
-                                </Select>
-                                <p v-if="stateFor(data.id).errors.faculty_id" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.faculty_id }}
-                                </p>
-                                <p v-else-if="facultyConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>Faculty already booked this day/time.
-                                </p>
-                            </template>
-                        </Column>
-
-                        <!-- Room -->
-                        <Column header="Room" style="min-width: 13rem">
-                            <template #body="{ data }">
-                                <Select
-                                    v-model="data.room_id"
-                                    :options="roomGroupsFor(data)"
-                                    optionLabel="label"
-                                    optionValue="value"
-                                    optionGroupLabel="label"
-                                    optionGroupChildren="items"
-                                    filter
-                                    showClear
-                                    placeholder="Select room"
-                                    class="w-full"
-                                    :class="{ 'p-invalid': stateFor(data.id).errors.room_id || roomConflictRowIds.has(data.id) }"
-                                    emptyMessage="No active rooms"
-                                    emptyFilterMessage="No matching rooms"
-                                    @update:modelValue="(v) => onRoomChange(data, v)"
-                                    @show="fetchRecommendations(data)"
-                                >
-                                    <template #optiongroup="{ option }">
-                                        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
-                                    </template>
-                                    <template #option="{ option }">
-                                        <span>{{ option.label }}</span>
-                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
-                                    </template>
-                                </Select>
-                                <p v-if="stateFor(data.id).errors.room_id" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.room_id }}
-                                </p>
-                                <p v-else-if="roomConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>Room already booked this day/time.
-                                </p>
-                                <p v-else-if="rowHasCapacityWarning(data.id)" class="text-amber-600 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>Section capacity exceeds this room's capacity.
-                                </p>
-                            </template>
-                        </Column>
-
-                        <!-- Days -->
-                        <Column header="Days" style="min-width: 12rem">
-                            <template #body="{ data }">
-                                <div class="flex items-start gap-1">
-                                    <MultiSelect
-                                        v-model="data.days"
-                                        :options="dayOptions"
-                                        optionLabel="label"
-                                        optionValue="value"
-                                        placeholder="Select days"
-                                        class="w-full"
-                                        :class="{ 'p-invalid': stateFor(data.id).errors.days || sectionConflictRowIds.has(data.id) }"
-                                        @update:modelValue="(v) => onDaysChange(data, v)"
-                                    >
-                                        <template #value="{ value, placeholder }">
-                                            <span v-if="!value || value.length === 0" class="text-slate-400">{{ placeholder }}</span>
-                                            <span v-else class="font-medium">{{ formatDays(value) }}</span>
-                                        </template>
-                                        <template #header>
-                                            <div class="flex flex-wrap gap-1 px-3 pt-2 pb-1">
-                                                <button
-                                                    v-for="preset in dayPresets"
-                                                    :key="preset.label"
-                                                    type="button"
-                                                    class="text-xs px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600"
-                                                    @click="applyDayPreset(data, preset)"
-                                                >
-                                                    {{ preset.label }}
-                                                </button>
+                                <div class="flex flex-col gap-2.5 py-1.5">
+                                    <!-- Line 1: EDP Code / Subject Code / Subject Title / Category / Units / Status / Source / Actions -->
+                                    <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+                                        <div class="min-w-[7rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">EDP Code</p>
+                                            <span v-if="data.edp_code" class="font-mono text-xs font-semibold text-indigo-700">
+                                                {{ data.edp_code }}
+                                            </span>
+                                            <Tag v-else value="Pending" severity="secondary" class="!text-[0.65rem]" />
+                                        </div>
+                                        <div class="min-w-[7rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Subject Code</p>
+                                            <span class="text-xs font-medium text-slate-700">{{ data.subject?.subject_code }}</span>
+                                        </div>
+                                        <div class="min-w-[12rem] flex-1">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Subject Title</p>
+                                            <span class="text-xs text-slate-700">{{ data.subject?.subject_title }}</span>
+                                        </div>
+                                        <div class="min-w-[7rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Category</p>
+                                            <Tag :value="data.subject?.category" :severity="categorySeverity(data.subject?.category)" class="!text-[0.65rem]" />
+                                        </div>
+                                        <div class="w-10">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Units</p>
+                                            <span class="text-xs text-slate-700">{{ data.subject?.units }}</span>
+                                        </div>
+                                        <div class="min-w-[8rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Status</p>
+                                            <div class="flex items-center gap-1 flex-wrap">
+                                                <Tag :value="displayStatus(data)" :severity="statusSeverity(displayStatus(data))" class="!text-[0.65rem]" />
+                                                <Tag
+                                                    v-if="data.is_auto_generated"
+                                                    value="⚡ Auto"
+                                                    severity="help"
+                                                    class="!text-[0.65rem]"
+                                                    title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Clear Generated Schedule to discard it."
+                                                />
+                                                <i
+                                                    v-if="rowHasBlockingConflict(data.id) || rowHasCapacityWarning(data.id) || hasActiveConflict(data)"
+                                                    class="pi pi-exclamation-triangle"
+                                                    :class="rowHasBlockingConflict(data.id) || hasActiveConflict(data) ? 'text-red-500' : 'text-amber-500'"
+                                                    :title="conflictTooltip(data.id) || 'Unresolved scheduling conflict'"
+                                                ></i>
                                             </div>
-                                        </template>
-                                    </MultiSelect>
-                                    <Button
-                                        icon="pi pi-sparkles"
-                                        text
-                                        rounded
-                                        size="small"
-                                        severity="secondary"
-                                        class="!p-1.5 shrink-0"
-                                        aria-label="Suggested times"
-                                        title="Suggested times"
-                                        @click="toggleTimeSuggestions($event, data)"
-                                    />
-                                </div>
-                                <p v-if="stateFor(data.id).errors.days" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.days }}
-                                </p>
-                                <p v-else-if="sectionConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>Overlaps another class in this section.
-                                </p>
-                            </template>
-                        </Column>
-
-                        <!-- Start Time -->
-                        <Column header="Start Time" style="min-width: 9rem">
-                            <template #body="{ data }">
-                                <DatePicker
-                                    :modelValue="startTimeModel(data)"
-                                    timeOnly
-                                    hourFormat="12"
-                                    showIcon
-                                    iconDisplay="input"
-                                    placeholder="Start"
-                                    class="w-full"
-                                    :class="{ 'p-invalid': stateFor(data.id).errors.start_time }"
-                                    @update:modelValue="(v) => onStartTimeChange(data, v)"
-                                />
-                                <p v-if="stateFor(data.id).errors.start_time" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.start_time }}
-                                </p>
-                            </template>
-                        </Column>
-
-                        <!-- End Time -->
-                        <Column header="End Time" style="min-width: 9rem">
-                            <template #body="{ data }">
-                                <DatePicker
-                                    :modelValue="endTimeModel(data)"
-                                    timeOnly
-                                    hourFormat="12"
-                                    showIcon
-                                    iconDisplay="input"
-                                    placeholder="End"
-                                    class="w-full"
-                                    :class="{ 'p-invalid': stateFor(data.id).errors.end_time }"
-                                    @update:modelValue="(v) => onEndTimeChange(data, v)"
-                                />
-                                <p v-if="stateFor(data.id).errors.end_time" class="text-red-500 text-xs mt-1">
-                                    <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.end_time }}
-                                </p>
-                            </template>
-                        </Column>
-
-                        <!-- Status -->
-                        <Column header="Status" style="width: 9rem">
-                            <template #body="{ data }">
-                                <div class="flex items-center gap-1 flex-wrap">
-                                    <Tag :value="displayStatus(data)" :severity="statusSeverity(displayStatus(data))" />
-                                    <Tag
-                                        v-if="data.is_auto_generated"
-                                        value="⚡ Auto"
-                                        severity="help"
-                                        title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Clear Generated Schedule to discard it."
-                                    />
-                                    <i
-                                        v-if="rowHasBlockingConflict(data.id) || rowHasCapacityWarning(data.id) || hasActiveConflict(data)"
-                                        class="pi pi-exclamation-triangle"
-                                        :class="rowHasBlockingConflict(data.id) || hasActiveConflict(data) ? 'text-red-500' : 'text-amber-500'"
-                                        :title="conflictTooltip(data.id) || 'Unresolved scheduling conflict'"
-                                    ></i>
-                                </div>
-                            </template>
-                        </Column>
-
-                        <Column header="Source" style="width: 9rem">
-                            <template #body="{ data }">
-                                <Tag :value="data.source" :severity="sourceSeverity(data.source)" />
-                            </template>
-                        </Column>
-                        <Column header="Actions" style="width: 10rem">
-                            <template #body="{ data }">
-                                <div class="flex items-center gap-1">
-                                    <Button
-                                        icon="pi pi-sparkles"
-                                        label="Recommend"
-                                        text
-                                        size="small"
-                                        aria-label="Smart Schedule Recommendation"
-                                        @click="openRecommendDrawer(data)"
-                                    />
-                                    <Button
-                                        icon="pi pi-trash"
-                                        text
-                                        rounded
-                                        severity="danger"
-                                        size="small"
-                                        aria-label="Remove"
-                                        @click="onRemove(data)"
-                                    />
-                                </div>
-                            </template>
-                        </Column>
-
-                        <!-- Smart Assignment Recommendation Panel (Prompt 8.6) -->
-                        <template #expansion="{ data }">
-                            <div class="p-4 bg-slate-50 rounded-lg">
-                                <div class="flex items-center justify-between mb-3">
-                                    <p class="text-sm font-semibold text-slate-700">
-                                        <i class="pi pi-sparkles mr-1 text-indigo-500"></i>Recommended Faculty, Room &amp; Time
-                                    </p>
-                                    <Button
-                                        icon="pi pi-refresh"
-                                        label="Refresh"
-                                        text
-                                        size="small"
-                                        :loading="recommendationStateFor(data.id).loading"
-                                        @click="fetchRecommendations(data, true)"
-                                    />
-                                </div>
-
-                                <div v-if="recommendationStateFor(data.id).loading" class="text-sm text-slate-500">
-                                    Finding the best matches for {{ data.subject?.subject_code }}…
-                                </div>
-                                <div v-else-if="recommendationStateFor(data.id).error" class="text-sm text-red-500">
-                                    {{ recommendationStateFor(data.id).error }}
-                                </div>
-                                <div v-else-if="recommendationStateFor(data.id).faculty" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <!-- Recommended Faculty -->
-                                    <div class="bg-white rounded-lg border border-slate-200 p-3">
-                                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Recommended Faculty</p>
-                                        <p v-if="recommendationStateFor(data.id).faculty.message" class="text-sm text-slate-500">
-                                            {{ recommendationStateFor(data.id).faculty.message }}
-                                        </p>
-                                        <ul v-else class="flex flex-col gap-3">
-                                            <li
-                                                v-for="rec in recommendationStateFor(data.id).faculty.recommendations"
-                                                :key="rec.id"
-                                                class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
-                                            >
-                                                <div class="flex items-center justify-between gap-2">
-                                                    <div class="min-w-0">
-                                                        <p class="text-sm font-medium text-slate-700 truncate">{{ rec.name }}</p>
-                                                        <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                                            <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
-                                                            <Tag
-                                                                v-if="rec.selected_by_college_match"
-                                                                value="Selected by College Match"
-                                                                severity="warning"
-                                                                class="!text-[0.65rem]"
-                                                            />
-                                                            <Tag
-                                                                v-if="rec.selected_by_general_education_match"
-                                                                value="Selected by General Education Match"
-                                                                severity="warning"
-                                                                class="!text-[0.65rem]"
-                                                            />
-                                                            <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
-                                                        </div>
-                                                    </div>
-                                                    <Button label="Use This" text size="small" @click="applyFacultyRecommendation(data, rec)" />
-                                                </div>
-                                                <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                                                    <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
-                                                </div>
-                                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
-                                                    <li
-                                                        v-for="reason in rec.reasons"
-                                                        :key="reason.label"
-                                                        class="text-[0.7rem] flex items-center gap-1"
-                                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
-                                                    >
-                                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
-                                                    </li>
-                                                </ul>
-                                            </li>
-                                        </ul>
+                                        </div>
+                                        <div class="min-w-[6rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Source</p>
+                                            <Tag :value="data.source" :severity="sourceSeverity(data.source)" class="!text-[0.65rem]" />
+                                        </div>
+                                        <div class="ml-auto flex items-center gap-1 self-end">
+                                            <Button
+                                                icon="pi pi-sparkles"
+                                                label="Recommend"
+                                                text
+                                                size="small"
+                                                class="!text-xs"
+                                                aria-label="Smart Schedule Recommendation"
+                                                @click="openRecommendDrawer(data)"
+                                            />
+                                            <Button
+                                                icon="pi pi-trash"
+                                                text
+                                                rounded
+                                                severity="danger"
+                                                size="small"
+                                                aria-label="Remove"
+                                                @click="onRemove(data)"
+                                            />
+                                        </div>
                                     </div>
 
-                                    <!-- Recommended Room -->
-                                    <div class="bg-white rounded-lg border border-slate-200 p-3">
-                                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Recommended Room</p>
-                                        <p v-if="recommendationStateFor(data.id).room?.message" class="text-sm text-slate-500">
-                                            {{ recommendationStateFor(data.id).room.message }}
-                                        </p>
-                                        <ul v-else class="flex flex-col gap-3">
-                                            <li
-                                                v-for="rec in recommendationStateFor(data.id).room?.recommendations ?? []"
-                                                :key="rec.id"
-                                                class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
-                                            >
-                                                <div class="flex items-center justify-between gap-2">
-                                                    <div class="min-w-0">
-                                                        <p class="text-sm font-medium text-slate-700 truncate">{{ rec.name }}</p>
-                                                        <div class="flex items-center gap-1.5 mt-0.5">
-                                                            <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
-                                                            <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
-                                                        </div>
-                                                    </div>
-                                                    <Button label="Use This" text size="small" @click="applyRoomRecommendation(data, rec)" />
-                                                </div>
-                                                <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                                                    <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
-                                                </div>
-                                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
-                                                    <li
-                                                        v-for="reason in rec.reasons"
-                                                        :key="reason.label"
-                                                        class="text-[0.7rem] flex items-center gap-1"
-                                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
-                                                    >
-                                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
-                                                    </li>
-                                                </ul>
-                                            </li>
-                                        </ul>
-                                    </div>
+                                    <!-- Line 2: Faculty / Room / Days / Start Time / End Time -->
+                                    <div class="flex flex-wrap items-start gap-3 pt-2 border-t border-slate-100">
+                                        <!-- Faculty -->
+                                        <div class="flex-1 min-w-[15rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Faculty</p>
+                                            <div class="flex items-start gap-1">
+                                                <Select
+                                                    v-model="data.faculty_id"
+                                                    :options="facultyGroupsFor(data)"
+                                                    optionLabel="label"
+                                                    optionValue="value"
+                                                    optionGroupLabel="label"
+                                                    optionGroupChildren="items"
+                                                    filter
+                                                    showClear
+                                                    placeholder="Select faculty"
+                                                    class="w-full"
+                                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id) }"
+                                                    emptyMessage="No active faculty"
+                                                    emptyFilterMessage="No matching faculty"
+                                                    @update:modelValue="(v) => onFacultyChange(data, v)"
+                                                    @show="fetchRecommendations(data)"
+                                                >
+                                                    <template #optiongroup="{ option }">
+                                                        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
+                                                    </template>
+                                                    <template #option="{ option }">
+                                                        <span>{{ option.label }}</span>
+                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
+                                                    </template>
+                                                </Select>
+                                                <Button
+                                                    icon="pi pi-sparkles"
+                                                    text
+                                                    rounded
+                                                    size="small"
+                                                    severity="secondary"
+                                                    class="!p-1.5 shrink-0"
+                                                    aria-label="Suggested faculty"
+                                                    title="Suggested faculty"
+                                                    @click="toggleFacultySuggestions($event, data)"
+                                                />
+                                            </div>
+                                            <p v-if="stateFor(data.id).errors.faculty_id" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.faculty_id }}
+                                            </p>
+                                            <p v-else-if="facultyConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>Faculty already booked this day/time.
+                                            </p>
+                                        </div>
 
-                                    <!-- Recommended Time -->
-                                    <div class="bg-white rounded-lg border border-slate-200 p-3">
-                                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Recommended Time</p>
-                                        <p v-if="recommendationStateFor(data.id).time?.message" class="text-sm text-slate-500">
-                                            {{ recommendationStateFor(data.id).time.message }}
-                                        </p>
-                                        <ul v-else class="flex flex-col gap-3">
-                                            <li
-                                                v-for="(rec, idx) in recommendationStateFor(data.id).time?.recommendations ?? []"
-                                                :key="idx"
-                                                class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
-                                            >
-                                                <div class="flex items-center justify-between gap-2">
-                                                    <div class="min-w-0">
-                                                        <p class="text-sm font-medium text-slate-700 truncate">
-                                                            {{ formatDays(rec.days) }} · {{ formatTimeRange(rec.start_time, rec.end_time) }}
-                                                        </p>
-                                                        <div class="flex items-center gap-1.5 mt-0.5">
-                                                            <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
-                                                            <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                        <!-- Room -->
+                                        <div class="flex-1 min-w-[14rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Room</p>
+                                            <div class="flex items-start gap-1">
+                                                <Select
+                                                    v-model="data.room_id"
+                                                    :options="roomGroupsFor(data)"
+                                                    optionLabel="label"
+                                                    optionValue="value"
+                                                    optionGroupLabel="label"
+                                                    optionGroupChildren="items"
+                                                    filter
+                                                    showClear
+                                                    placeholder="Select room"
+                                                    class="w-full"
+                                                    :class="{ 'p-invalid': stateFor(data.id).errors.room_id || roomConflictRowIds.has(data.id) }"
+                                                    emptyMessage="No active rooms"
+                                                    emptyFilterMessage="No matching rooms"
+                                                    @update:modelValue="(v) => onRoomChange(data, v)"
+                                                    @show="fetchRecommendations(data)"
+                                                >
+                                                    <template #optiongroup="{ option }">
+                                                        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
+                                                    </template>
+                                                    <template #option="{ option }">
+                                                        <span>{{ option.label }}</span>
+                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
+                                                    </template>
+                                                </Select>
+                                                <Button
+                                                    icon="pi pi-sparkles"
+                                                    text
+                                                    rounded
+                                                    size="small"
+                                                    severity="secondary"
+                                                    class="!p-1.5 shrink-0"
+                                                    aria-label="Suggested rooms"
+                                                    title="Suggested rooms"
+                                                    @click="toggleRoomSuggestions($event, data)"
+                                                />
+                                            </div>
+                                            <p v-if="stateFor(data.id).errors.room_id" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.room_id }}
+                                            </p>
+                                            <p v-else-if="roomConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>Room already booked this day/time.
+                                            </p>
+                                            <p v-else-if="rowHasCapacityWarning(data.id)" class="text-amber-600 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>Section capacity exceeds this room's capacity.
+                                            </p>
+                                        </div>
+
+                                        <!-- Days -->
+                                        <div class="flex-1 min-w-[12rem]">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Days</p>
+                                            <div class="flex items-start gap-1">
+                                                <MultiSelect
+                                                    v-model="data.days"
+                                                    :options="dayOptions"
+                                                    optionLabel="label"
+                                                    optionValue="value"
+                                                    placeholder="Select days"
+                                                    class="w-full"
+                                                    :class="{ 'p-invalid': stateFor(data.id).errors.days || sectionConflictRowIds.has(data.id) }"
+                                                    @update:modelValue="(v) => onDaysChange(data, v)"
+                                                >
+                                                    <template #value="{ value, placeholder }">
+                                                        <span v-if="!value || value.length === 0" class="text-slate-400">{{ placeholder }}</span>
+                                                        <span v-else class="font-medium">{{ formatDays(value) }}</span>
+                                                    </template>
+                                                    <template #header>
+                                                        <div class="flex flex-wrap gap-1 px-3 pt-2 pb-1">
+                                                            <button
+                                                                v-for="preset in dayPresets"
+                                                                :key="preset.label"
+                                                                type="button"
+                                                                class="text-xs px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600"
+                                                                @click="applyDayPreset(data, preset)"
+                                                            >
+                                                                {{ preset.label }}
+                                                            </button>
                                                         </div>
-                                                    </div>
-                                                    <Button label="Use This" text size="small" @click="applyTimeRecommendation(data, rec)" />
-                                                </div>
-                                                <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                                                    <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
-                                                </div>
-                                                <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
-                                                    <li
-                                                        v-for="reason in rec.reasons"
-                                                        :key="reason.label"
-                                                        class="text-[0.7rem] flex items-center gap-1"
-                                                        :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
-                                                    >
-                                                        <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
-                                                    </li>
-                                                </ul>
-                                            </li>
-                                        </ul>
+                                                    </template>
+                                                </MultiSelect>
+                                                <Button
+                                                    icon="pi pi-sparkles"
+                                                    text
+                                                    rounded
+                                                    size="small"
+                                                    severity="secondary"
+                                                    class="!p-1.5 shrink-0"
+                                                    aria-label="Suggested times"
+                                                    title="Suggested times"
+                                                    @click="toggleTimeSuggestions($event, data)"
+                                                />
+                                            </div>
+                                            <p v-if="stateFor(data.id).errors.days" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.days }}
+                                            </p>
+                                            <p v-else-if="sectionConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>Overlaps another class in this section.
+                                            </p>
+                                        </div>
+
+                                        <!-- Start Time -->
+                                        <div class="w-36">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Start Time</p>
+                                            <DatePicker
+                                                :modelValue="startTimeModel(data)"
+                                                timeOnly
+                                                hourFormat="12"
+                                                showIcon
+                                                iconDisplay="input"
+                                                placeholder="Start"
+                                                class="w-full"
+                                                :class="{ 'p-invalid': stateFor(data.id).errors.start_time }"
+                                                @update:modelValue="(v) => onStartTimeChange(data, v)"
+                                            />
+                                            <p v-if="stateFor(data.id).errors.start_time" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.start_time }}
+                                            </p>
+                                        </div>
+
+                                        <!-- End Time -->
+                                        <div class="w-36">
+                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">End Time</p>
+                                            <DatePicker
+                                                :modelValue="endTimeModel(data)"
+                                                timeOnly
+                                                hourFormat="12"
+                                                showIcon
+                                                iconDisplay="input"
+                                                placeholder="End"
+                                                class="w-full"
+                                                :class="{ 'p-invalid': stateFor(data.id).errors.end_time }"
+                                                @update:modelValue="(v) => onEndTimeChange(data, v)"
+                                            />
+                                            <p v-if="stateFor(data.id).errors.end_time" class="text-red-500 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.end_time }}
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
-                                <p class="text-xs text-slate-400 mt-3">
-                                    <i class="pi pi-info-circle mr-1"></i>Recommendations are suggestions only — nothing is assigned until you pick it.
-                                </p>
-                            </div>
-                        </template>
+                            </template>
+                        </Column>
+
                     </DataTable>
 
                     <!-- Suggested Time popover (Days column quick-pick) -->
                     <Popover ref="timePopover">
-                        <div class="w-80 max-w-[90vw]">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 px-1">
+                        <div class="w-72 max-w-[85vw]">
+                            <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
                                 Suggested Times<span v-if="timePopoverRow?.subject?.subject_code"> — {{ timePopoverRow.subject.subject_code }}</span>
                             </p>
-                            <div v-if="recommendationStateFor(timePopoverRow?.id).loading" class="text-sm text-slate-500 px-1 py-2">
+                            <div v-if="recommendationStateFor(timePopoverRow?.id).loading" class="text-xs text-slate-500 px-1 py-1.5">
                                 Finding open slots…
                             </div>
-                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).error" class="text-sm text-red-500 px-1 py-2">
+                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).error" class="text-xs text-red-500 px-1 py-1.5">
                                 {{ recommendationStateFor(timePopoverRow?.id).error }}
                             </div>
-                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).time?.message" class="text-sm text-slate-500 px-1 py-2">
+                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).time?.message" class="text-xs text-slate-500 px-1 py-1.5">
                                 {{ recommendationStateFor(timePopoverRow?.id).time.message }}
                             </div>
-                            <ul v-else class="flex flex-col gap-3 max-h-80 overflow-y-auto pr-1">
+                            <ul v-else class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
                                 <li
                                     v-for="(rec, idx) in recommendationStateFor(timePopoverRow?.id).time?.recommendations ?? []"
                                     :key="idx"
-                                    class="flex flex-col gap-1.5 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0"
+                                    class="flex flex-col gap-1 pb-1.5 border-b border-slate-100 last:border-b-0 last:pb-0"
                                 >
                                     <div class="flex items-center justify-between gap-2">
                                         <div class="min-w-0">
-                                            <p class="text-sm font-medium text-slate-700 truncate">
+                                            <p class="text-xs font-medium text-slate-700 truncate">
                                                 {{ formatDays(rec.days) }} · {{ formatTimeRange(rec.start_time, rec.end_time) }}
                                             </p>
                                             <div class="flex items-center gap-1.5 mt-0.5">
-                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.65rem]" />
-                                                <span class="text-[0.7rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.6rem]" />
+                                                <span class="text-[0.65rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
                                             </div>
                                         </div>
-                                        <Button label="Use This" text size="small" @click="applyTimeRecommendationFromPopover(timePopoverRow, rec)" />
+                                        <Button label="Use This" text size="small" class="!text-xs !p-1" @click="applyTimeRecommendationFromPopover(timePopoverRow, rec)" />
                                     </div>
-                                    <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                    <div class="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
                                         <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
                                     </div>
-                                    <ul class="flex flex-wrap gap-x-3 gap-y-0.5">
+                                    <ul class="flex flex-wrap gap-x-2 gap-y-0.5">
                                         <li
                                             v-for="reason in rec.reasons"
                                             :key="reason.label"
-                                            class="text-[0.7rem] flex items-center gap-1"
+                                            class="text-[0.65rem] flex items-center gap-1"
                                             :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
                                         >
                                             <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
@@ -1809,7 +1708,111 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     </ul>
                                 </li>
                             </ul>
-                            <p class="text-xs text-slate-400 mt-2 px-1">
+                            <p class="text-[0.65rem] text-slate-400 mt-1.5 px-1">
+                                <i class="pi pi-info-circle mr-1"></i>Suggestions only — nothing is assigned until you click "Use This".
+                            </p>
+                        </div>
+                    </Popover>
+
+                    <!-- Suggested Faculty popover (Faculty column quick-pick) -->
+                    <Popover ref="facultyPopover">
+                        <div class="w-72 max-w-[85vw]">
+                            <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
+                                Suggested Faculty<span v-if="facultyPopoverRow?.subject?.subject_code"> — {{ facultyPopoverRow.subject.subject_code }}</span>
+                            </p>
+                            <div v-if="recommendationStateFor(facultyPopoverRow?.id).loading" class="text-xs text-slate-500 px-1 py-1.5">
+                                Finding the best matches…
+                            </div>
+                            <div v-else-if="recommendationStateFor(facultyPopoverRow?.id).error" class="text-xs text-red-500 px-1 py-1.5">
+                                {{ recommendationStateFor(facultyPopoverRow?.id).error }}
+                            </div>
+                            <div v-else-if="recommendationStateFor(facultyPopoverRow?.id).faculty?.message" class="text-xs text-slate-500 px-1 py-1.5">
+                                {{ recommendationStateFor(facultyPopoverRow?.id).faculty.message }}
+                            </div>
+                            <ul v-else class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
+                                <li
+                                    v-for="rec in recommendationStateFor(facultyPopoverRow?.id).faculty?.recommendations ?? []"
+                                    :key="rec.id"
+                                    class="flex flex-col gap-1 pb-1.5 border-b border-slate-100 last:border-b-0 last:pb-0"
+                                >
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div class="min-w-0">
+                                            <p class="text-xs font-medium text-slate-700 truncate">{{ rec.name }}</p>
+                                            <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.6rem]" />
+                                                <span class="text-[0.65rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                            </div>
+                                        </div>
+                                        <Button label="Use This" text size="small" class="!text-xs !p-1" @click="applyFacultyRecommendationFromPopover(facultyPopoverRow, rec)" />
+                                    </div>
+                                    <div class="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
+                                        <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
+                                    </div>
+                                    <ul class="flex flex-wrap gap-x-2 gap-y-0.5">
+                                        <li
+                                            v-for="reason in rec.reasons"
+                                            :key="reason.label"
+                                            class="text-[0.65rem] flex items-center gap-1"
+                                            :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                        >
+                                            <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                        </li>
+                                    </ul>
+                                </li>
+                            </ul>
+                            <p class="text-[0.65rem] text-slate-400 mt-1.5 px-1">
+                                <i class="pi pi-info-circle mr-1"></i>Suggestions only — nothing is assigned until you click "Use This".
+                            </p>
+                        </div>
+                    </Popover>
+
+                    <!-- Suggested Room popover (Room column quick-pick) -->
+                    <Popover ref="roomPopover">
+                        <div class="w-72 max-w-[85vw]">
+                            <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
+                                Suggested Rooms<span v-if="roomPopoverRow?.subject?.subject_code"> — {{ roomPopoverRow.subject.subject_code }}</span>
+                            </p>
+                            <div v-if="recommendationStateFor(roomPopoverRow?.id).loading" class="text-xs text-slate-500 px-1 py-1.5">
+                                Finding the best matches…
+                            </div>
+                            <div v-else-if="recommendationStateFor(roomPopoverRow?.id).error" class="text-xs text-red-500 px-1 py-1.5">
+                                {{ recommendationStateFor(roomPopoverRow?.id).error }}
+                            </div>
+                            <div v-else-if="recommendationStateFor(roomPopoverRow?.id).room?.message" class="text-xs text-slate-500 px-1 py-1.5">
+                                {{ recommendationStateFor(roomPopoverRow?.id).room.message }}
+                            </div>
+                            <ul v-else class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
+                                <li
+                                    v-for="rec in recommendationStateFor(roomPopoverRow?.id).room?.recommendations ?? []"
+                                    :key="rec.id"
+                                    class="flex flex-col gap-1 pb-1.5 border-b border-slate-100 last:border-b-0 last:pb-0"
+                                >
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div class="min-w-0">
+                                            <p class="text-xs font-medium text-slate-700 truncate">{{ rec.name }}</p>
+                                            <div class="flex items-center gap-1.5 mt-0.5">
+                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.6rem]" />
+                                                <span class="text-[0.65rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
+                                            </div>
+                                        </div>
+                                        <Button label="Use This" text size="small" class="!text-xs !p-1" @click="applyRoomRecommendationFromPopover(roomPopoverRow, rec)" />
+                                    </div>
+                                    <div class="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
+                                        <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
+                                    </div>
+                                    <ul class="flex flex-wrap gap-x-2 gap-y-0.5">
+                                        <li
+                                            v-for="reason in rec.reasons"
+                                            :key="reason.label"
+                                            class="text-[0.65rem] flex items-center gap-1"
+                                            :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
+                                        >
+                                            <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
+                                        </li>
+                                    </ul>
+                                </li>
+                            </ul>
+                            <p class="text-[0.65rem] text-slate-400 mt-1.5 px-1">
                                 <i class="pi pi-info-circle mr-1"></i>Suggestions only — nothing is assigned until you click "Use This".
                             </p>
                         </div>
@@ -2408,6 +2411,23 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 .schedule-table :deep(.p-select),
 .schedule-table :deep(.p-multiselect),
 .schedule-table :deep(.p-datepicker-input) {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+}
+
+/* Slightly tighter row height/padding + smaller base font so more of
+   the table is visible at once and it's easier to scan/read. */
+.schedule-table :deep(.p-datatable-thead > tr > th) {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.8rem;
+}
+.schedule-table :deep(.p-datatable-tbody > tr > td) {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+}
+.schedule-table :deep(.p-select-label),
+.schedule-table :deep(.p-multiselect-label),
+.schedule-table :deep(.p-inputtext) {
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
 }
 </style>

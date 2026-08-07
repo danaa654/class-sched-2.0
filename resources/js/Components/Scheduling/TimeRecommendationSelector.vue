@@ -100,6 +100,34 @@ const dateToTimeString = (date) => {
     return `${hours}:${minutes}`;
 };
 
+// --- Auto-adjust duration when the number of meeting days changes ---------
+// The Registrar edits a *per-meeting* time (e.g. 1:00-2:00 PM), but the
+// underlying commitment is really a *weekly* duration (that block x number
+// of meetings/week). If a day is removed/added via the MultiSelect chips,
+// we keep the weekly total constant and redistribute it across whatever
+// days remain, instead of silently leaving a stale per-meeting time.
+const minutesBetween = (start, end) => {
+    if (!start || !end) return 0;
+    return Math.round((end.getTime() - start.getTime()) / 60000);
+};
+
+const addMinutes = (date, minutes) => {
+    const result = new Date(date.getTime());
+    result.setMinutes(result.getMinutes() + minutes);
+    return result;
+};
+
+// Weekly total (minutes) the current per-meeting time + day count implies.
+// Recalculated whenever the Registrar manually edits Start/End; used as the
+// baseline to redistribute across days when the day count changes.
+const totalWeeklyMinutes = ref(null);
+const adjustingForDayChange = ref(false);
+
+const LUNCH_START_MIN = 12 * 60; // 12:00 PM
+const LUNCH_END_MIN = 13 * 60; // 1:00 PM
+
+const toMinutesOfDay = (date) => (date ? date.getHours() * 60 + date.getMinutes() : null);
+
 const scoreColor = (score) => {
     if (score >= 85) return '#16a34a';
     if (score >= 65) return '#2563eb';
@@ -113,11 +141,48 @@ const editEnd = ref(null);
 const applying = ref(false);
 const applyError = ref(null);
 
+// Overlap check against the fixed lunch break (12:00 PM - 1:00 PM).
+const lunchConflict = computed(() => {
+    const startMin = toMinutesOfDay(editStart.value);
+    const endMin = toMinutesOfDay(editEnd.value);
+    if (startMin === null || endMin === null || endMin <= startMin) return false;
+    return startMin < LUNCH_END_MIN && endMin > LUNCH_START_MIN;
+});
+
+watch(editDays, (newDays, oldDays) => {
+    const newCount = newDays?.length ?? 0;
+    const oldCount = oldDays?.length ?? 0;
+    if (newCount === oldCount || newCount === 0 || !editStart.value) return;
+    if (!totalWeeklyMinutes.value) return;
+
+    const perMeetingMinutes = Math.round(totalWeeklyMinutes.value / newCount);
+    adjustingForDayChange.value = true;
+    editEnd.value = addMinutes(editStart.value, perMeetingMinutes);
+    adjustingForDayChange.value = false;
+});
+
+// If the Registrar manually retypes Start/End, that becomes the new
+// per-meeting time — re-baseline the weekly total so future day-count
+// changes redistribute from the value they just set.
+watch([editStart, editEnd], ([start, end]) => {
+    if (adjustingForDayChange.value) return;
+    const perMeeting = minutesBetween(start, end);
+    const count = editDays.value?.length || 1;
+    totalWeeklyMinutes.value = perMeeting > 0 ? perMeeting * count : null;
+});
+
 const openEditor = (event) => {
     editDays.value = [...(current.value?.days ?? [])];
     editStart.value = timeStringToDate(current.value?.start_time);
     editEnd.value = timeStringToDate(current.value?.end_time);
     applyError.value = null;
+
+    // Baseline the weekly total from the recommendation's current per-meeting
+    // time x day count, so toggling days redistributes from this value.
+    const baseMinutes = minutesBetween(editStart.value, editEnd.value);
+    const baseCount = editDays.value.length || 1;
+    totalWeeklyMinutes.value = baseMinutes > 0 ? baseMinutes * baseCount : null;
+
     popover.value?.toggle(event);
 };
 
@@ -220,6 +285,11 @@ const apply = async () => {
                         <DatePicker v-model="editEnd" timeOnly hourFormat="12" class="w-full" inputClass="w-full text-sm" />
                     </div>
                 </div>
+
+                <p v-if="lunchConflict" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2 flex items-start gap-1">
+                    <i class="pi pi-exclamation-triangle mt-0.5"></i>
+                    <span>This time overlaps the 12:00 PM - 1:00 PM lunch break.</span>
+                </p>
 
                 <p v-if="applyError" class="text-xs text-red-600 mb-2">{{ applyError }}</p>
 

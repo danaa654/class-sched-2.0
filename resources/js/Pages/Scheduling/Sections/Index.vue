@@ -120,9 +120,6 @@ const yearLevelOptions = computed(() => props.yearLevels.map((level) => ({ label
 const semesterSelectOptions = computed(() => props.semesterOptions.map((sem) => ({ label: sem, value: sem })));
 const academicYearOptions = computed(() => props.academicYears.map((year) => ({ label: year, value: year })));
 
-// "Add Section" only — editing now happens on the full Edit Section
-// workspace page (see openEdit below), which is the single place
-// scheduling for a section is managed.
 const addSectionVisible = ref(false);
 const editingSection = ref(null);
 
@@ -171,10 +168,24 @@ const openAdd = () => {
     addSectionVisible.value = true;
 };
 
-// Edit now navigates straight into the Edit Section workspace (same
-// page reached by clicking the row) instead of opening a dialog here.
+// Edit opens this same dialog pre-filled with the section's current
+// info, so a typo (section code, name, year level, etc.) can be fixed
+// right here without leaving the list. Assigning subjects/faculty/
+// rooms still only happens on the Section Subjects workspace.
 const openEdit = (section) => {
-    goToSectionSubjects(section);
+    editingSection.value = section;
+    sectionForm.clearErrors();
+    sectionForm.section_code = section.section_code;
+    sectionForm.section_name = section.section_name;
+    sectionForm.major_id = section.major_id;
+    sectionForm.curriculum_id = section.curriculum_id;
+    sectionForm.year_level = section.year_level;
+    sectionForm.academic_year = section.academic_year;
+    sectionForm.semester = section.semester;
+    sectionForm.estimated_students = section.estimated_students;
+    sectionForm.status = section.status;
+    sectionForm.remarks = section.remarks;
+    addSectionVisible.value = true;
 };
 
 const closeAddSection = () => {
@@ -351,6 +362,30 @@ const onDeleteSection = (section) => {
                                 <Tag
                                     :value="data.status"
                                     :severity="data.status === 'Active' ? 'success' : 'secondary'"
+                                />
+                            </template>
+                        </Column>
+                        <Column header="Scheduling" style="width: 11rem">
+                            <template #body="{ data }">
+                                <Tag
+                                    v-if="data.total_subjects_count === 0"
+                                    value="No Subjects Yet"
+                                    severity="secondary"
+                                />
+                                <Tag
+                                    v-else-if="data.assigned_subjects_count === 0"
+                                    value="Not Scheduled"
+                                    severity="secondary"
+                                />
+                                <Tag
+                                    v-else-if="data.assigned_subjects_count < data.total_subjects_count"
+                                    :value="`Partially Scheduled (${data.assigned_subjects_count}/${data.total_subjects_count})`"
+                                    severity="warn"
+                                />
+                                <Tag
+                                    v-else
+                                    :value="`Fully Scheduled (${data.assigned_subjects_count}/${data.total_subjects_count})`"
+                                    severity="success"
                                 />
                             </template>
                         </Column>

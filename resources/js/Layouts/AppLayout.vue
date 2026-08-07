@@ -36,22 +36,37 @@ const userManagementItems = [
     { label: 'Users', route: 'users' },
 ];
 
-const academicManagementItems = [
+// Academic Setup — everything that defines the academic environment
+// (school year/semester/rules, colleges/departments/programs, the
+// curriculum map, and subject records) before scheduling can begin.
+const academicSetupItems = [
     { label: 'Academic Calendar', route: 'academic-calendar' },
     { label: 'Academic Structure', route: 'academic-structure' },
-    { label: 'Subjects', route: 'subjects' },
     { label: 'Curriculum', route: 'curriculums' },
+    { label: 'Subjects', route: 'subjects' },
 ];
 
-const schedulingItems = [
-    { label: 'Scheduling', route: 'scheduling' },
+// Resource Management — the people/rooms/sections the scheduling
+// engine draws on.
+const resourceManagementItems = [
     { label: 'Faculty', route: 'scheduling.faculty' },
     { label: 'Rooms', route: 'scheduling.rooms' },
     { label: 'Sections', route: 'scheduling.sections' },
 ];
 
-const restMenuItems = [
+// Scheduling — the control center for generating and monitoring
+// schedules. (Faculty/Rooms/Sections moved to Resource Management
+// above; actual schedule editing still lives under Sections >
+// Section Subjects, reached from the Sections page.)
+const schedulingItems = [
+    { label: 'Scheduling Dashboard', route: 'scheduling' },
+];
+
+const reportsItems = [
     { label: 'Reports', route: 'reports' },
+];
+
+const systemItems = [
     { label: 'Settings', route: 'settings' },
 ];
 
@@ -77,6 +92,9 @@ const isActive = (routeName) => {
                     ☰
                 </button>
                 <span class="text-xl font-bold tracking-tight text-white">CLASSLY</span>
+            </div>
+
+            <div class="flex items-center gap-4">
                 <span
                     v-if="activeAcademicTermLabel"
                     class="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-emerald-300 border border-white/10"
@@ -85,9 +103,6 @@ const isActive = (routeName) => {
                     <i class="pi pi-calendar text-[11px]"></i>
                     {{ activeAcademicTermLabel }}
                 </span>
-            </div>
-
-            <div class="flex items-center gap-4">
                 <span v-if="user" class="text-sm text-slate-300">
                     {{ user.name }}
                 </span>
@@ -133,13 +148,31 @@ const isActive = (routeName) => {
                     </Link>
                 </div>
 
-                <!-- Academic Management -->
+                <!-- Academic Setup -->
                 <div class="pt-3">
                     <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                        Academic Management
+                        Academic Setup
                     </p>
                     <Link
-                        v-for="item in academicManagementItems"
+                        v-for="item in academicSetupItems"
+                        :key="item.label"
+                        :href="route(item.route)"
+                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        :class="isActive(item.route)
+                            ? 'bg-[#2563EB] text-white'
+                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                    >
+                        {{ item.label }}
+                    </Link>
+                </div>
+
+                <!-- Resource Management -->
+                <div class="pt-3">
+                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                        Resource Management
+                    </p>
+                    <Link
+                        v-for="item in resourceManagementItems"
                         :key="item.label"
                         :href="route(item.route)"
                         class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
@@ -169,17 +202,41 @@ const isActive = (routeName) => {
                     </Link>
                 </div>
 
-                <Link
-                    v-for="item in restMenuItems"
-                    :key="item.label"
-                    :href="route(item.route)"
-                    class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                    :class="isActive(item.route)
-                        ? 'bg-[#2563EB] text-white'
-                        : 'text-slate-300 hover:bg-white/5 hover:text-white'"
-                >
-                    {{ item.label }}
-                </Link>
+                <!-- Reports -->
+                <div class="pt-3">
+                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                        Reports
+                    </p>
+                    <Link
+                        v-for="item in reportsItems"
+                        :key="item.label"
+                        :href="route(item.route)"
+                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        :class="isActive(item.route)
+                            ? 'bg-[#2563EB] text-white'
+                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                    >
+                        {{ item.label }}
+                    </Link>
+                </div>
+
+                <!-- System -->
+                <div class="pt-3">
+                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                        System
+                    </p>
+                    <Link
+                        v-for="item in systemItems"
+                        :key="item.label"
+                        :href="route(item.route)"
+                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        :class="isActive(item.route)
+                            ? 'bg-[#2563EB] text-white'
+                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                    >
+                        {{ item.label }}
+                    </Link>
+                </div>
             </nav>
         </aside>
 

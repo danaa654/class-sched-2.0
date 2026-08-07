@@ -1366,20 +1366,41 @@ class RecommendationService
                     // Subject Hours) are all satisfied by construction
                     // once a slot survives the conflict checks above,
                     // so each is awarded its fixed share of the score.
-                    // The remaining share is a preference bonus that
-                    // favors earlier, more standard slots (fewer
-                    // day-splits, earlier start) — the same "best
-                    // available time blocks first" ordering the spec
-                    // asks for.
-                    $preferenceBonus = max(50 - ($slotIndex * 8), 0);
+                    // The remaining share is a Preferred Day Combination
+                    // bonus straight from MeetingPatternService's
+                    // priority table (Prompt 8.15 — Intelligent Day &
+                    // Time Combination Engine), plus a small
+                    // Student-Friendly-Time bonus that favors earlier
+                    // slots over evening ones.
+                    $tier = $this->meetingPatternService->priorityTier($days);
+                    $dayPatternBonus = (int) round((($tier['priority'] ?? 50) / 100) * 35);
+                    $isEvening = $this->minutesFromTime($start) >= (17 * 60);
+                    $studentFriendlyBonus = $isEvening ? 0 : 15;
 
                     $points = [
                         'faculty_available' => 15,
                         'room_available' => 15,
                         'section_available' => 10,
                         'fits_subject_hours' => 10,
-                        'preferred_slot' => $preferenceBonus,
+                        'preferred_day_combination' => $dayPatternBonus,
+                        'student_friendly_time' => $studentFriendlyBonus,
                     ];
+
+                    $reasons = [
+                        ['label' => 'Faculty Available', 'met' => true, 'type' => 'success'],
+                        ['label' => 'Room Available', 'met' => true, 'type' => 'success'],
+                        ['label' => 'Section Available', 'met' => true, 'type' => 'success'],
+                        ['label' => 'Fits Subject Hours', 'met' => true, 'type' => 'success'],
+                        $tier && $tier['tier'] === 'Preferred'
+                            ? ['label' => 'Preferred Day Combination', 'met' => true, 'type' => 'success']
+                            : ['label' => ($tier['tier'] ?? 'Non-preferred').' Day Combination', 'met' => false, 'type' => 'warning'],
+                    ];
+
+                    if ($isEvening) {
+                        $reasons[] = ['label' => 'Evening Schedule', 'met' => false, 'type' => 'warning'];
+                    } else {
+                        $reasons[] = ['label' => 'Student-Friendly Time', 'met' => true, 'type' => 'success'];
+                    }
 
                     $results[] = [
                         'days' => $days,
@@ -1387,15 +1408,11 @@ class RecommendationService
                         'end_time' => $end,
                         'meetings_per_week' => count($days),
                         'subject_type' => $this->meetingPatternService->label($subject),
+                        'day_pattern_name' => $tier['name'] ?? implode('/', $days),
                         'score' => array_sum($points),
                         'score_max' => 100,
                         'score_breakdown' => $points,
-                        'reasons' => [
-                            ['label' => 'Faculty Available', 'met' => true],
-                            ['label' => 'Room Available', 'met' => true],
-                            ['label' => 'Section Available', 'met' => true],
-                            ['label' => 'Fits Subject Hours', 'met' => true],
-                        ],
+                        'reasons' => $reasons,
                     ];
 
                     $slotIndex++;
@@ -1410,6 +1427,14 @@ class RecommendationService
         if (empty($results)) {
             return ['recommendations' => [], 'message' => 'No available time slot found without conflicts.'];
         }
+
+        // The AI should choose the highest-scoring combination first —
+        // sort by score, then prefer earlier start times as the
+        // tiebreaker (same "best slot first" ordering as before).
+        usort($results, function (array $a, array $b) {
+            return $b['score'] <=> $a['score']
+                ?: strcmp($a['start_time'], $b['start_time']);
+        });
 
         foreach ($results as &$item) {
             $item['confidence'] = $this->confidenceFromScore($item['score']);
@@ -1485,12 +1510,22 @@ class RecommendationService
             : ! SchoolYear::overlapsLunchBreak($startTime, $endTime);
         $overlapsLunch = SchoolYear::overlapsLunchBreak($startTime, $endTime);
 
+        // Day pattern tier + Evening Schedule check — same Meeting
+        // Pattern Table / Student-Friendly-Time rules recommendTimes()
+        // applies to its own suggestions, reused here so a manually
+        // typed day/time gets an honest score and honest reasons too.
+        $tier = $this->meetingPatternService->priorityTier($days);
+        $dayPatternBonus = $fitsPattern ? (int) round((($tier['priority'] ?? 50) / 100) * 35) : 0;
+        $isEvening = $this->minutesFromTime($startTime) >= (17 * 60);
+        $studentFriendlyBonus = $isEvening ? 0 : 15;
+
         $points = [
             'faculty_available' => $facultyConflict ? 0 : 15,
             'room_available' => $roomConflict ? 0 : 15,
             'section_available' => $sectionConflict ? 0 : 10,
             'fits_subject_hours' => $fitsHours ? 10 : 0,
-            'preferred_slot' => $fitsPattern ? 50 : 25,
+            'preferred_day_combination' => $dayPatternBonus,
+            'student_friendly_time' => $studentFriendlyBonus,
         ];
         $score = ($daysAllowed && $withinPolicy) ? array_sum($points) : 0;
 
@@ -1502,6 +1537,18 @@ class RecommendationService
             ['label' => $daysAllowed ? 'Within Available Class Days' : 'Outside Available Class Days', 'met' => $daysAllowed, 'type' => $daysAllowed ? 'success' : 'danger'],
             ['label' => $overlapsLunch ? 'Overlaps Lunch Break (12:00 PM - 1:00 PM)' : 'Does Not Overlap Lunch Break', 'met' => ! $overlapsLunch, 'type' => $overlapsLunch ? 'danger' : 'success'],
         ];
+
+        if ($fitsPattern) {
+            $reasons[] = $tier && $tier['tier'] === 'Preferred'
+                ? ['label' => 'Preferred Day Combination', 'met' => true, 'type' => 'success']
+                : ['label' => ($tier['tier'] ?? 'Non-preferred').' Day Combination', 'met' => false, 'type' => 'warning'];
+        }
+
+        if ($isEvening) {
+            $reasons[] = ['label' => 'Evening Schedule', 'met' => false, 'type' => 'warning'];
+        } else {
+            $reasons[] = ['label' => 'Student-Friendly Time', 'met' => true, 'type' => 'success'];
+        }
 
         if (! $fitsPattern) {
             $label = $this->meetingPatternService->label($subject);

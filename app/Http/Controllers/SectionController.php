@@ -28,6 +28,25 @@ class SectionController extends Controller
 
         $sections = Section::query()
             ->with(['major:id,name,code', 'curriculum:id,code,name,major_id'])
+            // Scheduling-progress indicator for the list — counts every
+            // placement that has Faculty, Room, Days, Start, and End
+            // Time all filled in, regardless of the row's `status`
+            // column. A Section can show "12/12 assigned" here while
+            // its rows still say Draft, because Auto Generate results
+            // aren't finalized (status flips to Scheduled) until the
+            // Registrar clicks Accept All & Save — this count answers
+            // "has this section already been worked on?", not "is it
+            // finalized?".
+            ->withCount([
+                'sectionSubjects as total_subjects_count',
+                'sectionSubjects as assigned_subjects_count' => function ($query) {
+                    $query->whereNotNull('faculty_id')
+                        ->whereNotNull('room_id')
+                        ->whereNotNull('days')
+                        ->whereNotNull('start_time')
+                        ->whereNotNull('end_time');
+                },
+            ])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('section_code', 'like', "%{$search}%")
