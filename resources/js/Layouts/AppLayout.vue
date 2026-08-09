@@ -114,15 +114,15 @@ const isActive = (routeName) => {
 
         <!-- Left Sidebar -->
         <aside
-            class="fixed top-16 left-0 bottom-0 bg-[#121358] text-slate-200 overflow-y-auto transition-all duration-200 z-20"
+            class="fixed top-16 left-0 bottom-0 bg-[#121358] text-slate-200 overflow-hidden transition-all duration-200 z-20"
             :class="sidebarOpen ? 'w-[260px]' : 'w-0 overflow-hidden'"
         >
-            <nav class="py-4 px-2 space-y-1 w-[260px]">
+            <nav class="h-full overflow-hidden py-3 px-2 space-y-0.5 w-[260px] text-[13px]">
                 <Link
                     v-for="item in menuItems"
                     :key="item.label"
                     :href="route(item.route)"
-                    class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                    class="block px-3 py-2 rounded-lg font-medium transition-colors"
                     :class="isActive(item.route)
                         ? 'bg-[#2563EB] text-white'
                         : 'text-slate-300 hover:bg-white/5 hover:text-white'"
@@ -131,15 +131,15 @@ const isActive = (routeName) => {
                 </Link>
 
                 <!-- User Management (Administrator only) -->
-                <div v-if="isAdministrator" class="pt-3">
-                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <div v-if="isAdministrator" class="pt-2">
+                    <p class="px-3 pb-0.5 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                         User Management
                     </p>
                     <Link
                         v-for="item in userManagementItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
@@ -149,15 +149,15 @@ const isActive = (routeName) => {
                 </div>
 
                 <!-- Academic Setup -->
-                <div class="pt-3">
-                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <div class="pt-2">
+                    <p class="px-3 pb-0.5 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                         Academic Setup
                     </p>
                     <Link
                         v-for="item in academicSetupItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
@@ -167,15 +167,15 @@ const isActive = (routeName) => {
                 </div>
 
                 <!-- Resource Management -->
-                <div class="pt-3">
-                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <div class="pt-2">
+                    <p class="px-3 pb-0.5 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                         Resource Management
                     </p>
                     <Link
                         v-for="item in resourceManagementItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
@@ -185,15 +185,15 @@ const isActive = (routeName) => {
                 </div>
 
                 <!-- Scheduling -->
-                <div class="pt-3">
-                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <div class="pt-2">
+                    <p class="px-3 pb-0.5 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                         Scheduling
                     </p>
                     <Link
                         v-for="item in schedulingItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
@@ -203,15 +203,15 @@ const isActive = (routeName) => {
                 </div>
 
                 <!-- Reports -->
-                <div class="pt-3">
-                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <div class="pt-2">
+                    <p class="px-3 pb-0.5 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                         Reports
                     </p>
                     <Link
                         v-for="item in reportsItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
@@ -221,15 +221,15 @@ const isActive = (routeName) => {
                 </div>
 
                 <!-- System -->
-                <div class="pt-3">
-                    <p class="px-4 pb-1 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <div class="pt-2">
+                    <p class="px-3 pb-0.5 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                         System
                     </p>
                     <Link
                         v-for="item in systemItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"

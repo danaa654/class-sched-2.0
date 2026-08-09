@@ -46,6 +46,7 @@ class AutoScheduleService
         private readonly RecommendationService $recommendationService,
         private readonly ScheduleConflictService $conflictService,
         private readonly FacultyWorkloadService $workloadService,
+        private readonly IrregularSectionMergeService $mergeService,
     ) {
     }
 
@@ -87,15 +88,25 @@ class AutoScheduleService
             }
         }
 
+        $mergedCount = collect($results)->where('is_merged', true)->count();
+
+        $message = count($results) === $targets->count()
+            ? count($results).' of '.$targets->count().' subjects scheduled. No conflicts detected.'
+            : count($results).' of '.$targets->count().' subjects scheduled. '
+                .count($unresolved).' '.(count($unresolved) === 1 ? 'subject requires' : 'subjects require').' manual scheduling.';
+
+        if ($mergedCount > 0) {
+            $message .= ' '.$mergedCount.' '.($mergedCount === 1 ? 'subject was' : 'subjects were')
+                .' merged into existing Regular section classes.';
+        }
+
         return [
             'total' => $targets->count(),
             'scheduled' => count($results),
+            'merged' => $mergedCount,
             'results' => $results,
             'unresolved' => $unresolved,
-            'message' => count($results) === $targets->count()
-                ? count($results).' of '.$targets->count().' subjects scheduled. No conflicts detected.'
-                : count($results).' of '.$targets->count().' subjects scheduled. '
-                    .count($unresolved).' '.(count($unresolved) === 1 ? 'subject requires' : 'subjects require').' manual scheduling.',
+            'message' => $message,
         ];
     }
 
@@ -119,6 +130,9 @@ class AutoScheduleService
                 'status' => 'Draft',
                 'is_auto_generated' => false,
                 'auto_generated_meta' => null,
+                'is_merged' => false,
+                'merged_into_section_subject_id' => null,
+                'merge_recommendation' => null,
             ]);
     }
 
@@ -162,6 +176,35 @@ class AutoScheduleService
      */
     private function generateOne(Section $section, SectionSubject $sectionSubject): array
     {
+        // INTELLIGENT IRREGULAR SECTION SCHEDULING — for an Irregular
+        // section, evaluate a merge into a compatible Regular
+        // section's existing class BEFORE ever searching for an
+        // independent Faculty+Room+Time combination. The merge
+        // recommendation (and every candidate considered) is always
+        // recorded on the row — including when the outcome is
+        // "independent" — so the review panel and the "Merge
+        // Recommendation" modal have something to show regardless of
+        // which path this subject ended up taking.
+        if ($section->isIrregular()) {
+            $mergeOutcome = $this->mergeService->recommend($sectionSubject);
+
+            if ($mergeOutcome['recommendation'] === 'merge' && $mergeOutcome['best_match']) {
+                $host = SectionSubject::find($mergeOutcome['best_match']['section_subject_id']);
+
+                if ($host) {
+                    $this->mergeService->applyMerge($sectionSubject, $host, $mergeOutcome);
+
+                    return $this->mergedResult($sectionSubject, $mergeOutcome);
+                }
+            }
+
+            // No viable merge — fall through to the normal independent
+            // search below, but keep the recommendation (with its
+            // 'independent_reason') attached to the row so the
+            // Administrator can see why merging wasn't possible.
+            $sectionSubject->update(['merge_recommendation' => $mergeOutcome]);
+        }
+
         $subject = $sectionSubject->subject;
 
         $facultyRec = $this->recommendationService->recommendFaculty($subject, $section, $sectionSubject);
@@ -317,7 +360,39 @@ class AutoScheduleService
                 'section_subject_id' => $sectionSubject->id,
                 'subject_code' => $sectionSubject->subject->subject_code,
                 'subject_title' => $sectionSubject->subject->subject_title,
+                'is_merged' => false,
+                'merge_recommendation' => $sectionSubject->merge_recommendation,
             ]),
+        ];
+    }
+
+    /**
+     * Builds the review-panel result row for a subject that was
+     * MERGED into an existing Regular section's class rather than
+     * scheduled independently — "Merge into BSIT-4A" per the spec.
+     */
+    private function mergedResult(SectionSubject $sectionSubject, array $mergeOutcome): array
+    {
+        $host = $mergeOutcome['best_match'];
+
+        return [
+            'success' => true,
+            'result' => [
+                'section_subject_id' => $sectionSubject->id,
+                'subject_code' => $sectionSubject->subject->subject_code,
+                'subject_title' => $sectionSubject->subject->subject_title,
+                'is_merged' => true,
+                'merged_into_section_code' => $host['section_code'],
+                'merge_recommendation' => $mergeOutcome,
+                'overall_score' => $host['score'],
+                'faculty' => ['name' => $host['faculty_name']],
+                'room' => ['name' => $host['room_name']],
+                'time' => [
+                    'days' => explode(',', (string) $host['days']),
+                    'start_time' => $host['start_time'],
+                    'end_time' => $host['end_time'],
+                ],
+            ],
         ];
     }
 
@@ -340,6 +415,7 @@ class AutoScheduleService
                 'subject_title' => $sectionSubject->subject->subject_title,
                 'reason' => $reason,
                 'reason_details' => $reasonDetails,
+                'merge_recommendation' => $sectionSubject->merge_recommendation,
             ],
         ];
     }

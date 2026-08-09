@@ -29,6 +29,7 @@ class Section extends Model
     protected $fillable = [
         'section_code',
         'section_name',
+        'section_type',
         'major_id',
         'curriculum_id',
         'academic_year',
@@ -40,6 +41,18 @@ class Section extends Model
     ];
 
     /**
+     * `section_code_active` is a DB-generated column (see the sections
+     * migration) that exists purely to make the section_code unique
+     * index soft-delete-aware. It carries no information the app needs
+     * beyond that, so it's kept out of arrays/JSON.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'section_code_active',
+    ];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
@@ -47,6 +60,19 @@ class Section extends Model
         return [
             'estimated_students' => 'integer',
         ];
+    }
+
+    /**
+     * Whether this Section is Irregular — its students follow a mix
+     * of subjects that don't line up with one single Regular
+     * section's block schedule, so its subjects are scheduled one at
+     * a time by IrregularSectionMergeService (merge into a compatible
+     * Regular section's class where possible, else an independent
+     * schedule) rather than as one uniform block.
+     */
+    public function isIrregular(): bool
+    {
+        return $this->section_type === 'Irregular';
     }
 
     /**

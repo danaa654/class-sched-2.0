@@ -122,6 +122,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/section-subjects/{section}/{subject}/room-override', [SectionSubjectController::class, 'overrideRoom'])->name('scheduling.section-subjects.room-override');
     Route::post('/scheduling/section-subjects/{section}/{subject}/time-override', [SectionSubjectController::class, 'overrideTime'])->name('scheduling.section-subjects.time-override');
 
+    // INTELLIGENT IRREGULAR SECTION SCHEDULING — merge recommendation
+    // modal + Administrator override actions (see IrregularSectionMergeService).
+    Route::get('/scheduling/section-subjects/{section}/{subject}/merge-recommendation', [SectionSubjectController::class, 'mergeRecommendation'])->name('scheduling.section-subjects.merge-recommendation');
+    Route::post('/scheduling/section-subjects/{section}/{subject}/merge', [SectionSubjectController::class, 'applyMerge'])->name('scheduling.section-subjects.merge');
+    Route::post('/scheduling/section-subjects/{section}/{subject}/schedule-independently', [SectionSubjectController::class, 'scheduleIndependently'])->name('scheduling.section-subjects.schedule-independently');
+
     // ⚡ Auto Generate Schedule (Prompt 8.9).
     Route::post('/scheduling/section-subjects/{section}/auto-generate', [SectionSubjectController::class, 'autoGenerate'])->name('scheduling.section-subjects.auto-generate');
     Route::post('/scheduling/section-subjects/{section}/auto-generate/regenerate', [SectionSubjectController::class, 'regenerateSchedule'])->name('scheduling.section-subjects.auto-generate.regenerate');

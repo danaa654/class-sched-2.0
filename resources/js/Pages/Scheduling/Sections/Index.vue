@@ -28,6 +28,7 @@ const props = defineProps({
     yearLevels: { type: Array, default: () => [] },
     semesterOptions: { type: Array, default: () => [] },
     academicYears: { type: Array, default: () => [] },
+    sectionTypes: { type: Array, default: () => ['Regular', 'Irregular'] },
 });
 
 const toast = useToast();
@@ -119,6 +120,9 @@ const statusOptions = [
 const yearLevelOptions = computed(() => props.yearLevels.map((level) => ({ label: level, value: level })));
 const semesterSelectOptions = computed(() => props.semesterOptions.map((sem) => ({ label: sem, value: sem })));
 const academicYearOptions = computed(() => props.academicYears.map((year) => ({ label: year, value: year })));
+const sectionTypeOptions = computed(() =>
+    (props.sectionTypes ?? ['Regular', 'Irregular']).map((type) => ({ label: type, value: type })),
+);
 
 const addSectionVisible = ref(false);
 const editingSection = ref(null);
@@ -126,6 +130,7 @@ const editingSection = ref(null);
 const sectionForm = useForm({
     section_code: '',
     section_name: '',
+    section_type: 'Regular',
     major_id: null,
     curriculum_id: null,
     year_level: null,
@@ -177,6 +182,7 @@ const openEdit = (section) => {
     sectionForm.clearErrors();
     sectionForm.section_code = section.section_code;
     sectionForm.section_name = section.section_name;
+    sectionForm.section_type = section.section_type ?? 'Regular';
     sectionForm.major_id = section.major_id;
     sectionForm.curriculum_id = section.curriculum_id;
     sectionForm.year_level = section.year_level;
@@ -196,6 +202,14 @@ const closeAddSection = () => {
 };
 
 const onSaveSection = () => {
+    // Guard against double-submit (double-click, or Enter + click) firing
+    // two requests before the first one lands — both would pass the
+    // "unique" validation check and the second insert would then crash
+    // on the database's unique constraint instead of failing validation.
+    if (sectionForm.processing) {
+        return;
+    }
+
     const options = {
         preserveScroll: true,
         onSuccess: () => {
@@ -332,6 +346,14 @@ const onDeleteSection = (section) => {
 
                         <Column field="section_code" header="Section Code" style="width: 10rem" />
                         <Column field="section_name" header="Section Name" style="width: 10rem" />
+                        <Column header="Type" style="width: 7rem">
+                            <template #body="{ data }">
+                                <Tag
+                                    :value="data.section_type || 'Regular'"
+                                    :severity="data.section_type === 'Irregular' ? 'warn' : 'info'"
+                                />
+                            </template>
+                        </Column>
                         <Column header="Major" style="width: 10rem">
                             <template #body="{ data }">
                                 {{ data.major?.name || '—' }}
@@ -470,6 +492,30 @@ const onDeleteSection = (section) => {
                     <small v-if="sectionForm.errors.section_name" class="text-red-500">
                         {{ sectionForm.errors.section_name }}
                     </small>
+                </div>
+
+                <!-- Section Type -->
+                <div class="flex flex-col gap-1">
+                    <label for="section_type" class="text-sm font-medium text-slate-700">
+                        Section Type <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="section_type"
+                        v-model="sectionForm.section_type"
+                        :options="sectionTypeOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select section type"
+                        :invalid="!!sectionForm.errors.section_type"
+                        class="w-full"
+                    />
+                    <small v-if="sectionForm.errors.section_type" class="text-red-500">
+                        {{ sectionForm.errors.section_type }}
+                    </small>
+                    <p v-else class="text-xs text-slate-400">
+                        Irregular sections have subjects scheduled one at a time — Auto Generate will try to merge
+                        each one into a compatible Regular section's class before creating an independent schedule.
+                    </p>
                 </div>
 
                 <!-- Major -->
@@ -640,6 +686,7 @@ const onDeleteSection = (section) => {
                     icon="pi pi-check"
                     severity="success"
                     :loading="sectionForm.processing"
+                    :disabled="sectionForm.processing"
                     @click="onSaveSection"
                 />
             </template>

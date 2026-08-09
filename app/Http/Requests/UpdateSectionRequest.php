@@ -28,8 +28,17 @@ class UpdateSectionRequest extends FormRequest
         $sectionId = $this->route('section')?->id;
 
         return [
-            'section_code' => ['required', 'string', 'max:20', Rule::unique('sections', 'section_code')->ignore($sectionId)],
+            'section_code' => [
+                'required',
+                'string',
+                'max:20',
+                // whereNull('deleted_at') — same reasoning as
+                // StoreSectionRequest: don't let a soft-deleted
+                // Section's old code block reuse.
+                Rule::unique('sections', 'section_code')->ignore($sectionId)->whereNull('deleted_at'),
+            ],
             'section_name' => ['required', 'string', 'max:255'],
+            'section_type' => ['required', Rule::in(StoreSectionRequest::SECTION_TYPES)],
             'major_id' => ['required', 'integer', 'exists:majors,id'],
             'curriculum_id' => ['required', 'integer', 'exists:curriculums,id'],
             'year_level' => ['required', Rule::in(StoreSectionRequest::YEAR_LEVELS)],

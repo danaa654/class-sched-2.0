@@ -41,6 +41,9 @@ class SectionSubject extends Model
         'edp_code',
         'is_auto_generated',
         'auto_generated_meta',
+        'is_merged',
+        'merged_into_section_subject_id',
+        'merge_recommendation',
     ];
 
     /**
@@ -52,6 +55,8 @@ class SectionSubject extends Model
             'capacity' => 'integer',
             'is_auto_generated' => 'boolean',
             'auto_generated_meta' => 'array',
+            'is_merged' => 'boolean',
+            'merge_recommendation' => 'array',
         ];
     }
 
@@ -95,5 +100,32 @@ class SectionSubject extends Model
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
+    }
+
+    /**
+     * INTELLIGENT IRREGULAR SECTION SCHEDULING — the Regular section's
+     * class session this (Irregular section's) placement was merged
+     * into, if any. Null for independently-scheduled or not-yet-
+     * scheduled rows. See IrregularSectionMergeService.
+     *
+     * @return BelongsTo<SectionSubject, SectionSubject>
+     */
+    public function mergedInto(): BelongsTo
+    {
+        return $this->belongsTo(SectionSubject::class, 'merged_into_section_subject_id');
+    }
+
+    /**
+     * Every Irregular-section placement currently riding along on
+     * THIS row's class session (the reverse of mergedInto()) — used
+     * to compute the effective headcount a Room capacity check must
+     * account for (this row's own Section's estimated_students plus
+     * every merged-in Section's).
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<SectionSubject>
+     */
+    public function mergedPlacements(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(SectionSubject::class, 'merged_into_section_subject_id');
     }
 }

@@ -7,8 +7,10 @@ use App\Http\Requests\UpdateSectionRequest;
 use App\Models\Curriculum;
 use App\Models\Major;
 use App\Models\Section;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -86,6 +88,7 @@ class SectionController extends Controller
             'curriculums' => $curriculums,
             'yearLevels' => StoreSectionRequest::YEAR_LEVELS,
             'semesterOptions' => StoreSectionRequest::SEMESTERS,
+            'sectionTypes' => StoreSectionRequest::SECTION_TYPES,
             'academicYears' => $this->academicYearOptions(),
         ]);
     }
@@ -95,7 +98,19 @@ class SectionController extends Controller
      */
     public function store(StoreSectionRequest $request): RedirectResponse
     {
-        Section::create($request->validated());
+        // The StoreSectionRequest's "unique" rule already checks
+        // section_code, but that check and this insert aren't atomic —
+        // a double-submit (double-click, or a slow request the user
+        // retries) can fire two requests that both pass validation
+        // before either one has inserted. Catch that race here instead
+        // of letting it surface as a raw 500 error page.
+        try {
+            Section::create($request->validated());
+        } catch (UniqueConstraintViolationException $e) {
+            throw ValidationException::withMessages([
+                'section_code' => 'This section code was just taken by another request. Please use a different code.',
+            ]);
+        }
 
         return redirect()->route('scheduling.sections')->with('success', 'Section added successfully.');
     }
@@ -110,7 +125,13 @@ class SectionController extends Controller
      */
     public function update(UpdateSectionRequest $request, Section $section): RedirectResponse
     {
-        $section->update($request->validated());
+        try {
+            $section->update($request->validated());
+        } catch (UniqueConstraintViolationException $e) {
+            throw ValidationException::withMessages([
+                'section_code' => 'This section code was just taken by another request. Please use a different code.',
+            ]);
+        }
 
         return back()->with('success', 'Section updated successfully.');
     }

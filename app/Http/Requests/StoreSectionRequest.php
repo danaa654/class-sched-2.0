@@ -29,6 +29,18 @@ class StoreSectionRequest extends FormRequest
     public const SEMESTERS = ['First Semester', 'Second Semester', 'Summer'];
 
     /**
+     * 'Regular' sections get one uniform block schedule the normal
+     * way. 'Irregular' sections have their subjects scheduled one at
+     * a time by IrregularSectionMergeService during Auto Generate —
+     * merged into a compatible Regular section's class where
+     * possible, or an independent schedule otherwise. See
+     * IrregularSectionMergeService's docblock.
+     *
+     * @var list<string>
+     */
+    public const SECTION_TYPES = ['Regular', 'Irregular'];
+
+    /**
      * Determine if the user is authorized to make this request.
      */
     public function authorize(): bool
@@ -44,8 +56,20 @@ class StoreSectionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'section_code' => ['required', 'string', 'max:20', 'unique:sections,section_code'],
+            'section_code' => [
+                'required',
+                'string',
+                'max:20',
+                // whereNull('deleted_at') — a soft-deleted Section's code
+                // must be reusable. The bare 'unique:' rule queries the
+                // raw table and, unlike Eloquent's own SoftDeletes
+                // scope, does NOT exclude trashed rows on its own, so a
+                // deleted Section would otherwise permanently block its
+                // own code from ever being used again.
+                Rule::unique('sections', 'section_code')->whereNull('deleted_at'),
+            ],
             'section_name' => ['required', 'string', 'max:255'],
+            'section_type' => ['required', Rule::in(self::SECTION_TYPES)],
             'major_id' => ['required', 'integer', 'exists:majors,id'],
             'curriculum_id' => ['required', 'integer', 'exists:curriculums,id'],
             'year_level' => ['required', Rule::in(self::YEAR_LEVELS)],
