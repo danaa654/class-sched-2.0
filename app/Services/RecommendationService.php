@@ -9,6 +9,7 @@ use App\Models\Room;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Subject;
+use App\Services\RoomUtilizationService;
 
 /**
  * Smart Assignment Recommendation Engine (Prompt 8.6).
@@ -879,6 +880,35 @@ class RecommendationService
      * criteria (equipment, building proximity, air conditioning,
      * etc.) without touching the hard-filter or ranking logic.
      */
+    /**
+     * ROOM SCORE WEIGHTS — configurable percentages summing to 100,
+     * matching the Smart Room Recommendation spec exactly. This is
+     * the single place an administrator (or a future Settings screen)
+     * would change to retune the balance between Availability, Room
+     * Type, Capacity, College/Program match, Facilities, Utilization,
+     * and Building convenience — recommendRooms() and
+     * scoreArbitraryRoom() both read from here so they can never
+     * drift out of sync with each other.
+     *
+     * "Facilities/Equipment" has no dedicated data in the Room Master
+     * yet (no equipment table), so it is currently awarded in full
+     * for every eligible room — once equipment tracking exists this
+     * is the only line that needs to change. Same for "Distance /
+     * Building Convenience": with no campus-map/travel-time data
+     * available, it is awarded in full rather than guessed at.
+     *
+     * @var array<string,int>
+     */
+    private const ROOM_SCORE_WEIGHTS = [
+        'availability' => 25,
+        'room_type' => 20,
+        'capacity' => 15,
+        'scope' => 15,
+        'facilities' => 10,
+        'utilization' => 10,
+        'convenience' => 5,
+    ];
+
     private const ROOM_POINTS_TYPE_MATCH = 34;
 
     private const ROOM_POINTS_CAPACITY_OK = 30;
@@ -890,6 +920,188 @@ class RecommendationService
     private const ROOM_POINTS_SCOPE_COLLEGE = 8;
 
     private const ROOM_POINTS_SCOPE_SHARED = 0;
+
+    /**
+     * Bonus points added on top of the weighted 100-point score when
+     * the Subject has an explicit, active Room Recommendation
+     * configured on the Room Details page (Room Recommendation &
+     * Smart Auto-Scheduling). This is a SOFT preference bonus only —
+     * applied after every hard filter has already passed, so it can
+     * never make an otherwise-invalid room eligible, and a room
+     * without the bonus can still outrank a recommended one on
+     * availability/scope/utilization alone.
+     */
+    private const ROOM_RECOMMENDATION_BONUS = 12;
+
+    /**
+     * Weighted Room Score (out of 100) per ROOM_SCORE_WEIGHTS, shared
+     * by recommendRooms() (the hard-filtered candidate pool) and
+     * scoreArbitraryRoom() (search/manual-override scoring) so the
+     * two can never compute a different score for the same room.
+     *
+     * @return array{score:int, breakdown:array<string,int>}
+     */
+    private function weightedRoomScore(
+        bool $typeMatch,
+        bool $available,
+        bool $capacityOk,
+        int $capacityNeeded,
+        int $roomCapacity,
+        string $tier,
+        float $utilizationPercent,
+    ): array {
+        $w = self::ROOM_SCORE_WEIGHTS;
+
+        // Capacity suitability — full credit for a right-sized room,
+        // tapering down (never below 40% of the weight) the more the
+        // room overshoots what's actually needed, so a 40-seat room
+        // for a 10-student section scores lower than a 12-seat room
+        // for the same section, without excluding either outright.
+        $capacityPoints = 0;
+        if ($capacityOk) {
+            if ($capacityNeeded <= 0 || $roomCapacity <= 0) {
+                $capacityPoints = $w['capacity'];
+            } else {
+                $overshoot = max(0, $roomCapacity - $capacityNeeded) / max(1, $capacityNeeded);
+                $capacityPoints = (int) round($w['capacity'] * max(0.4, 1 - min(1, $overshoot / 2)));
+            }
+        }
+
+        $scopePoints = match ($tier) {
+            'program' => $w['scope'],
+            'college' => (int) round($w['scope'] * 0.6),
+            'shared' => (int) round($w['scope'] * 0.25),
+            default => 0,
+        };
+
+        // Utilization balancing — the less-used room among otherwise
+        // equal candidates earns more of this weight; a fully-booked
+        // room (100%+) earns none of it, matching "Room A 95% / Room
+        // B 40% -> prefer Room B" from the spec.
+        $utilizationPoints = (int) round($w['utilization'] * (1 - min(1, max(0, $utilizationPercent) / 100)));
+
+        $breakdown = [
+            'availability' => $available ? $w['availability'] : 0,
+            'room_type' => $typeMatch ? $w['room_type'] : 0,
+            'capacity' => $capacityPoints,
+            'scope' => $scopePoints,
+            // No Equipment/Facilities data model exists yet — see the
+            // ROOM_SCORE_WEIGHTS docblock — awarded in full for now.
+            'facilities' => $w['facilities'],
+            'utilization' => $utilizationPoints,
+            // No building/travel-time data exists yet — see the
+            // ROOM_SCORE_WEIGHTS docblock — awarded in full for now.
+            'convenience' => $w['convenience'],
+        ];
+
+        return ['score' => array_sum($breakdown), 'breakdown' => $breakdown];
+    }
+
+    /**
+     * One-sentence, human-readable explanation for why a room was
+     * (or wasn't) the top recommendation — the "Why Room 306?" panel
+     * from the spec.
+     */
+    private function roomExplanation(string $roomLabel, bool $isTopPick, string $tier, float $utilizationPercent, int $score): string
+    {
+        if (! $isTopPick) {
+            return "{$roomLabel} is a valid, conflict-free option but scored lower overall (".$score.'/100), mainly on scope match and current utilization.';
+        }
+
+        $scopeText = match ($tier) {
+            'program' => 'matches the section\'s own program',
+            'college' => 'is shared within the section\'s college',
+            default => 'is a shared room open to every college/program',
+        };
+
+        return "Best overall match — {$roomLabel} is available at the selected schedule, has the correct room type, has sufficient capacity, {$scopeText}, ".
+            "and is currently at only {$utilizationPercent}% utilization compared to other eligible rooms.";
+    }
+
+    /**
+     * Green/Blue/Yellow/Red status per the spec's indicator legend:
+     *   Green  = Recommended / fully compatible (the top pick)
+     *   Blue   = Valid alternative
+     *   Yellow = Valid but has a soft preference issue (e.g. shared
+     *            with another college/program, oversized capacity)
+     *   Red    = Hard conflict — never returned by recommendRooms(),
+     *            only ever produced by scoreArbitraryRoom() for a
+     *            Manual Override pick.
+     */
+    private function roomStatusColor(bool $isManualOverride, bool $isTopPick, string $tier): string
+    {
+        return match (true) {
+            $isManualOverride => 'red',
+            $isTopPick => 'green',
+            $tier === 'program' => 'blue',
+            default => 'yellow',
+        };
+    }
+
+    /**
+     * Active Room ids explicitly recommended for a Subject, per the
+     * `room_subject_recommendations` table configured on the Room
+     * Details page. Used purely as a scoring bonus — see
+     * ROOM_RECOMMENDATION_BONUS.
+     *
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    private function recommendedRoomIdsFor(Subject $subject): \Illuminate\Support\Collection
+    {
+        return $subject->recommendedRooms()->pluck('rooms.id');
+    }
+
+    /**
+     * ROOM OWNERSHIP + CONTROLLED OVERRIDE — resolve the three-level
+     * recommendation the Room Details "Recommended Subjects" UI and
+     * the Auto Scheduler explanation panel both need:
+     *
+     *   Preferred  — an administrator explicitly recommended this
+     *                Subject for this Room (room_subject_recommendations).
+     *   Suitable   — no explicit recommendation, but the Room
+     *                naturally matches the Subject's Program/College
+     *                scope (tier is program/college/shared).
+     *   Available  — technically usable (cleared every hard filter)
+     *                but neither explicitly recommended nor a natural
+     *                scope match (a different College's room).
+     *
+     * Also flags is_manual_override: true only when an explicit
+     * recommendation crosses scope lines (Preferred + mismatch tier)
+     * — i.e. an administrator intentionally recommending, say, an ITE
+     * subject for a CCS laboratory. This is what earns the "Manual
+     * Recommendation / Administrator Override" label rather than
+     * pretending the Subject naturally belongs to that Room.
+     *
+     * @return array{level:string, is_manual_override:bool}
+     */
+    private function recommendationLevel(bool $isRecommended, string $tier): array
+    {
+        $naturalMatch = in_array($tier, ['program', 'college', 'shared'], true);
+
+        return match (true) {
+            $isRecommended => [
+                'level' => 'preferred',
+                'is_manual_override' => ! $naturalMatch,
+            ],
+            $naturalMatch => ['level' => 'suitable', 'is_manual_override' => false],
+            default => ['level' => 'available', 'is_manual_override' => false],
+        };
+    }
+
+    /**
+     * Display label/color for a recommendation level, per the
+     * 🟢 Preferred / 🟡 Suitable / ⚪ Available legend.
+     *
+     * @return array{label:string, color:string}
+     */
+    private function recommendationLevelMeta(string $level): array
+    {
+        return match ($level) {
+            'preferred' => ['label' => 'Preferred', 'color' => 'green'],
+            'suitable' => ['label' => 'Suitable', 'color' => 'yellow'],
+            default => ['label' => 'Available', 'color' => 'gray'],
+        };
+    }
 
     public function recommendRooms(Subject $subject, Section $section, ?SectionSubject $current = null): array
     {
@@ -909,20 +1121,34 @@ class RecommendationService
             return ['recommendations' => [], 'message' => 'No active rooms found.', 'reasons' => ['No active rooms are configured in the Room Master.']];
         }
 
+        // Explicit admin recommendations (room_subject_recommendations)
+        // are resolved BEFORE the hard filters so a recommended Room's
+        // Type can be overridden — see the Type-bypass rule below.
+        $recommendedRoomIds = $this->recommendedRoomIdsFor($subject);
+
         // --- Hard filters (Priorities 1, 5, 6) -----------------------
-        // A room that fails any of these is never a candidate, no
-        // matter how well it scopes to the Section — it simply isn't
-        // usable for this Subject at this time.
+        // A room that fails any of these is never a candidate — EXCEPT
+        // Type, which an explicit administrator recommendation is now
+        // allowed to override (e.g. deliberately assigning a Lecture
+        // subject to a Laboratory room). Scope (College/Program) is
+        // intentionally NOT a hard filter — a cross-college room is
+        // still a valid "Available" candidate, and an administrator
+        // may explicitly recommend one via the Room Details page (see
+        // recommendationLevel()). Capacity and Availability/Conflict
+        // remain hard filters even for a recommended Room — an
+        // explicit recommendation can never seat more students than
+        // the room holds or double-book an occupied slot.
         $typeExcluded = 0;
         $capacityExcluded = 0;
         $conflictExcluded = 0;
-        $scopeExcluded = 0;
 
         $eligible = $allRooms->filter(function (Room $room) use (
-            $preferredType, $capacityNeeded, $current, $sectionDepartmentId, $sectionCollegeId,
-            &$typeExcluded, &$capacityExcluded, &$conflictExcluded, &$scopeExcluded,
+            $preferredType, $capacityNeeded, $current, $recommendedRoomIds,
+            &$typeExcluded, &$capacityExcluded, &$conflictExcluded,
         ) {
-            if ($room->room_type !== $preferredType) {
+            $isRecommended = $recommendedRoomIds->contains($room->id);
+
+            if (! $isRecommended && $room->room_type !== $preferredType) {
                 $typeExcluded++;
 
                 return false;
@@ -940,14 +1166,6 @@ class RecommendationService
                 return false;
             }
 
-            if ($this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId) === null) {
-                // Scoped to a different College/Program entirely —
-                // never a valid candidate for this Section.
-                $scopeExcluded++;
-
-                return false;
-            }
-
             return true;
         })->values();
 
@@ -955,7 +1173,7 @@ class RecommendationService
             return [
                 'recommendations' => [],
                 'message' => 'No suitable room available.',
-                'reasons' => $this->noRoomReasons($preferredType, $typeExcluded, $capacityExcluded, $conflictExcluded, $scopeExcluded),
+                'reasons' => $this->noRoomReasons($preferredType, $typeExcluded, $capacityExcluded, $conflictExcluded, 0),
             ];
         }
 
@@ -978,34 +1196,66 @@ class RecommendationService
         // first, so utilization spreads across the whole eligible pool
         // (e.g. all "All Colleges" lecture rooms, or all of a
         // program's own labs) instead of monopolizing a single one.
-        $usageCounts = SectionSubject::query()
-            ->whereIn('room_id', $eligible->pluck('id'))
-            ->whereNotNull('days')
-            ->selectRaw('room_id, count(*) as used')
-            ->groupBy('room_id')
-            ->pluck('used', 'room_id');
+        // Prefer real Room Utilization % (Scheduled Hours / Max
+        // Available Hours from the Academic Calendar) over a raw
+        // schedule-slot count — a room with three short slots isn't
+        // necessarily busier than one with two long ones, and this
+        // keeps the Auto Scheduler's tie-break reading the exact same
+        // number the Rooms page shows as "X% Utilized".
+        $utilization = app(RoomUtilizationService::class)->summarizeRooms($eligible);
+        $usageCounts = $eligible->mapWithKeys(
+            fn (Room $room) => [$room->id => $utilization[$room->id]['utilization_percent'] ?? 0]
+        );
 
         $ranked = $eligible->map(function (Room $room) use (
-            $sectionDepartmentId, $sectionCollegeId, $closestCapacity, $current, $usageCounts,
+            $sectionDepartmentId, $sectionCollegeId, $capacityNeeded, $usageCounts, $recommendedRoomIds, $preferredType,
         ) {
             $tier = $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId);
+            $isTypeOverride = $room->room_type !== $preferredType;
+            $utilizationPercent = round((float) ($usageCounts[$room->id] ?? 0), 1);
 
-            $scopePoints = match ($tier) {
-                'program' => self::ROOM_POINTS_SCOPE_PROGRAM,
-                'college' => self::ROOM_POINTS_SCOPE_COLLEGE,
-                default => self::ROOM_POINTS_SCOPE_SHARED,
-            };
+            // Every room reaching this point already cleared the hard
+            // filters (Type/Capacity/Availability/Scope), so those
+            // booleans are always true here — only the weighted score
+            // varies by how WELL each room fits.
+            $scored = $this->weightedRoomScore(
+                typeMatch: true,
+                available: true,
+                capacityOk: true,
+                capacityNeeded: $capacityNeeded,
+                roomCapacity: $room->capacity,
+                tier: $tier,
+                utilizationPercent: $utilizationPercent,
+            );
 
-            $points = [
-                'room_type_match' => self::ROOM_POINTS_TYPE_MATCH,
-                'capacity_ok' => self::ROOM_POINTS_CAPACITY_OK,
-                'available' => self::ROOM_POINTS_AVAILABLE,
-                'scope' => $scopePoints,
+            // Room Recommendation bonus — a soft preference only,
+            // applied after every hard filter already passed. Never
+            // pushes the score above 100.
+            $isRecommended = $recommendedRoomIds->contains($room->id);
+            if ($isRecommended) {
+                $scored['score'] = min(100, $scored['score'] + self::ROOM_RECOMMENDATION_BONUS);
+                $scored['breakdown']['recommended'] = self::ROOM_RECOMMENDATION_BONUS;
+            }
+
+            $levelInfo = $this->recommendationLevel($isRecommended, $tier);
+            $levelInfo['is_manual_override'] = $levelInfo['is_manual_override'] || ($isRecommended && $isTypeOverride);
+            $levelMeta = $this->recommendationLevelMeta($levelInfo['level']);
+
+            $reasons = [
+                $isTypeOverride
+                    ? ['label' => 'Room Type overridden by Administrator recommendation', 'met' => true, 'type' => 'warning']
+                    : ['label' => 'Correct Room Type', 'met' => true, 'type' => 'success'],
             ];
 
-            $score = array_sum($points);
-
-            $reasons = [['label' => 'Correct Room Type', 'met' => true, 'type' => 'success']];
+            if ($isRecommended) {
+                $reasons[] = [
+                    'label' => $levelInfo['is_manual_override'] || $isTypeOverride
+                        ? 'Administrator recommended (manual override)'
+                        : 'Recommended for this Subject',
+                    'met' => true,
+                    'type' => 'success',
+                ];
+            }
 
             if ($tier === 'program') {
                 $reasons[] = ['label' => 'Same Program', 'met' => true, 'type' => 'success'];
@@ -1013,12 +1263,21 @@ class RecommendationService
             } elseif ($tier === 'college') {
                 $reasons[] = ['label' => 'Same College', 'met' => true, 'type' => 'success'];
                 $reasons[] = ['label' => 'Shared by all programs', 'met' => true, 'type' => 'warning'];
-            } else {
+            } elseif ($tier === 'shared') {
                 $reasons[] = ['label' => 'Shared Room', 'met' => true, 'type' => 'success'];
+            } else {
+                $reasons[] = [
+                    'label' => $levelInfo['is_manual_override']
+                        ? 'Subject belongs to another college — manual override'
+                        : 'Different college — not scope-matched',
+                    'met' => $levelInfo['is_manual_override'],
+                    'type' => $levelInfo['is_manual_override'] ? 'warning' : 'danger',
+                ];
             }
 
             $reasons[] = ['label' => 'Capacity OK', 'met' => true, 'type' => 'success'];
             $reasons[] = ['label' => 'Available', 'met' => true, 'type' => 'success'];
+            $reasons[] = ['label' => "Room Utilization: {$utilizationPercent}%", 'met' => true, 'type' => $utilizationPercent >= 90 ? 'warning' : 'success'];
 
             return [
                 'id' => $room->id,
@@ -1029,20 +1288,38 @@ class RecommendationService
                 'college' => $room->college?->name,
                 'capacity' => $room->capacity,
                 'match_tier' => $tier,
-                'badge' => match ($tier) {
-                    'program' => 'Program Match',
-                    'college' => 'College Match',
-                    default => 'Shared Room',
+                'badge' => match (true) {
+                    $levelInfo['is_manual_override'] => 'Administrator Override',
+                    $isRecommended => 'Recommended Room',
+                    $tier === 'program' => 'Program Match',
+                    $tier === 'college' => 'College Match',
+                    $tier === 'shared' => 'Shared Room',
+                    default => 'Available',
                 },
-                'score' => $score,
+                'is_recommended' => $isRecommended,
+                'recommendation_level' => $levelInfo['level'],
+                'recommendation_level_label' => $levelMeta['label'],
+                'recommendation_level_color' => $levelMeta['color'],
+                'is_manual_override' => $levelInfo['is_manual_override'],
+                'score' => $scored['score'],
                 'score_max' => 100,
-                'score_breakdown' => $points,
+                'score_breakdown' => $scored['breakdown'],
                 'reasons' => $reasons,
-                'times_in_use' => (int) ($usageCounts[$room->id] ?? 0),
+                'utilization_percent' => $utilizationPercent,
             ];
         })->values()->all();
 
         usort($ranked, function (array $a, array $b) use ($closestCapacity) {
+            // Priority 1: an explicit administrator recommendation
+            // always outranks a non-recommended room, regardless of
+            // score — "highest priority" per the Room Recommendation
+            // spec. Hard constraints have already been enforced
+            // before this point, so this can never surface an invalid
+            // room, only re-order equally-valid ones.
+            if ($a['is_recommended'] !== $b['is_recommended']) {
+                return $b['is_recommended'] <=> $a['is_recommended'];
+            }
+
             if ($a['score'] !== $b['score']) {
                 return $b['score'] <=> $a['score'];
             }
@@ -1052,8 +1329,8 @@ class RecommendationService
             // subjects across every eligible room (all lecture rooms,
             // all of a program's labs, etc.) instead of always
             // defaulting to the same one.
-            if ($a['times_in_use'] !== $b['times_in_use']) {
-                return $a['times_in_use'] <=> $b['times_in_use'];
+            if ($a['utilization_percent'] !== $b['utilization_percent']) {
+                return $a['utilization_percent'] <=> $b['utilization_percent'];
             }
 
             // Tie-break 2: capacity closest to what's needed wins over
@@ -1063,8 +1340,12 @@ class RecommendationService
 
         $ranked = array_slice($ranked, 0, self::MAX_ROOM_RESULTS);
 
-        foreach ($ranked as &$item) {
+        foreach ($ranked as $index => &$item) {
+            $isTopPick = $index === 0;
             $item['confidence'] = $this->confidenceFromScore($item['score']);
+            $item['status_color'] = $this->roomStatusColor(false, $isTopPick, $item['match_tier']);
+            $item['is_top_pick'] = $isTopPick;
+            $item['explanation'] = $this->roomExplanation($item['name'], $isTopPick, $item['match_tier'], $item['utilization_percent'], $item['score']);
         }
         unset($item);
 
@@ -1153,25 +1434,42 @@ class RecommendationService
 
         $sectionDepartmentId = $section->major?->department_id;
         $sectionCollegeId = $section->major?->department?->college_id;
-        $tier = $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId) ?? 'mismatch';
+        $tier = $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId);
 
-        $points = [
-            'room_type_match' => $typeMatch ? self::ROOM_POINTS_TYPE_MATCH : 0,
-            'capacity_ok' => $capacityOk ? self::ROOM_POINTS_CAPACITY_OK : 0,
-            'available' => $available ? self::ROOM_POINTS_AVAILABLE : 0,
-            'scope' => match ($tier) {
-                'program' => self::ROOM_POINTS_SCOPE_PROGRAM,
-                'college' => self::ROOM_POINTS_SCOPE_COLLEGE,
-                'shared' => self::ROOM_POINTS_SCOPE_SHARED,
-                default => 0,
-            },
-        ];
+        $utilizationPercent = round(app(RoomUtilizationService::class)->summarizeRoom($room)['utilization_percent'] ?? 0.0, 1);
 
-        $score = array_sum($points);
+        $scored = $this->weightedRoomScore(
+            typeMatch: $typeMatch,
+            available: $available,
+            capacityOk: $capacityOk,
+            capacityNeeded: $capacityNeeded,
+            roomCapacity: $room->capacity,
+            tier: $tier,
+            utilizationPercent: $utilizationPercent,
+        );
+
+        $isRecommended = $this->recommendedRoomIdsFor($subject)->contains($room->id);
+        if ($isRecommended) {
+            $scored['score'] = min(100, $scored['score'] + self::ROOM_RECOMMENDATION_BONUS);
+            $scored['breakdown']['recommended'] = self::ROOM_RECOMMENDATION_BONUS;
+        }
+        $score = $scored['score'];
+
+        $levelInfo = $this->recommendationLevel($isRecommended, $tier);
 
         $reasons = [
             ['label' => $typeMatch ? 'Correct Room Type' : 'Wrong Room Type', 'met' => $typeMatch, 'type' => $typeMatch ? 'success' : 'danger'],
         ];
+
+        if ($isRecommended) {
+            $reasons[] = [
+                'label' => $levelInfo['is_manual_override']
+                    ? 'Administrator recommended (cross-college override)'
+                    : 'Recommended for this Subject',
+                'met' => true,
+                'type' => 'success',
+            ];
+        }
 
         if ($tier === 'program') {
             $reasons[] = ['label' => 'Same Program', 'met' => true, 'type' => 'success'];
@@ -1182,19 +1480,34 @@ class RecommendationService
         } elseif ($tier === 'shared') {
             $reasons[] = ['label' => 'Shared Room', 'met' => true, 'type' => 'success'];
         } else {
-            $reasons[] = ['label' => 'Different College', 'met' => false, 'type' => 'danger'];
+            $reasons[] = [
+                'label' => $levelInfo['is_manual_override']
+                    ? 'Subject belongs to another college — manual override'
+                    : 'Different College',
+                'met' => $levelInfo['is_manual_override'],
+                'type' => $levelInfo['is_manual_override'] ? 'warning' : 'danger',
+            ];
         }
 
         $reasons[] = ['label' => $capacityOk ? 'Capacity OK' : 'Capacity Too Small', 'met' => $capacityOk, 'type' => $capacityOk ? 'success' : 'danger'];
         $reasons[] = ['label' => $available ? 'Available' : 'Occupied at this time', 'met' => $available, 'type' => $available ? 'success' : 'danger'];
 
-        $isManualOverride = ! $typeMatch || ! $capacityOk || ! $available || $tier === 'mismatch';
+        // A "Manual Override" pick, in the hard-constraint sense, is
+        // only ever Type/Capacity/Availability failing — those are
+        // the only true hard constraints (Priorities per the spec).
+        // Scope mismatch alone is NOT a hard-constraint override; a
+        // cross-college room is a legitimate "Available" (or, if
+        // explicitly recommended, "Preferred") pick, never blocked.
+        $isManualOverride = ! $typeMatch || ! $capacityOk || ! $available;
 
         $badge = match (true) {
             $isManualOverride => 'Manual Override',
+            $levelInfo['is_manual_override'] => 'Administrator Override',
+            $isRecommended => 'Recommended Room',
             $tier === 'program' => 'Program Match',
             $tier === 'college' => 'College Match',
-            default => 'Shared Room',
+            $tier === 'shared' => 'Shared Room',
+            default => 'Available',
         };
 
         $overrideReason = null;
@@ -1208,9 +1521,6 @@ class RecommendationService
             }
             if (! $available) {
                 $issues[] = 'is already booked at this day/time';
-            }
-            if ($tier === 'mismatch') {
-                $issues[] = "belongs to a different College than this Section";
             }
             $overrideReason = 'This room '.implode(', ', $issues).'.';
         }
@@ -1226,12 +1536,22 @@ class RecommendationService
             'match_tier' => $tier,
             'score' => $score,
             'score_max' => 100,
-            'score_breakdown' => $points,
+            'score_breakdown' => $scored['breakdown'],
             'reasons' => $reasons,
             'confidence' => $this->confidenceFromScore($score),
+            'is_recommended' => $isRecommended,
+            'recommendation_level' => $levelInfo['level'],
+            'recommendation_level_label' => $this->recommendationLevelMeta($levelInfo['level'])['label'],
+            'recommendation_level_color' => $this->recommendationLevelMeta($levelInfo['level'])['color'],
+            'is_manual_override' => $levelInfo['is_manual_override'],
             'badge' => $badge,
             'manual_override' => $isManualOverride,
             'override_reason' => $overrideReason,
+            'utilization_percent' => $utilizationPercent,
+            'status_color' => $this->roomStatusColor($isManualOverride, false, $tier),
+            'explanation' => $isManualOverride
+                ? $overrideReason
+                : $this->roomExplanation("{$room->room_code} — {$room->room_name}", false, $tier, $utilizationPercent, $score),
         ];
     }
 
@@ -1250,7 +1570,18 @@ class RecommendationService
      *                belong to (or a Department without a College
      *                match) — never recommended.
      */
-    private function resolveRoomScopeTier(Room $room, ?int $sectionDepartmentId, ?int $sectionCollegeId): ?string
+    /**
+     * Resolve which scoping tier a Room falls into for a given
+     * Section — 'program' / 'college' / 'shared' (naturally suitable)
+     * or 'mismatch' (belongs to a different College/Program entirely).
+     *
+     * As of the Room Ownership + Controlled Override enhancement,
+     * 'mismatch' is NOT a hard exclusion — a cross-college room can
+     * still be a valid (if low-scoring) "Available" candidate, or a
+     * high-scoring one if the administrator has explicitly
+     * recommended it (see recommendationLevel()).
+     */
+    private function resolveRoomScopeTier(Room $room, ?int $sectionDepartmentId, ?int $sectionCollegeId): string
     {
         if (! $room->college_id && ! $room->department_id) {
             return 'shared';
@@ -1264,7 +1595,7 @@ class RecommendationService
             return 'college';
         }
 
-        return null;
+        return 'mismatch';
     }
 
     /**

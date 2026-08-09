@@ -66,14 +66,29 @@ const scoreColor = (score) => {
     return '#d97706';
 };
 
+const STATUS_DOT = {
+    green: '#16a34a',
+    blue: '#2563eb',
+    yellow: '#d97706',
+    red: '#dc2626',
+};
+
+const statusDotColor = (statusColor) => STATUS_DOT[statusColor] ?? STATUS_DOT.blue;
+
 const badgeSeverity = (badge) => {
     switch (badge) {
+        case 'Recommended Room':
+            return 'success';
         case 'Program Match':
             return 'success';
         case 'College Match':
             return 'info';
         case 'Shared Room':
             return 'info';
+        case 'Available':
+            return 'secondary';
+        case 'Administrator Override':
+            return 'warning';
         case 'Manual Override':
             return 'warning';
         default:
@@ -82,14 +97,20 @@ const badgeSeverity = (badge) => {
 };
 
 const recommendedBadge = (r) => r.badge ?? (
-    r.match_tier === 'program' ? 'Program Match'
+    r.recommendation_level === 'preferred' ? 'Recommended Room'
+        : r.match_tier === 'program' ? 'Program Match'
         : r.match_tier === 'college' ? 'College Match'
-        : 'Shared Room'
+        : r.match_tier === 'shared' ? 'Shared Room'
+        : 'Available'
 );
 
 const currentBadge = computed(() => current.value?.badge ?? recommendedBadge(current.value ?? {}));
 
-const isManualOverride = computed(() => current.value?.manual_override === true || current.value?.match_tier === 'mismatch');
+// True hard-constraint override only (Wrong Type/Capacity/Occupied).
+// A cross-college pick alone is no longer a hard override — see
+// is_manual_override for the "Administrator Override" (cross-scope
+// but explicitly recommended) case, shown as its own badge instead.
+const isManualOverride = computed(() => current.value?.manual_override === true);
 
 /** Loads the recommended pool (no search text) — called on mount and whenever the search box is cleared. */
 const loadRecommended = async () => {
@@ -168,8 +189,15 @@ const select = async (event) => {
     <div>
         <div class="flex items-center justify-between mb-1">
             <span class="text-xs font-medium text-slate-500 uppercase">Room</span>
-            <span class="text-xs font-semibold" :style="{ color: scoreColor(current.score ?? 0) }">
-                {{ current.score ?? 0 }}%
+            <span class="flex items-center gap-1.5">
+                <span
+                    class="inline-block w-2 h-2 rounded-full"
+                    :style="{ background: statusDotColor(current.status_color) }"
+                    :title="current.status_color === 'red' ? 'Conflict' : current.status_color === 'green' ? 'Recommended' : current.status_color === 'yellow' ? 'Soft preference issue' : 'Valid alternative'"
+                ></span>
+                <span class="text-xs font-semibold" :style="{ color: scoreColor(current.score ?? 0) }">
+                    {{ current.score ?? 0 }}%
+                </span>
             </span>
         </div>
 
@@ -243,6 +271,11 @@ const select = async (event) => {
                 <i :class="reason.type === 'warning' ? 'pi pi-exclamation-triangle' : (reason.met ? 'pi pi-check' : 'pi pi-times')"></i>{{ reason.label }}
             </li>
         </ul>
+
+        <!-- Why this room? -->
+        <p v-if="current.explanation && !isManualOverride" class="text-xs text-slate-500 mt-2 leading-relaxed">
+            <i class="pi pi-info-circle text-slate-400 mr-1"></i>{{ current.explanation }}
+        </p>
     </div>
 </template>
 

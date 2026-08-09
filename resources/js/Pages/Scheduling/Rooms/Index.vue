@@ -16,17 +16,55 @@ import Column from 'primevue/column';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import ProgressBar from 'primevue/progressbar';
+import RoomRecommendedSubjects from '@/Components/Scheduling/RoomRecommendedSubjects.vue';
 
 const props = defineProps({
     rooms: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
+    summary: {
+        type: Object,
+        default: () => ({
+            total_rooms: 0,
+            active_rooms: 0,
+            available_rooms: 0,
+            fully_booked_rooms: 0,
+            average_utilization: 0,
+            rooms_with_conflicts: 0,
+        }),
+    },
     filters: {
         type: Object,
-        default: () => ({ room_search: '' }),
+        default: () => ({ room_search: '', quick_filter: 'all' }),
     },
     roomTypes: { type: Array, default: () => [] },
     colleges: { type: Array, default: () => [] },
     departments: { type: Array, default: () => [] },
+    buildings: { type: Array, default: () => [] },
+    floors: { type: Array, default: () => [] },
 });
+
+/* ------------------------------------------------------------------ */
+/* Utilization / Availability display helpers                          */
+/* ------------------------------------------------------------------ */
+
+const UTILIZATION_SEVERITY = {
+    Normal: 'success',
+    'High Usage': 'warning',
+    'Nearly Full': 'warning',
+    Overbooked: 'danger',
+};
+
+const AVAILABILITY_SEVERITY = {
+    Available: 'success',
+    'Partially Available': 'info',
+    'Fully Booked': 'warning',
+    'Overbooked / Conflict': 'danger',
+    Overbooked: 'danger',
+    Inactive: 'secondary',
+};
+
+const utilizationSeverity = (status) => UTILIZATION_SEVERITY[status] ?? 'info';
+const availabilitySeverity = (status) => AVAILABILITY_SEVERITY[status] ?? 'info';
 
 const toast = useToast();
 const page = usePage();
@@ -54,20 +92,40 @@ watch(
 /* ------------------------------------------------------------------ */
 
 const search = ref(props.filters.room_search ?? '');
+const quickFilter = ref(props.filters.quick_filter ?? 'all');
+const building = ref(props.filters.building ?? null);
+const floor = ref(props.filters.floor ?? null);
+const roomTypeFilter = ref(props.filters.room_type ?? null);
+const collegeFilter = ref(props.filters.college_id ? Number(props.filters.college_id) : null);
+const departmentFilter = ref(props.filters.department_id ? Number(props.filters.department_id) : null);
+const statusFilter = ref(props.filters.status ?? null);
+const availabilityFilter = ref(props.filters.availability ?? null);
 const loading = ref(false);
 let searchDebounce = null;
+
+const activeQuery = () => ({
+    room_search: search.value,
+    quick_filter: quickFilter.value,
+    building: building.value,
+    floor: floor.value,
+    room_type: roomTypeFilter.value,
+    college_id: collegeFilter.value,
+    department_id: departmentFilter.value,
+    status: statusFilter.value,
+    availability: availabilityFilter.value,
+});
 
 const reloadRooms = (extra = {}) => {
     loading.value = true;
 
     router.get(
         route('scheduling.rooms'),
-        { room_search: search.value, ...extra },
+        { ...activeQuery(), ...extra },
         {
             preserveState: true,
             preserveScroll: true,
             replace: true,
-            only: ['rooms'],
+            only: ['rooms', 'summary', 'filters'],
             onFinish: () => {
                 loading.value = false;
             },
@@ -81,6 +139,24 @@ watch(search, () => {
         reloadRooms({ room_page: 1 });
     }, 350);
 });
+
+watch([building, floor, roomTypeFilter, collegeFilter, departmentFilter, statusFilter, availabilityFilter], () => {
+    reloadRooms({ room_page: 1 });
+});
+
+const quickFilters = [
+    { label: 'All Rooms', value: 'all', icon: 'pi pi-th-large' },
+    { label: 'Available', value: 'available', icon: 'pi pi-check-circle' },
+    { label: 'Fully Booked', value: 'fully_booked', icon: 'pi pi-lock' },
+    { label: 'High Usage', value: 'high_usage', icon: 'pi pi-chart-line' },
+    { label: 'Conflicts', value: 'conflicts', icon: 'pi pi-exclamation-triangle' },
+    { label: 'Inactive', value: 'inactive', icon: 'pi pi-ban' },
+];
+
+const selectQuickFilter = (value) => {
+    quickFilter.value = value;
+    reloadRooms({ room_page: 1 });
+};
 
 const onPage = (event) => {
     reloadRooms({ room_page: event.page + 1 });
@@ -232,6 +308,51 @@ const onDeleteRoom = (room) => {
         }
     });
 };
+
+/* ------------------------------------------------------------------ */
+/* Room Schedule Details modal                                         */
+/* ------------------------------------------------------------------ */
+
+const scheduleVisible = ref(false);
+const scheduleLoading = ref(false);
+const scheduleRoom = ref(null);
+const scheduleSummary = ref(null);
+const scheduleTimetable = ref({});
+
+const openSchedule = async (room) => {
+    scheduleVisible.value = true;
+    scheduleLoading.value = true;
+    scheduleRoom.value = room;
+    scheduleSummary.value = null;
+    scheduleTimetable.value = {};
+
+    try {
+        const { data } = await window.axios.get(route('scheduling.rooms.schedule', room.id));
+        scheduleRoom.value = data.room;
+        scheduleSummary.value = data.summary;
+        scheduleTimetable.value = data.timetable;
+    } catch (error) {
+        toast.add({ severity: 'error', summary: 'Error', detail: 'Could not load the room schedule.', life: 4000 });
+        scheduleVisible.value = false;
+    } finally {
+        scheduleLoading.value = false;
+    }
+};
+
+// Clicking anywhere on a room row opens the same Room Schedule Details
+// modal as the Utilization column / calendar action — including the
+// "Recommended Subjects" panel at the bottom — so an admin doesn't have
+// to know that only the Utilization cell was clickable before.
+const onRowClick = (event) => {
+    openSchedule(event.data);
+};
+
+const closeSchedule = () => {
+    scheduleVisible.value = false;
+    scheduleRoom.value = null;
+    scheduleSummary.value = null;
+    scheduleTimetable.value = {};
+};
 </script>
 
 <template>
@@ -251,6 +372,36 @@ const onDeleteRoom = (room) => {
                 <p class="mt-1 text-slate-500">
                     Manage classrooms, laboratories, and other scheduling facilities.
                 </p>
+            </div>
+
+            <!-- Room Usage Summary Cards -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                    <p class="text-xs font-medium text-slate-500">Total Rooms</p>
+                    <p class="text-2xl font-bold text-[#1E293B] mt-1">{{ summary.total_rooms }}</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                    <p class="text-xs font-medium text-slate-500">Active Rooms</p>
+                    <p class="text-2xl font-bold text-[#1E293B] mt-1">{{ summary.active_rooms }}</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                    <p class="text-xs font-medium text-slate-500">Available Rooms</p>
+                    <p class="text-2xl font-bold text-emerald-600 mt-1">{{ summary.available_rooms }}</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                    <p class="text-xs font-medium text-slate-500">Fully Booked</p>
+                    <p class="text-2xl font-bold text-amber-600 mt-1">{{ summary.fully_booked_rooms }}</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                    <p class="text-xs font-medium text-slate-500">Avg. Utilization</p>
+                    <p class="text-2xl font-bold text-[#1E293B] mt-1">{{ summary.average_utilization }}%</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                    <p class="text-xs font-medium text-slate-500">Conflicts</p>
+                    <p class="text-2xl font-bold" :class="summary.rooms_with_conflicts > 0 ? 'text-red-600' : 'text-[#1E293B]'">
+                        {{ summary.rooms_with_conflicts }}
+                    </p>
+                </div>
             </div>
 
             <Card class="!rounded-2xl border border-slate-100 shadow-sm">
@@ -282,6 +433,46 @@ const onDeleteRoom = (room) => {
                         </template>
                     </Toolbar>
 
+                    <!-- Quick Filters -->
+                    <div class="flex flex-wrap gap-2 mb-4">
+                        <Button
+                            v-for="qf in quickFilters"
+                            :key="qf.value"
+                            :label="qf.label"
+                            :icon="qf.icon"
+                            size="small"
+                            :severity="quickFilter === qf.value ? 'success' : 'secondary'"
+                            :outlined="quickFilter !== qf.value"
+                            @click="selectQuickFilter(qf.value)"
+                        />
+                    </div>
+
+                    <!-- Advanced Filters -->
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+                        <Select v-model="building" :options="buildings" placeholder="Building" showClear class="w-full" />
+                        <Select v-model="floor" :options="floors" placeholder="Floor" showClear class="w-full" />
+                        <Select v-model="roomTypeFilter" :options="roomTypes" placeholder="Room Type" showClear class="w-full" />
+                        <Select
+                            v-model="collegeFilter"
+                            :options="colleges"
+                            optionLabel="name"
+                            optionValue="id"
+                            placeholder="College"
+                            showClear
+                            class="w-full"
+                        />
+                        <Select
+                            v-model="departmentFilter"
+                            :options="departments"
+                            optionLabel="name"
+                            optionValue="id"
+                            placeholder="Program"
+                            showClear
+                            class="w-full"
+                        />
+                        <Select v-model="statusFilter" :options="['Active', 'Inactive']" placeholder="Status" showClear class="w-full" />
+                    </div>
+
                     <!-- Rooms Table -->
                     <DataTable
                         :value="rooms.data"
@@ -295,7 +486,9 @@ const onDeleteRoom = (room) => {
                         :rows="rooms.per_page"
                         :totalRecords="rooms.total"
                         :first="(rooms.current_page - 1) * rooms.per_page"
+                        :rowClass="() => 'cursor-pointer hover:bg-slate-50'"
                         @page="onPage"
+                        @row-click="onRowClick"
                     >
                         <template #empty>
                             <div class="text-center py-10">
@@ -341,6 +534,55 @@ const onDeleteRoom = (room) => {
                                 {{ data.capacity }}
                             </template>
                         </Column>
+                        <Column header="Utilization" style="width: 14rem">
+                            <template #body="{ data }">
+                                <button
+                                    type="button"
+                                    class="w-full text-left group"
+                                    :title="`Weekly scheduled hours: ${data.utilization?.scheduled_hours ?? 0} / ${data.utilization?.max_hours ?? 0} hrs. Click to view the full room schedule.`"
+                                    @click.stop="openSchedule(data)"
+                                >
+                                    <div class="flex items-center justify-between mb-1">
+                                        <span class="text-xs font-medium text-slate-600 group-hover:text-slate-900">
+                                            {{ data.utilization?.scheduled_hours ?? 0 }} / {{ data.utilization?.max_hours ?? 0 }} hrs
+                                        </span>
+                                        <Tag
+                                            :value="`${data.utilization?.utilization_percent ?? 0}%`"
+                                            :severity="utilizationSeverity(data.utilization?.utilization_status)"
+                                        />
+                                    </div>
+                                    <ProgressBar
+                                        :value="Math.min(100, data.utilization?.utilization_percent ?? 0)"
+                                        :showValue="false"
+                                        style="height: 8px"
+                                    />
+                                    <span class="text-xs text-slate-400">
+                                        {{ data.utilization?.remaining_hours ?? 0 }} hrs remaining
+                                    </span>
+                                </button>
+                            </template>
+                        </Column>
+                        <Column header="Availability" style="width: 12rem">
+                            <template #body="{ data }">
+                                <Tag
+                                    :value="data.utilization?.availability ?? '—'"
+                                    :severity="availabilitySeverity(data.utilization?.availability)"
+                                />
+                                <div v-if="data.utilization?.has_conflict" class="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                    <i class="pi pi-exclamation-triangle"></i> Conflict
+                                </div>
+                                <div
+                                    v-if="data.utilization?.capacity_exceeded"
+                                    class="text-xs text-red-600 mt-1"
+                                    :title="`Peak assigned enrollment ${data.utilization.peak_enrollment} exceeds capacity ${data.utilization.capacity}`"
+                                >
+                                    Capacity exceeded — {{ data.utilization.peak_enrollment }} / {{ data.utilization.capacity }}
+                                </div>
+                                <div v-else-if="data.utilization" class="text-xs text-slate-400 mt-1">
+                                    {{ data.utilization.seats_available }} seats available
+                                </div>
+                            </template>
+                        </Column>
                         <Column header="Status" style="width: 9rem">
                             <template #body="{ data }">
                                 <Tag
@@ -349,9 +591,18 @@ const onDeleteRoom = (room) => {
                                 />
                             </template>
                         </Column>
-                        <Column header="Actions" style="width: 9rem">
+                        <Column header="Actions" style="width: 10rem">
                             <template #body="{ data }">
-                                <div class="flex gap-1">
+                                <div class="flex gap-1" @click.stop>
+                                    <Button
+                                        icon="pi pi-calendar"
+                                        text
+                                        rounded
+                                        severity="info"
+                                        size="small"
+                                        aria-label="View Schedule"
+                                        @click="openSchedule(data)"
+                                    />
                                     <Button
                                         icon="pi pi-pencil"
                                         text
@@ -584,6 +835,116 @@ const onDeleteRoom = (room) => {
                     :loading="roomForm.processing"
                     @click="onSaveRoom"
                 />
+            </template>
+        </Dialog>
+
+        <!-- Room Schedule Details -->
+        <Dialog
+            v-model:visible="scheduleVisible"
+            modal
+            :header="scheduleRoom ? `${scheduleRoom.room_code} — ${scheduleRoom.room_name}` : 'Room Schedule'"
+            :style="{ width: '900px' }"
+            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :draggable="false"
+            @hide="closeSchedule"
+        >
+            <div v-if="scheduleLoading" class="py-16 text-center text-slate-400">
+                <i class="pi pi-spin pi-spinner text-2xl"></i>
+                <p class="mt-2 text-sm">Loading room schedule…</p>
+            </div>
+
+            <div v-else-if="scheduleRoom && scheduleSummary" class="space-y-5">
+                <!-- Room info -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                    <div>
+                        <p class="text-xs text-slate-400">Room Type</p>
+                        <p class="font-medium text-slate-700">{{ scheduleRoom.room_type }}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-400">Capacity</p>
+                        <p class="font-medium text-slate-700">{{ scheduleRoom.capacity }}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-400">College</p>
+                        <p class="font-medium text-slate-700">{{ scheduleRoom.college?.name ?? 'All Colleges' }}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-400">Program</p>
+                        <p class="font-medium text-slate-700">{{ scheduleRoom.department?.name ?? 'All Programs' }}</p>
+                    </div>
+                </div>
+
+                <!-- Utilization -->
+                <div class="rounded-xl border border-slate-100 p-4">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium text-slate-600">
+                            {{ scheduleSummary.scheduled_hours }} / {{ scheduleSummary.max_hours }} hrs weekly
+                        </span>
+                        <Tag
+                            :value="`${scheduleSummary.utilization_percent}% Utilized`"
+                            :severity="utilizationSeverity(scheduleSummary.utilization_status)"
+                        />
+                    </div>
+                    <ProgressBar :value="Math.min(100, scheduleSummary.utilization_percent)" :showValue="false" style="height: 10px" />
+                    <p class="text-xs text-slate-400 mt-1">{{ scheduleSummary.remaining_hours }} hrs remaining this week</p>
+                </div>
+
+                <!-- Utilization by day -->
+                <div>
+                    <p class="text-sm font-semibold text-slate-700 mb-2">Utilization by Day</p>
+                    <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                        <div
+                            v-for="(day, name) in scheduleSummary.by_day"
+                            :key="name"
+                            class="rounded-lg border border-slate-100 p-2 text-center"
+                        >
+                            <p class="text-xs text-slate-500">{{ name }}</p>
+                            <p class="text-sm font-bold text-slate-700">{{ day.utilization_percent }}%</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weekly Timetable -->
+                <div>
+                    <p class="text-sm font-semibold text-slate-700 mb-2">Weekly Timetable</p>
+                    <div class="space-y-3 max-h-80 overflow-y-auto pr-1">
+                        <div v-for="(day, name) in scheduleTimetable" :key="name" class="rounded-lg border border-slate-100 p-3">
+                            <p class="text-xs font-semibold text-slate-500 mb-2">{{ name }}</p>
+
+                            <div v-if="day.booked.length" class="space-y-1 mb-2">
+                                <div
+                                    v-for="slot in day.booked"
+                                    :key="slot.section_subject_id"
+                                    class="flex items-center justify-between text-xs bg-slate-50 rounded px-2 py-1"
+                                >
+                                    <span class="font-medium text-slate-700">{{ slot.start_time }}–{{ slot.end_time }}</span>
+                                    <span class="text-slate-600">{{ slot.subject }} · {{ slot.section }}</span>
+                                    <span class="text-slate-500">{{ slot.faculty }}</span>
+                                </div>
+                            </div>
+                            <p v-else class="text-xs text-slate-400 italic mb-2">No classes scheduled.</p>
+
+                            <div v-if="day.available.length" class="flex flex-wrap gap-1">
+                                <span
+                                    v-for="(gap, i) in day.available"
+                                    :key="i"
+                                    class="text-[11px] rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5"
+                                >
+                                    {{ gap.start_time }}–{{ gap.end_time }} open
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recommended Subjects -->
+                <div class="rounded-xl border border-slate-100 p-4">
+                    <RoomRecommendedSubjects :room="scheduleRoom" />
+                </div>
+            </div>
+
+            <template #footer>
+                <Button label="Close" severity="secondary" outlined @click="closeSchedule" />
             </template>
         </Dialog>
     </AppLayout>

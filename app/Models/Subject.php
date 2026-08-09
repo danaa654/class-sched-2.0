@@ -75,4 +75,20 @@ class Subject extends Model
     {
         return $this->belongsToMany(Faculty::class, 'faculty_subject')->withTimestamps();
     }
+
+    /**
+     * Rooms this Subject is recommended for (soft preference,
+     * configured from the Room Details page). Used by
+     * RecommendationService::recommendRooms() as a scoring bonus,
+     * never a hard constraint.
+     *
+     * @return BelongsToMany<Room>
+     */
+    public function recommendedRooms(): BelongsToMany
+    {
+        return $this->belongsToMany(Room::class, 'room_subject_recommendations')
+            ->wherePivot('active', true)
+            ->withPivot(['id', 'active', 'created_by', 'created_at'])
+            ->withTimestamps();
+    }
 }

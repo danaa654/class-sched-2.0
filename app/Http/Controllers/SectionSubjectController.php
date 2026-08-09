@@ -532,6 +532,9 @@ class SectionSubjectController extends Controller
             'badge' => $scored['badge'],
             'manual_override' => $scored['manual_override'],
             'override_reason' => $scored['override_reason'],
+            'utilization_percent' => $scored['utilization_percent'],
+            'status_color' => $scored['status_color'],
+            'explanation' => $scored['explanation'],
         ];
 
         if (isset($meta['faculty']['score'], $meta['time']['score'])) {

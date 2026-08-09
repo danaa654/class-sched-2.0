@@ -14,6 +14,7 @@ use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\MajorController;
 use App\Http\Controllers\ReportsController;
 use App\Http\Controllers\RoomController;
+use App\Http\Controllers\RoomRecommendationController;
 use App\Http\Controllers\SchedulingController;
 use App\Http\Controllers\SchoolYearController;
 use App\Http\Controllers\SectionController;
@@ -96,9 +97,17 @@ Route::middleware('auth')->group(function () {
     Route::delete('/scheduling/faculty/{faculty}/availability/{faculty_availability}', [FacultyAvailabilityController::class, 'destroy'])->name('scheduling.faculty.availability.destroy');
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');
+    Route::get('/scheduling/rooms/{room}/schedule', [RoomController::class, 'schedule'])->name('scheduling.rooms.schedule');
     Route::post('/scheduling/rooms', [RoomController::class, 'store'])->name('scheduling.rooms.store');
     Route::put('/scheduling/rooms/{room}', [RoomController::class, 'update'])->name('scheduling.rooms.update');
     Route::delete('/scheduling/rooms/{room}', [RoomController::class, 'destroy'])->name('scheduling.rooms.destroy');
+    // Room Recommendation — "Recommended Subjects" on the Room Details
+    // page (source of truth for room-subject soft preferences, read
+    // by RecommendationService::recommendRooms() as a scoring bonus).
+    Route::get('/scheduling/rooms/{room}/recommendations', [RoomRecommendationController::class, 'index'])->name('scheduling.rooms.recommendations');
+    Route::get('/scheduling/rooms/{room}/recommendations/subjects', [RoomRecommendationController::class, 'searchableSubjects'])->name('scheduling.rooms.recommendations.subjects');
+    Route::post('/scheduling/rooms/{room}/recommendations', [RoomRecommendationController::class, 'store'])->name('scheduling.rooms.recommendations.store');
+    Route::delete('/scheduling/rooms/{room}/recommendations/{recommendation}', [RoomRecommendationController::class, 'destroy'])->name('scheduling.rooms.recommendations.destroy');
     Route::get('/scheduling/sections', [SectionController::class, 'index'])->name('scheduling.sections');
     Route::post('/scheduling/sections', [SectionController::class, 'store'])->name('scheduling.sections.store');
     Route::put('/scheduling/sections/{section}', [SectionController::class, 'update'])->name('scheduling.sections.update');

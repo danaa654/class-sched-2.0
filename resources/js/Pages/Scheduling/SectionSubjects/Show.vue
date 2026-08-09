@@ -2468,8 +2468,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
                         <div class="flex justify-end mt-4">
                             <Button
-                                label="Add"
-                                icon="pi pi-plus"
+                                label="Save"
+                                icon="pi pi-check"
                                 severity="success"
                                 :loading="manualForm.processing"
                                 :disabled="manualForm.subject_ids.length === 0"

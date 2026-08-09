@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -69,5 +71,31 @@ class Room extends Model
     public function college(): BelongsTo
     {
         return $this->belongsTo(College::class);
+    }
+
+    /**
+     * Raw recommendation rows for this Room (includes inactive ones).
+     *
+     * @return HasMany<RoomSubjectRecommendation>
+     */
+    public function subjectRecommendations(): HasMany
+    {
+        return $this->hasMany(RoomSubjectRecommendation::class);
+    }
+
+    /**
+     * Subjects recommended (soft preference) for this Room — the
+     * "Recommended Subjects" list shown on the Room Details page.
+     * A soft preference only; never a hard scheduling constraint.
+     * See RecommendationService::recommendRooms().
+     *
+     * @return BelongsToMany<Subject>
+     */
+    public function recommendedSubjects(): BelongsToMany
+    {
+        return $this->belongsToMany(Subject::class, 'room_subject_recommendations')
+            ->wherePivot('active', true)
+            ->withPivot(['id', 'active', 'created_by', 'created_at'])
+            ->withTimestamps();
     }
 }
