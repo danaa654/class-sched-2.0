@@ -2,8 +2,6 @@
 import { computed } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import InputText from 'primevue/inputtext';
-import Password from 'primevue/password';
-import Checkbox from 'primevue/checkbox';
 import Button from 'primevue/button';
 import Message from 'primevue/message';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
@@ -20,14 +18,10 @@ const isDark = computed(() => theme.value === 'dark');
 
 const form = useForm({
     email: '',
-    password: '',
-    remember: false,
 });
 
 const submit = () => {
-    form.post(route('login'), {
-        onFinish: () => form.reset('password'),
-    });
+    form.post(route('password.email'));
 };
 
 const inputClass = computed(() =>
@@ -38,7 +32,7 @@ const inputClass = computed(() =>
 </script>
 
 <template>
-    <Head title="Login" />
+    <Head title="Forgot Password" />
 
     <div
         class="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-16 transition-colors duration-300"
@@ -68,7 +62,7 @@ const inputClass = computed(() =>
                     class="mb-4 h-16 w-16 drop-shadow-[0_0_20px_rgba(37,99,235,0.55)]"
                 />
                 <h1 class="text-2xl font-extrabold tracking-tight">CLASSLY</h1>
-                <p class="mt-1 text-sm font-medium text-[#2563EB]" :class="isDark && '!text-[#5B9CFF]'">
+                <p class="mt-1 text-sm font-medium" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'">
                     Class Scheduling and Management System
                 </p>
             </div>
@@ -79,9 +73,9 @@ const inputClass = computed(() =>
                     ? 'border-white/15 bg-white/[0.07] shadow-[0_8px_40px_rgba(0,0,0,0.5)]'
                     : 'border-white/60 bg-white/60 shadow-[0_8px_32px_rgba(30,41,59,0.12)]'"
             >
-                <h2 class="text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Welcome back</h2>
+                <h2 class="text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Forgot your password?</h2>
                 <p class="mt-1 text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-500'">
-                    Sign in to access your CLASSLY dashboard.
+                    Enter your email and we'll send you a link to reset it.
                 </p>
 
                 <Message
@@ -95,15 +89,6 @@ const inputClass = computed(() =>
                 </Message>
 
                 <form class="mt-6 flex flex-col gap-5" @submit.prevent="submit">
-                    <Message
-                        v-if="form.errors.email"
-                        severity="error"
-                        :closable="false"
-                        :class="isDark ? '!border-red-400/30 !bg-red-400/10 !text-red-200' : '!border-red-300 !bg-red-50 !text-red-700'"
-                    >
-                        {{ form.errors.email }}
-                    </Message>
-
                     <div class="flex flex-col gap-2">
                         <label for="email" class="text-sm font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">Email</label>
                         <InputText
@@ -116,47 +101,26 @@ const inputClass = computed(() =>
                             :invalid="!!form.errors.email"
                             placeholder="you@classly.local"
                         />
-                    </div>
-
-                    <div class="flex flex-col gap-2">
-                        <label for="password" class="text-sm font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">Password</label>
-                        <Password
-                            id="password"
-                            v-model="form.password"
-                            :feedback="false"
-                            toggleMask
-                            autocomplete="current-password"
-                            :inputClass="['w-full', inputClass]"
-                            class="w-full"
-                            :invalid="!!form.errors.password"
-                            placeholder="••••••••"
-                        />
-                        <small v-if="form.errors.password" class="text-red-400">
-                            {{ form.errors.password }}
+                        <small v-if="form.errors.email" class="text-red-400">
+                            {{ form.errors.email }}
                         </small>
-                    </div>
-
-                    <div class="flex items-center justify-between gap-2">
-                        <div class="flex items-center gap-2">
-                            <Checkbox v-model="form.remember" inputId="remember" binary />
-                            <label for="remember" class="text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-600'">Remember me</label>
-                        </div>
-                        <Link
-                            :href="route('password.request')"
-                            class="text-sm hover:underline"
-                            :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'"
-                        >
-                            Forgot password?
-                        </Link>
                     </div>
 
                     <Button
                         type="submit"
-                        label="Login"
+                        label="Email Password Reset Link"
                         class="!w-full !border-[#2563EB]/60 !bg-[#2563EB] shadow-[0_8px_24px_rgba(37,99,235,0.45)]"
                         size="large"
                         :loading="form.processing"
                     />
+
+                    <Link
+                        :href="route('login')"
+                        class="text-center text-sm transition-colors"
+                        :class="isDark ? 'text-slate-400 hover:text-[#5B9CFF]' : 'text-slate-500 hover:text-[#2563EB]'"
+                    >
+                        Back to login
+                    </Link>
                 </form>
             </div>
         </div>

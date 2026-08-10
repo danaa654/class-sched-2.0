@@ -1693,6 +1693,13 @@ class RecommendationService
         $excludingId = $current?->id ?? 0;
         $results = [];
 
+        // How many meetings/week this Subject expects (1 for Lab/
+        // Special subjects, 2 for Lecture, per MeetingPatternService).
+        // Threaded through into every candidate below so the frontend
+        // Time selector can cap manual day-picking at this count and
+        // never silently turn a 1-meeting Subject into a 2-meeting one.
+        $expectedMeetings = $this->meetingPatternService->meetingsPerWeek($subject);
+
         // SCHEDULING PREFERENCES (Academic Calendar -> active School
         // Year) — Class Start/End Time, the Time Interval, and the
         // fixed Lunch Break all come from here now. Nothing in this
@@ -1763,65 +1770,19 @@ class RecommendationService
                     continue;
                 }
 
-                // TIME RECOMMENDATION SCORE (100 points). The engine no
-                // longer stops at the first conflict-free slot — every
+                // TIME RECOMMENDATION SCORE (100 points) — computed by
+                // buildTimeCandidate(), shared with
+                // recommendSingleDaySlots() so both search spaces
+                // score a candidate identically. The engine no longer
+                // stops at the first conflict-free slot — every
                 // candidate is fully scored, then ranked, so Auto
                 // Generate / Regenerate / Recommend Time / Recommend
                 // Schedule all pick the highest-QUALITY conflict-free
                 // slot rather than merely the first one found.
-                //
-                //   Faculty Available            10
-                //   Room Available                10
-                //   Section Available             10
-                //   Fits Subject Hours            10
-                //   Preferred Day Combination     20
-                //   Smart Time Preference         15
-                //   Section Daily Load Balance    25  (NEW — see below)
-                //   -------------------------------
-                //   Total                        100
-                $tier = $this->meetingPatternService->priorityTier($days);
-                $dayPatternBonus = (int) round((($tier['priority'] ?? 50) / 100) * 20);
-
-                [$timePreferenceBonus, $timePreferenceLabel] = $this->scoreTimePreference($start);
-
-                [$loadScore, $loadReasons] = $this->scoreSectionDailyLoad(
-                    $sectionSnapshot, $allowedDays, $days, $start, $end, $subjectHasLab
+                $results[] = $this->buildTimeCandidate(
+                    $days, $start, $end, $totalHours, $subjectHasLab,
+                    $expectedMeetings, $sectionSnapshot, $allowedDays, $subject
                 );
-
-                $points = [
-                    'faculty_available' => 10,
-                    'room_available' => 10,
-                    'section_available' => 10,
-                    'fits_subject_hours' => 10,
-                    'preferred_day_combination' => $dayPatternBonus,
-                    'smart_time_preference' => $timePreferenceBonus,
-                    'section_daily_load_balance' => $loadScore,
-                ];
-
-                $reasons = [
-                    ['label' => 'Faculty Available', 'met' => true, 'type' => 'success'],
-                    ['label' => 'Room Available', 'met' => true, 'type' => 'success'],
-                    ['label' => 'Section Available', 'met' => true, 'type' => 'success'],
-                    ['label' => 'Fits Subject Hours', 'met' => true, 'type' => 'success'],
-                    $tier && $tier['tier'] === 'Preferred'
-                        ? ['label' => 'Preferred Day Combination', 'met' => true, 'type' => 'success']
-                        : ['label' => ($tier['tier'] ?? 'Non-preferred').' Day Combination', 'met' => false, 'type' => 'warning'],
-                    ['label' => $timePreferenceLabel, 'met' => $timePreferenceBonus >= 12, 'type' => $timePreferenceBonus >= 12 ? 'success' : 'warning'],
-                    ...$loadReasons,
-                ];
-
-                $results[] = [
-                    'days' => $days,
-                    'start_time' => $start,
-                    'end_time' => $end,
-                    'meetings_per_week' => count($days),
-                    'subject_type' => $this->meetingPatternService->label($subject),
-                    'day_pattern_name' => $tier['name'] ?? implode('/', $days),
-                    'score' => array_sum($points),
-                    'score_max' => 100,
-                    'score_breakdown' => $points,
-                    'reasons' => $reasons,
-                ];
 
                 // Unlike the old "first conflict-free slot wins" search,
                 // the optimizer needs a wide enough pool of candidates
@@ -1855,6 +1816,218 @@ class RecommendationService
         unset($item);
 
         return ['recommendations' => $results, 'message' => null];
+    }
+
+    /**
+     * SINGLE-DAY SLOT SEARCH — Smart Day & Time Recommendation modal.
+     *
+     * recommendTimes() above only ever searches Day COMBINATIONS that
+     * match the Subject's full weekly meeting count (e.g. a Lecture
+     * subject only gets MW/TTH/... 2-day patterns back). That's
+     * correct when generating a Subject's whole schedule from
+     * scratch, but wrong for the "fix just ONE conflicting meeting"
+     * flow: a Tue/Thu subject where the Registrar is only replacing
+     * the Thursday occurrence needs single-day candidates (e.g. just
+     * "Saturday"), not another full 2-day pattern.
+     *
+     * Reuses the exact same conflict checks (ScheduleConflictService)
+     * and scoring (buildTimeCandidate()) as recommendTimes() — this
+     * is a different SEARCH SPACE (one Day at a time, across every
+     * allowed Day), never a different or simplified validation rule.
+     *
+     * @param  int|null  $sessionMinutes  Duration of the specific occurrence being replaced (e.g. the Registrar's current Start/End). Falls back to the Subject's usual per-meeting length when omitted.
+     * @param  list<string>  $excludeDays  Days already used by this row's OTHER meetings (or otherwise off the table) — never offered again as a "new" single-day option.
+     */
+    public function recommendSingleDaySlots(
+        Subject $subject,
+        Section $section,
+        ?int $facultyId,
+        ?int $roomId,
+        ?SectionSubject $current = null,
+        ?int $sessionMinutes = null,
+        array $excludeDays = []
+    ): array {
+        $totalHours = (int) $subject->lecture_hours + (int) $subject->laboratory_hours;
+        if ($totalHours <= 0) {
+            $totalHours = 3;
+        }
+        $subjectHasLab = (int) $subject->laboratory_hours > 0;
+
+        $excludingId = $current?->id ?? 0;
+        $expectedMeetings = $this->meetingPatternService->meetingsPerWeek($subject);
+
+        // Duration for this single occurrence: the exact Start/End
+        // the Registrar was just editing when given, otherwise the
+        // Subject's usual per-meeting length (weekly hours split
+        // across its expected meeting count), capped to a sane
+        // single block the same way MeetingPatternService bumps
+        // meeting frequency for long Subjects.
+        $maxContinuousHours = (float) config('scheduling.meeting_patterns.max_continuous_hours', 3);
+        $defaultSessionMinutes = (int) round(($totalHours / max($expectedMeetings, 1)) * 60);
+        if ($maxContinuousHours > 0) {
+            $defaultSessionMinutes = min($defaultSessionMinutes, (int) round($maxContinuousHours * 60));
+        }
+        $sessionMinutes = $sessionMinutes && $sessionMinutes > 0 ? $sessionMinutes : max($defaultSessionMinutes, 30);
+
+        $activeSchoolYear = SchoolYear::active();
+        $candidateStartTimes = $activeSchoolYear ? $activeSchoolYear->candidateStartTimes() : (new SchoolYear)->candidateStartTimes();
+        $classEndMinutes = $this->minutesFromTime($activeSchoolYear?->classEndTime() ?? SchoolYear::DEFAULT_CLASS_END_TIME);
+        $allowedDays = $activeSchoolYear ? $activeSchoolYear->allowedDays() : SchoolYear::DEFAULT_CLASS_DAYS;
+
+        $searchDays = array_values(array_diff($allowedDays, $excludeDays));
+
+        $sectionSnapshot = $section->id ? $this->sectionScheduleSnapshot($section->id, $excludingId) : [];
+
+        $results = [];
+
+        foreach ($searchDays as $day) {
+            $days = [$day];
+
+            foreach ($candidateStartTimes as $start) {
+                [$hour, $minute] = array_map('intval', explode(':', $start));
+                $endMinutes = ($hour * 60 + $minute) + $sessionMinutes;
+
+                if ($endMinutes > $classEndMinutes) {
+                    continue;
+                }
+
+                $end = sprintf('%02d:%02d', intdiv($endMinutes, 60), $endMinutes % 60);
+
+                if (SchoolYear::overlapsLunchBreak($start, $end)) {
+                    continue;
+                }
+
+                $hasConflict = false;
+
+                if ($section->id) {
+                    $hasConflict = $hasConflict || (bool) $this->conflictService->findSectionConflict(
+                        $section->id, $excludingId, $days, $start, $end
+                    );
+                }
+                if (! $hasConflict && $facultyId) {
+                    $hasConflict = (bool) $this->conflictService->findFacultyConflict(
+                        $facultyId, $excludingId, $days, $start, $end
+                    );
+                }
+                if (! $hasConflict && $roomId) {
+                    $hasConflict = (bool) $this->conflictService->findRoomConflict(
+                        $roomId, $excludingId, $days, $start, $end
+                    );
+                }
+
+                if ($hasConflict) {
+                    continue;
+                }
+
+                $candidate = $this->buildTimeCandidate(
+                    $days, $start, $end, $totalHours, $subjectHasLab,
+                    $expectedMeetings, $sectionSnapshot, $allowedDays, $subject
+                );
+                $candidate['single_day'] = true;
+                $results[] = $candidate;
+
+                if (count($results) >= self::MAX_TIME_RESULTS * 6) {
+                    break 2;
+                }
+            }
+        }
+
+        if (empty($results)) {
+            return ['recommendations' => [], 'message' => 'No available single-day time slot found without conflicts.'];
+        }
+
+        usort($results, function (array $a, array $b) {
+            return $b['score'] <=> $a['score']
+                ?: strcmp($a['start_time'], $b['start_time']);
+        });
+
+        $results = array_slice($results, 0, self::MAX_TIME_RESULTS);
+
+        foreach ($results as &$item) {
+            $item['confidence'] = $this->confidenceFromScore($item['score']);
+        }
+        unset($item);
+
+        return ['recommendations' => $results, 'message' => null];
+    }
+
+    /**
+     * Shared per-candidate scorer for both recommendTimes() (full
+     * weekly-pattern search) and recommendSingleDaySlots() (one-Day
+     * search) — a candidate is scored identically no matter which
+     * search space found it, so results from both can be safely
+     * merged and ranked together by the caller.
+     *
+     * @param  list<string>  $days
+     * @param  array<string, list<array{start:int,end:int,has_lab:bool}>>  $sectionSnapshot
+     * @param  list<string>  $allowedDays
+     */
+    private function buildTimeCandidate(
+        array $days,
+        string $start,
+        string $end,
+        int $totalHours,
+        bool $subjectHasLab,
+        int $expectedMeetings,
+        array $sectionSnapshot,
+        array $allowedDays,
+        Subject $subject
+    ): array {
+        // TIME RECOMMENDATION SCORE (100 points):
+        //   Faculty Available            10
+        //   Room Available                10
+        //   Section Available             10
+        //   Fits Subject Hours            10
+        //   Preferred Day Combination     20
+        //   Smart Time Preference         15
+        //   Section Daily Load Balance    25
+        //   -------------------------------
+        //   Total                        100
+        $tier = $this->meetingPatternService->priorityTier($days);
+        $dayPatternBonus = (int) round((($tier['priority'] ?? 50) / 100) * 20);
+
+        [$timePreferenceBonus, $timePreferenceLabel] = $this->scoreTimePreference($start);
+
+        [$loadScore, $loadReasons] = $this->scoreSectionDailyLoad(
+            $sectionSnapshot, $allowedDays, $days, $start, $end, $subjectHasLab
+        );
+
+        $points = [
+            'faculty_available' => 10,
+            'room_available' => 10,
+            'section_available' => 10,
+            'fits_subject_hours' => 10,
+            'preferred_day_combination' => $dayPatternBonus,
+            'smart_time_preference' => $timePreferenceBonus,
+            'section_daily_load_balance' => $loadScore,
+        ];
+
+        $reasons = [
+            ['label' => 'Faculty Available', 'met' => true, 'type' => 'success'],
+            ['label' => 'Room Available', 'met' => true, 'type' => 'success'],
+            ['label' => 'Section Available', 'met' => true, 'type' => 'success'],
+            ['label' => 'Fits Subject Hours', 'met' => true, 'type' => 'success'],
+            $tier && $tier['tier'] === 'Preferred'
+                ? ['label' => 'Preferred Day Combination', 'met' => true, 'type' => 'success']
+                : ['label' => ($tier['tier'] ?? 'Non-preferred').' Day Combination', 'met' => false, 'type' => 'warning'],
+            ['label' => $timePreferenceLabel, 'met' => $timePreferenceBonus >= 12, 'type' => $timePreferenceBonus >= 12 ? 'success' : 'warning'],
+            ...$loadReasons,
+        ];
+
+        return [
+            'days' => $days,
+            'start_time' => $start,
+            'end_time' => $end,
+            'meetings_per_week' => count($days),
+            'expected_meetings' => $expectedMeetings,
+            'required_weekly_hours' => $totalHours,
+            'subject_type' => $this->meetingPatternService->label($subject),
+            'day_pattern_name' => $tier['name'] ?? implode('/', $days),
+            'score' => array_sum($points),
+            'score_max' => 100,
+            'score_breakdown' => $points,
+            'reasons' => $reasons,
+        ];
     }
 
     /**
@@ -2214,6 +2387,8 @@ class RecommendationService
             'start_time' => $startTime,
             'end_time' => $endTime,
             'meetings_per_week' => count($days),
+            'expected_meetings' => $expectedMeetings,
+            'required_weekly_hours' => $totalHours,
             'subject_type' => $this->meetingPatternService->label($subject),
             'score' => $score,
             'score_max' => 100,

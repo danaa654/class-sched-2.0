@@ -238,6 +238,15 @@ class MeetingPatternService
      * as a hard ceiling so a future misconfiguration can never
      * accidentally reintroduce 3+ meeting/week schedules until that
      * ceiling is deliberately raised.
+     *
+     * Hour-aware bump: a Subject's Type only sets the *default* — if
+     * its total weekly hours (lecture + laboratory) wouldn't fit in a
+     * single reasonable block (max_continuous_hours, default 3h), the
+     * frequency is bumped up so the extra hours get their own
+     * meeting instead of one unrealistically long block. E.g. a
+     * "Special" (1x/week default) Capstone subject worth 4
+     * hours/week becomes 2 meetings/week (2h + 2h) automatically,
+     * still capped by max_meetings_per_week.
      */
     public function meetingsPerWeek(Subject $subject): int
     {
@@ -249,7 +258,38 @@ class MeetingPatternService
 
         $max = (int) config('scheduling.meeting_patterns.max_meetings_per_week', 2);
 
+        $meetings = $this->bumpForRequiredHours($subject, $meetings, $max);
+
         return max(1, min($meetings, $max));
+    }
+
+    /**
+     * If the Subject's total weekly hours don't fit in
+     * max_continuous_hours (config, default 3h) per meeting at the
+     * currently-proposed frequency, raises the frequency just enough
+     * to fit — never below the Type default, never above $max. This
+     * is what lets a subject's *required hours* drive the meeting
+     * count instead of a keyword-based Type guess alone.
+     */
+    private function bumpForRequiredHours(Subject $subject, int $meetings, int $max): int
+    {
+        $totalHours = (int) $subject->lecture_hours + (int) $subject->laboratory_hours;
+
+        if ($totalHours <= 0) {
+            return $meetings;
+        }
+
+        $maxContinuousHours = (float) config('scheduling.meeting_patterns.max_continuous_hours', 3);
+
+        if ($maxContinuousHours <= 0) {
+            return $meetings;
+        }
+
+        while ($meetings < $max && ($totalHours / $meetings) > $maxContinuousHours) {
+            $meetings++;
+        }
+
+        return $meetings;
     }
 
     /**

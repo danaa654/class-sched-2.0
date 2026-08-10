@@ -15,9 +15,16 @@ class AuthenticatedSessionController extends Controller
     /**
      * Display the login view.
      */
-    public function create(): Response
+    public function create(Request $request): Response
     {
-        return Inertia::render('Auth/Login');
+        // Same reasoning as PasswordResetLinkController::create() — the
+        // app's shared Inertia props don't forward a generic "status"
+        // session value, so we pass it explicitly. This is what shows
+        // the "Your password has been reset." banner after
+        // NewPasswordController redirects here.
+        return Inertia::render('Auth/Login', [
+            'status' => $request->session()->get('status'),
+        ]);
     }
 
     /**

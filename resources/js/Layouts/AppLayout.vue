@@ -2,6 +2,11 @@
 import { Link, usePage } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
 import Button from 'primevue/button';
+import ThemeToggle from '@/Components/ThemeToggle.vue';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const page = usePage();
 const user = computed(() => page.props.auth?.user);
@@ -80,7 +85,7 @@ const isActive = (routeName) => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-[#F8FAFC]">
+    <div class="min-h-screen transition-colors duration-300" :class="isDark ? 'bg-[#0B1120]' : 'bg-[#F8FAFC]'">
         <!-- Top Navigation Bar -->
         <header class="h-16 w-full bg-[#121358] shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
             <div class="flex items-center gap-4">
@@ -91,6 +96,7 @@ const isActive = (routeName) => {
                 >
                     ☰
                 </button>
+                <img src="/logo.png" alt="" class="h-7 w-7" />
                 <span class="text-xl font-bold tracking-tight text-white">CLASSLY</span>
             </div>
 
@@ -103,6 +109,7 @@ const isActive = (routeName) => {
                     <i class="pi pi-calendar text-[11px]"></i>
                     {{ activeAcademicTermLabel }}
                 </span>
+                <ThemeToggle />
                 <span v-if="user" class="text-sm text-slate-300">
                     {{ user.name }}
                 </span>
@@ -245,8 +252,8 @@ const isActive = (routeName) => {
             class="pt-16 transition-all duration-200"
             :class="sidebarOpen ? 'pl-[260px]' : 'pl-0'"
         >
-            <div class="p-8">
-                <slot />
+            <div class="p-8" :class="isDark ? 'text-slate-100' : ''">
+                <slot :is-dark="isDark" />
             </div>
         </main>
     </div>

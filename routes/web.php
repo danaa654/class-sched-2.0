@@ -4,6 +4,8 @@ use App\Http\Controllers\AcademicCalendarController;
 use App\Http\Controllers\AcademicStructureController;
 use App\Http\Controllers\AcademicTermController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\NewPasswordController;
+use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\CollegeController;
 use App\Http\Controllers\CurriculumController;
 use App\Http\Controllers\CurriculumSubjectController;
@@ -30,11 +32,19 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', [WelcomeController::class, 'index'])->name('welcome');
 
 // Guest-only authentication routes.
-// Registration, password reset, and email verification are intentionally
-// NOT included — accounts are created only by the Administrator.
+// Registration and email verification are intentionally NOT included —
+// accounts are created only by the Administrator. Password reset IS
+// included so users who forget their password can recover access
+// without needing an Administrator to reset it for them.
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store']);
+
+    Route::get('/forgot-password', [PasswordResetLinkController::class, 'create'])->name('password.request');
+    Route::post('/forgot-password', [PasswordResetLinkController::class, 'store'])->name('password.email');
+
+    Route::get('/reset-password/{token}', [NewPasswordController::class, 'create'])->name('password.reset');
+    Route::post('/reset-password', [NewPasswordController::class, 'store'])->name('password.store');
 });
 
 // Authenticated routes.
@@ -130,6 +140,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/scheduling/section-subjects/{section}/{subject}/room-options', [SectionSubjectController::class, 'roomOptions'])->name('scheduling.section-subjects.room-options');
     Route::post('/scheduling/section-subjects/{section}/{subject}/room-override', [SectionSubjectController::class, 'overrideRoom'])->name('scheduling.section-subjects.room-override');
     Route::post('/scheduling/section-subjects/{section}/{subject}/time-override', [SectionSubjectController::class, 'overrideTime'])->name('scheduling.section-subjects.time-override');
+    // Smart Day & Time Recommendation modal — ranked, conflict-free
+    // alternatives when a manually-picked Day/Time fails validation.
+    // Reuses RecommendationService::recommendTimes() (the exact same
+    // engine Auto Generate itself uses), never a separate simplified
+    // algorithm — see SectionSubjectController::timeRecommendations().
+    Route::get('/scheduling/section-subjects/{section}/{subject}/time-recommendations', [SectionSubjectController::class, 'timeRecommendations'])->name('scheduling.section-subjects.time-recommendations');
 
     // INTELLIGENT IRREGULAR SECTION SCHEDULING — merge recommendation
     // modal + Administrator override actions (see IrregularSectionMergeService).

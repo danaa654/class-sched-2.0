@@ -623,6 +623,115 @@ class SectionSubjectController extends Controller
     }
 
     /**
+     * Smart Day & Time Recommendation modal — "Find Recommended Day & Time".
+     *
+     * Backs the TimeRecommendationSelector's recovery flow: when the
+     * Registrar's manually-picked Day/Time fails validation (lunch
+     * break overlap, Faculty/Room/Section conflict, etc.), this
+     * returns a ranked list of ACTUALLY SCHEDULABLE alternatives
+     * instead of leaving the Registrar to guess-and-check.
+     *
+     * Deliberately calls RecommendationService::recommendTimes() —
+     * the exact same candidate-generation/scoring/ranking engine
+     * Auto Generate itself uses (Faculty/Room/Section conflict
+     * checks via ScheduleConflictService, lunch break via
+     * SchoolYear::overlapsLunchBreak(), meeting-count/day-pattern
+     * rules via MeetingPatternService, Section Daily Load
+     * Optimization scoring) — never a separate, simplified
+     * recommendation algorithm that Auto Generate itself would
+     * reject. Faculty/Room stay exactly as already assigned on this
+     * row; only Days/Start/End are searched.
+     *
+     * Optional `preferred_days` query param (comma-separated Day
+     * tokens, e.g. "Sat") is presentation-only — it never changes
+     * which candidates are valid or how they're scored, it just lets
+     * the frontend split the ranked list into "<Day> alternatives"
+     * vs "Other recommended days" the way the spec's modal groups
+     * them (see item 9, "Support Keep Current Day").
+     */
+    public function timeRecommendations(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $subject->loadMissing(['subject', 'section.major.department']);
+
+        $preferredDays = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) $request->query('preferred_days', ''))
+        )));
+
+        // Days to never re-offer as a "new" single-day option — the
+        // row's OTHER already-selected meetings (passed by the
+        // frontend as whatever the editor currently holds, minus the
+        // one being replaced), so a Tue/Thu subject being fixed on
+        // Thursday never gets handed "Tuesday" back as if it were new.
+        $excludeDays = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) $request->query('exclude_days', ''))
+        )));
+
+        // Duration of the specific occurrence being replaced (the
+        // Registrar's current Start/End in the editor), so single-day
+        // alternatives keep the same session length instead of
+        // silently changing it. Falls back to the Subject's usual
+        // per-meeting length inside recommendSingleDaySlots() when omitted.
+        $sessionMinutes = $request->query('session_minutes');
+        $sessionMinutes = is_numeric($sessionMinutes) ? (int) $sessionMinutes : null;
+
+        $multiDay = $this->recommendationService->recommendTimes(
+            $subject->subject,
+            $subject->section,
+            $subject->faculty_id,
+            $subject->room_id,
+            $subject
+        );
+
+        $singleDay = $this->recommendationService->recommendSingleDaySlots(
+            $subject->subject,
+            $subject->section,
+            $subject->faculty_id,
+            $subject->room_id,
+            $subject,
+            $sessionMinutes,
+            $excludeDays
+        );
+
+        $recommendations = array_merge($multiDay['recommendations'], $singleDay['recommendations']);
+
+        foreach ($recommendations as &$candidate) {
+            $candidate['matches_preferred_day'] = ! empty($preferredDays)
+                && empty(array_diff($candidate['days'], $preferredDays))
+                && empty(array_diff($preferredDays, $candidate['days']));
+        }
+        unset($candidate);
+
+        // Best-first within each group: preferred-day matches surface
+        // first (still ranked by score among themselves), everything
+        // else follows — the ranking itself is untouched. Single-day
+        // and multi-day candidates are merged into one ranked pool
+        // rather than kept as separate lists, since they're scored by
+        // the exact same buildTimeCandidate() logic and are directly
+        // comparable.
+        usort($recommendations, function (array $a, array $b) {
+            return (int) $b['matches_preferred_day'] <=> (int) $a['matches_preferred_day']
+                ?: $b['score'] <=> $a['score'];
+        });
+
+        $message = $multiDay['message'] ?? $singleDay['message'];
+
+        return response()->json([
+            'recommendations' => $recommendations,
+            'message' => empty($recommendations) ? $message : null,
+            'preferred_days' => $preferredDays,
+            'current' => [
+                'days' => array_values(array_filter(explode(',', (string) $subject->days))),
+                'start_time' => $subject->start_time,
+                'end_time' => $subject->end_time,
+            ],
+        ]);
+    }
+
+    /**
      * "⚡ Auto Generate Schedule" (Prompt 8.9).
      *
      * Runs AutoScheduleService for every currently unscheduled subject

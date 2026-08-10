@@ -22,7 +22,22 @@ return [
         | the future. Leave at 2 to keep the "no 3-meetings/week unless
         | explicitly enabled" rule in force.
         */
-        'max_meetings_per_week' => 2,
+        'max_meetings_per_week' => 3,
+
+        /*
+        |----------------------------------------------------------------
+        | Max continuous hours per meeting
+        |----------------------------------------------------------------
+        | Used to make meeting frequency HOUR-AWARE: if a Subject's
+        | total weekly hours (lecture + laboratory) wouldn't fit in a
+        | single meeting of this length, MeetingPatternService bumps
+        | the meeting count up (capped by max_meetings_per_week above)
+        | instead of proposing one unrealistically long block. E.g. a
+        | 4-hour/week Capstone (Type "special", 1x/week default)
+        | becomes 2 meetings of 2 hours each rather than one 4-hour
+        | block. Set to 0 to disable this bump entirely.
+        */
+        'max_continuous_hours' => 3,
 
         /*
         |----------------------------------------------------------------
