@@ -318,6 +318,7 @@ const scheduleLoading = ref(false);
 const scheduleRoom = ref(null);
 const scheduleSummary = ref(null);
 const scheduleTimetable = ref({});
+const roomRecommendedSubjectsRef = ref(null);
 
 const openSchedule = async (room) => {
     scheduleVisible.value = true;
@@ -846,6 +847,7 @@ const closeSchedule = () => {
             :style="{ width: '900px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :contentStyle="{ maxHeight: '70vh', overflowY: 'auto' }"
             @hide="closeSchedule"
         >
             <div v-if="scheduleLoading" class="py-16 text-center text-slate-400">
@@ -872,6 +874,19 @@ const closeSchedule = () => {
                         <p class="text-xs text-slate-400">Program</p>
                         <p class="font-medium text-slate-700">{{ scheduleRoom.department?.name ?? 'All Programs' }}</p>
                     </div>
+                </div>
+
+                <!-- Quick action — jumps straight to Add Subject Recommendation
+                     (the full panel is further down, near "Recommended
+                     Subjects"), so it's reachable without scrolling. -->
+                <div class="flex justify-end">
+                    <Button
+                        label="Add Subject Recommendation"
+                        icon="pi pi-plus"
+                        severity="success"
+                        size="small"
+                        @click="roomRecommendedSubjectsRef?.openAdd()"
+                    />
                 </div>
 
                 <!-- Utilization -->
@@ -939,7 +954,7 @@ const closeSchedule = () => {
 
                 <!-- Recommended Subjects -->
                 <div class="rounded-xl border border-slate-100 p-4">
-                    <RoomRecommendedSubjects :room="scheduleRoom" />
+                    <RoomRecommendedSubjects ref="roomRecommendedSubjectsRef" :room="scheduleRoom" />
                 </div>
             </div>
 

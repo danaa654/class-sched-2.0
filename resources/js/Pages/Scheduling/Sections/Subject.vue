@@ -171,7 +171,10 @@ const statusSeverity = (status) => {
 /* come back without a full Inertia page reload.                       */
 /* ------------------------------------------------------------------ */
 
-const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+};
 
 const submit = async (row, field, payload) => {
     const state = stateFor(row.id);
@@ -187,7 +190,7 @@ const submit = async (row, field, payload) => {
                 headers: {
                     'Content-Type': 'application/json',
                     Accept: 'application/json',
-                    'X-CSRF-TOKEN': csrfToken(),
+                    'X-XSRF-TOKEN': csrfToken(),
                 },
                 body: JSON.stringify(payload),
             },

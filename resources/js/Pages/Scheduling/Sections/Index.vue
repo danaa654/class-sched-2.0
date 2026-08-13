@@ -129,7 +129,13 @@ const sectionTypeOptions = computed(() =>
 );
 
 const addSectionVisible = ref(false);
+const editSectionVisible = ref(false);
 const editingSection = ref(null);
+
+/* ------------------------------------------------------------------ */
+/* Edit Section (single section — Section Code/Name stay editable      */
+/* here so a generated name can still be fixed later)                  */
+/* ------------------------------------------------------------------ */
 
 const sectionForm = useForm({
     section_code: '',
@@ -145,7 +151,8 @@ const sectionForm = useForm({
     remarks: '',
 });
 
-// Only show curriculums that belong to the selected Major.
+// Only show curriculums (Prospectuses) that belong to the selected
+// College / Program.
 const filteredCurriculums = computed(() => {
     if (!sectionForm.major_id) {
         return [];
@@ -156,8 +163,8 @@ const filteredCurriculums = computed(() => {
         .map((curriculum) => ({ label: `${curriculum.code} — ${curriculum.name}`, value: curriculum.id }));
 });
 
-// If the Major changes and the currently selected Curriculum no longer
-// belongs to it, clear the Curriculum selection.
+// If the Program changes and the currently selected Prospectus no
+// longer belongs to it, clear the Prospectus selection.
 watch(
     () => sectionForm.major_id,
     () => {
@@ -170,17 +177,10 @@ watch(
     },
 );
 
-const openAdd = () => {
-    editingSection.value = null;
-    sectionForm.reset();
-    sectionForm.clearErrors();
-    addSectionVisible.value = true;
-};
-
-// Edit opens this same dialog pre-filled with the section's current
-// info, so a typo (section code, name, year level, etc.) can be fixed
-// right here without leaving the list. Assigning subjects/faculty/
-// rooms still only happens on the Section Subjects workspace.
+// Edit opens a dialog pre-filled with the section's current info, so a
+// typo (section code, name, year level, etc.) can be fixed right here
+// without leaving the list. Assigning subjects/faculty/rooms still
+// only happens on the Section Subjects workspace.
 const openEdit = (section) => {
     editingSection.value = section;
     sectionForm.clearErrors();
@@ -195,11 +195,11 @@ const openEdit = (section) => {
     sectionForm.estimated_students = section.estimated_students;
     sectionForm.status = section.status;
     sectionForm.remarks = section.remarks;
-    addSectionVisible.value = true;
+    editSectionVisible.value = true;
 };
 
-const closeAddSection = () => {
-    addSectionVisible.value = false;
+const closeEditSection = () => {
+    editSectionVisible.value = false;
     editingSection.value = null;
     sectionForm.reset();
     sectionForm.clearErrors();
@@ -210,20 +210,17 @@ const onSaveSection = () => {
     // two requests before the first one lands — both would pass the
     // "unique" validation check and the second insert would then crash
     // on the database's unique constraint instead of failing validation.
-    if (sectionForm.processing) {
+    if (sectionForm.processing || !editingSection.value) {
         return;
     }
 
-    const options = {
+    sectionForm.put(route('scheduling.sections.update', editingSection.value.id), {
         preserveScroll: true,
         onSuccess: () => {
-            const wasEditing = !!editingSection.value;
-            closeAddSection();
+            closeEditSection();
             Swal.fire({
-                title: wasEditing ? 'Section updated' : 'Section saved',
-                text: wasEditing
-                    ? 'The section was updated successfully.'
-                    : 'The section was created successfully.',
+                title: 'Section updated',
+                text: 'The section was updated successfully.',
                 icon: 'success',
                 confirmButtonColor: '#16A34A',
             });
@@ -237,19 +234,348 @@ const onSaveSection = () => {
                 life: 3000,
             });
         },
-    };
+    });
+};
 
-    if (editingSection.value) {
-        sectionForm.put(route('scheduling.sections.update', editingSection.value.id), options);
-    } else {
-        sectionForm.post(route('scheduling.sections.store'), options);
+/* ------------------------------------------------------------------ */
+/* Add Section — batch generation flow                                 */
+/* (Academic Year / Semester / Program / Year Level / Prospectus +     */
+/* Section Prefix + Number of Blocks → BSIT-1A, BSIT-1B, ...)          */
+/* ------------------------------------------------------------------ */
+
+const batchForm = useForm({
+    academic_year: null,
+    semester: null,
+    section_type: 'Regular',
+    major_id: null,
+    year_level: null,
+    curriculum_id: null,
+    section_prefix: '',
+    number_of_blocks: 1,
+    estimated_students_per_block: 35,
+    status: 'Active',
+    remarks: '',
+});
+
+// Prospectuses (Curriculum Items) for the selected College / Program.
+const filteredProspectuses = computed(() => {
+    if (!batchForm.major_id) {
+        return [];
     }
+
+    return props.curriculums
+        .filter((curriculum) => curriculum.major_id === batchForm.major_id)
+        .map((curriculum) => ({ label: `${curriculum.code} — ${curriculum.name}`, value: curriculum.id }));
+});
+
+watch(
+    () => batchForm.major_id,
+    () => {
+        const stillValid = filteredProspectuses.value.some(
+            (curriculum) => curriculum.value === batchForm.curriculum_id,
+        );
+        if (!stillValid) {
+            batchForm.curriculum_id = null;
+        }
+    },
+);
+
+// Irregular sections don't necessarily follow one Prospectus — its
+// subjects are picked manually later (Manual Selection), so Prospectus
+// is optional/reference-only for them. Clear it when switching to
+// Irregular so a stale selection doesn't linger unseen; the field
+// stays visible (disabled+optional) rather than disappearing, since
+// the admin may still want to reference one.
+watch(
+    () => batchForm.section_type,
+    (type) => {
+        if (type === 'Irregular') {
+            batchForm.curriculum_id = null;
+        }
+    },
+);
+
+/**
+ * Section Prefix auto-suggestion (College/Program + Year Level →
+ * "BSIT-1", "BSIT-2", ...). Only overwrites the prefix while the admin
+ * hasn't typed their own — tracked via `prefixManuallyEdited` so a
+ * Program/Year Level change never silently clobbers a custom prefix.
+ */
+const prefixManuallyEdited = ref(false);
+
+const yearLevelOrdinal = (yearLevel) => {
+    const index = props.yearLevels.indexOf(yearLevel);
+    return index === -1 ? null : index + 1;
+};
+
+const suggestedPrefix = computed(() => {
+    const major = props.activeMajors.find((m) => m.id === batchForm.major_id);
+    const ordinal = yearLevelOrdinal(batchForm.year_level);
+
+    if (!major || !ordinal) {
+        return '';
+    }
+
+    return `${major.code}-${ordinal}`;
+});
+
+watch(suggestedPrefix, (suggestion) => {
+    if (suggestion && !prefixManuallyEdited.value) {
+        batchForm.section_prefix = suggestion;
+    }
+});
+
+const onPrefixInput = () => {
+    // Once the admin types something that no longer matches the
+    // auto-suggestion, stop overwriting it on further Program/Year
+    // Level changes.
+    prefixManuallyEdited.value = batchForm.section_prefix !== suggestedPrefix.value;
+};
+
+// The live "Sections to be created" preview — fetched from the server
+// (previewBatch) so the next-available-letter logic always matches
+// what save will actually do, rather than duplicating that logic in
+// JS and risking it drifting out of sync.
+const previewSections = ref([]); // [{ section_code, estimated_students }]
+const previewLoading = ref(false);
+const previewError = ref('');
+const nameErrors = ref({}); // index -> message, from server validation on save
+
+const canPreview = computed(
+    () =>
+        !!batchForm.academic_year &&
+        !!batchForm.semester &&
+        !!batchForm.major_id &&
+        !!batchForm.year_level &&
+        (batchForm.section_type !== 'Regular' || !!batchForm.curriculum_id) &&
+        !!batchForm.section_prefix &&
+        batchForm.number_of_blocks >= 1 &&
+        batchForm.estimated_students_per_block >= 1,
+);
+
+let previewDebounce = null;
+
+// Reads Laravel's XSRF-TOKEN cookie (URL-decoded) — same pattern as
+// TimeRecommendationSelector.vue / RoomRecommendationSelector.vue /
+// FacultyRecommendationSelector.vue. Laravel refreshes this cookie on
+// every response, so it self-heals as long as the browser has made
+// any request recently — unlike the static <meta name="csrf-token">
+// value below, which is baked into the page at the last full load and
+// goes stale (causing a 419 "CSRF token mismatch") after the session
+// changes underneath it, e.g. a `migrate:fresh` wiping the sessions
+// table, or simply an idle tab outliving the session lifetime.
+const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+};
+
+const refreshPreview = () => {
+    clearTimeout(previewDebounce);
+
+    if (!canPreview.value) {
+        previewSections.value = [];
+        previewError.value = '';
+        return;
+    }
+
+    previewDebounce = setTimeout(async () => {
+        previewLoading.value = true;
+        previewError.value = '';
+        try {
+            const response = await fetch(route('scheduling.sections.preview-batch'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify({
+                    major_id: batchForm.major_id,
+                    section_type: batchForm.section_type,
+                    curriculum_id: batchForm.curriculum_id,
+                    year_level: batchForm.year_level,
+                    academic_year: batchForm.academic_year,
+                    semester: batchForm.semester,
+                    section_prefix: batchForm.section_prefix,
+                    number_of_blocks: batchForm.number_of_blocks,
+                    estimated_students_per_block: batchForm.estimated_students_per_block,
+                }),
+            });
+
+            if (!response.ok) {
+                // Surface the server's actual validation message instead of
+                // a generic one — a 422 from PreviewSectionBatchRequest
+                // carries a specific reason (e.g. "The selected prospectus
+                // does not belong to the selected program"), and hiding it
+                // makes the real cause impossible to see from the UI.
+                let serverMessage = '';
+                try {
+                    const errorBody = await response.json();
+                    const firstFieldErrors = errorBody?.errors ? Object.values(errorBody.errors)[0] : null;
+                    serverMessage = (Array.isArray(firstFieldErrors) ? firstFieldErrors[0] : null)
+                        ?? errorBody?.message
+                        ?? '';
+                } catch (parseError) {
+                    // Response wasn't JSON (e.g. a 500 HTML error page) —
+                    // fall through to the generic message below.
+                }
+
+                previewError.value = serverMessage
+                    ? `Could not generate a preview — ${serverMessage}`
+                    : `Could not generate a preview — check the fields above. (HTTP ${response.status})`;
+                previewSections.value = [];
+                return;
+            }
+
+            const data = await response.json();
+            previewSections.value = data.sections ?? [];
+            nameErrors.value = {};
+        } catch (e) {
+            previewError.value = 'Could not reach the server to generate a preview.';
+        } finally {
+            previewLoading.value = false;
+        }
+    }, 350);
+};
+
+watch(
+    () => [
+        batchForm.academic_year,
+        batchForm.semester,
+        batchForm.section_type,
+        batchForm.major_id,
+        batchForm.curriculum_id,
+        batchForm.year_level,
+        batchForm.section_prefix,
+        batchForm.number_of_blocks,
+        batchForm.estimated_students_per_block,
+    ],
+    refreshPreview,
+);
+
+// Detect duplicate names the admin typed in manually within the
+// preview list itself (server also re-checks this, and against the
+// database, on save).
+const previewDuplicates = computed(() => {
+    const seen = new Map();
+    previewSections.value.forEach((row, index) => {
+        const key = (row.section_code || '').trim().toUpperCase();
+        if (!key) return;
+        if (seen.has(key)) {
+            seen.get(key).push(index);
+        } else {
+            seen.set(key, [index]);
+        }
+    });
+
+    const dupIndexes = new Set();
+    for (const indexes of seen.values()) {
+        if (indexes.length > 1) {
+            indexes.forEach((i) => dupIndexes.add(i));
+        }
+    }
+    return dupIndexes;
+});
+
+const hasBlankNames = computed(() => previewSections.value.some((row) => !(row.section_code || '').trim()));
+
+const canSaveBatch = computed(
+    () =>
+        previewSections.value.length > 0 &&
+        previewDuplicates.value.size === 0 &&
+        !hasBlankNames.value &&
+        !previewLoading.value,
+);
+
+const openAdd = () => {
+    editingSection.value = null;
+    batchForm.reset();
+    batchForm.clearErrors();
+    prefixManuallyEdited.value = false;
+    previewSections.value = [];
+    previewError.value = '';
+    nameErrors.value = {};
+    addSectionVisible.value = true;
+};
+
+const closeAddSection = () => {
+    addSectionVisible.value = false;
+    batchForm.reset();
+    batchForm.clearErrors();
+    prefixManuallyEdited.value = false;
+    previewSections.value = [];
+    nameErrors.value = {};
+};
+
+const onSaveBatch = () => {
+    if (batchForm.processing || !canSaveBatch.value) {
+        return;
+    }
+
+    nameErrors.value = {};
+
+    batchForm
+        .transform((data) => ({
+            major_id: data.major_id,
+            section_type: data.section_type,
+            curriculum_id: data.curriculum_id,
+            year_level: data.year_level,
+            academic_year: data.academic_year,
+            semester: data.semester,
+            status: data.status,
+            remarks: data.remarks,
+            sections: previewSections.value.map((row) => ({
+                section_code: (row.section_code || '').trim(),
+                estimated_students: row.estimated_students,
+            })),
+        }))
+        .post(route('scheduling.sections.store-batch'), {
+            preserveScroll: true,
+            onSuccess: () => {
+                const count = previewSections.value.length;
+                closeAddSection();
+                Swal.fire({
+                    title: count === 1 ? 'Section saved' : 'Sections saved',
+                    text:
+                        count === 1
+                            ? 'The section was created successfully.'
+                            : `${count} sections were created successfully.`,
+                    icon: 'success',
+                    confirmButtonColor: '#16A34A',
+                });
+                onRefresh();
+            },
+            onError: (errors) => {
+                // Map "sections.0.section_code" style errors back onto
+                // the matching preview row.
+                const mapped = {};
+                Object.entries(errors).forEach(([key, message]) => {
+                    const match = key.match(/^sections\.(\d+)\.section_code$/);
+                    if (match) {
+                        mapped[match[1]] = message;
+                    }
+                });
+                nameErrors.value = mapped;
+
+
+                toast.add({
+                    severity: 'warn',
+                    summary: 'Check the sections list',
+                    detail: 'Please fix the highlighted section names and try again.',
+                    life: 3500,
+                });
+            },
+        });
+};
+
+const removePreviewRow = (index) => {
+    previewSections.value.splice(index, 1);
 };
 
 const onDeleteSection = (section) => {
     Swal.fire({
         title: 'Delete this section?',
-        text: `${section.section_code} — ${section.section_name} will be permanently deleted.`,
+        text: `${section.section_name} will be permanently deleted.`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
@@ -348,7 +674,6 @@ const onDeleteSection = (section) => {
                             </div>
                         </template>
 
-                        <Column field="section_code" header="Section Code" style="width: 10rem" />
                         <Column field="section_name" header="Section Name" style="width: 10rem" />
                         <Column header="Type" style="width: 7rem">
                             <template #body="{ data }">
@@ -358,12 +683,12 @@ const onDeleteSection = (section) => {
                                 />
                             </template>
                         </Column>
-                        <Column header="Major" style="width: 10rem">
+                        <Column header="Program" style="width: 10rem">
                             <template #body="{ data }">
                                 {{ data.major?.name || '—' }}
                             </template>
                         </Column>
-                        <Column header="Curriculum" style="width: 12rem">
+                        <Column header="Prospectus" style="width: 12rem">
                             <template #body="{ data }">
                                 {{ data.curriculum?.code || '—' }}
                             </template>
@@ -453,49 +778,363 @@ const onDeleteSection = (section) => {
             </Card>
         </div>
 
-        <!-- Add Section Dialog -->
+        <!-- Add Section Dialog (batch generation flow) -->
         <Dialog
             v-model:visible="addSectionVisible"
             modal
-            :header="editingSection ? 'Edit Section' : 'Add Section'"
-            :style="{ width: '700px' }"
+            header="Add Section"
+            :style="{ width: '760px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
             :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeAddSection"
         >
+            <form class="flex flex-col gap-5" @submit.prevent="onSaveBatch">
+                <!-- Academic Information -->
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                        Academic Information
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                        <div class="flex flex-col gap-1">
+                            <label for="batch_academic_year" class="text-sm font-medium text-slate-700">
+                                Academic Year <span class="text-red-500">*</span>
+                            </label>
+                            <Select
+                                id="batch_academic_year"
+                                v-model="batchForm.academic_year"
+                                :options="academicYearOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="e.g. 2026-2027"
+                                :invalid="!!batchForm.errors.academic_year"
+                                class="w-full"
+                            />
+                            <small v-if="batchForm.errors.academic_year" class="text-red-500">
+                                {{ batchForm.errors.academic_year }}
+                            </small>
+                        </div>
+
+                        <div class="flex flex-col gap-1">
+                            <label for="batch_semester" class="text-sm font-medium text-slate-700">
+                                Semester <span class="text-red-500">*</span>
+                            </label>
+                            <Select
+                                id="batch_semester"
+                                v-model="batchForm.semester"
+                                :options="semesterSelectOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="e.g. 1st Semester"
+                                :invalid="!!batchForm.errors.semester"
+                                class="w-full"
+                            />
+                            <small v-if="batchForm.errors.semester" class="text-red-500">
+                                {{ batchForm.errors.semester }}
+                            </small>
+                        </div>
+
+                        <div class="flex flex-col gap-1 sm:col-span-2">
+                            <label for="batch_section_type" class="text-sm font-medium text-slate-700">
+                                Section Type <span class="text-red-500">*</span>
+                            </label>
+                            <Select
+                                id="batch_section_type"
+                                v-model="batchForm.section_type"
+                                :options="sectionTypeOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="Select section type"
+                                :invalid="!!batchForm.errors.section_type"
+                                class="w-full"
+                            />
+                            <small v-if="batchForm.errors.section_type" class="text-red-500">
+                                {{ batchForm.errors.section_type }}
+                            </small>
+                            <p v-else class="text-xs text-slate-400">
+                                Irregular sections have subjects scheduled one at a time — Auto Generate will try to
+                                merge each one into a compatible Regular section's class before creating an
+                                independent schedule.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Program Information -->
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                        Program Information
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                        <div class="flex flex-col gap-1 sm:col-span-2">
+                            <label for="batch_major_id" class="text-sm font-medium text-slate-700">
+                                College / Program <span class="text-red-500">*</span>
+                            </label>
+                            <Select
+                                id="batch_major_id"
+                                v-model="batchForm.major_id"
+                                :options="activeMajors"
+                                optionLabel="name"
+                                optionValue="id"
+                                filter
+                                placeholder="e.g. Bachelor of Science in Information Technology (BSIT)"
+                                :invalid="!!batchForm.errors.major_id"
+                                class="w-full"
+                            />
+                            <small v-if="batchForm.errors.major_id" class="text-red-500">
+                                {{ batchForm.errors.major_id }}
+                            </small>
+                        </div>
+
+                        <div class="flex flex-col gap-1">
+                            <label for="batch_year_level" class="text-sm font-medium text-slate-700">
+                                Year Level <span class="text-red-500">*</span>
+                            </label>
+                            <Select
+                                id="batch_year_level"
+                                v-model="batchForm.year_level"
+                                :options="yearLevelOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="e.g. 1st Year"
+                                :invalid="!!batchForm.errors.year_level"
+                                class="w-full"
+                            />
+                            <small v-if="batchForm.errors.year_level" class="text-red-500">
+                                {{ batchForm.errors.year_level }}
+                            </small>
+                        </div>
+
+                        <div class="flex flex-col gap-1">
+                            <label for="batch_curriculum_id" class="text-sm font-medium text-slate-700">
+                                Prospectus
+                                <span v-if="batchForm.section_type === 'Regular'" class="text-red-500">*</span>
+                                <span v-else class="text-slate-400 font-normal">(optional / reference)</span>
+                            </label>
+                            <Select
+                                id="batch_curriculum_id"
+                                v-model="batchForm.curriculum_id"
+                                :options="filteredProspectuses"
+                                optionLabel="label"
+                                optionValue="value"
+                                filter
+                                showClear
+                                :disabled="!batchForm.major_id"
+                                :placeholder="batchForm.major_id ? 'Select a prospectus' : 'Select a program first'"
+                                :invalid="!!batchForm.errors.curriculum_id"
+                                class="w-full"
+                            />
+                            <small v-if="batchForm.errors.curriculum_id" class="text-red-500">
+                                {{ batchForm.errors.curriculum_id }}
+                            </small>
+                            <p v-else-if="batchForm.section_type === 'Irregular'" class="text-xs text-slate-400">
+                                Irregular sections don't have to follow one Prospectus — subjects are added manually
+                                on the section's Manage Subjects page.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section Generation -->
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                        Section Generation
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-4">
+                        <div class="flex flex-col gap-1">
+                            <label for="batch_prefix" class="text-sm font-medium text-slate-700">
+                                Section Prefix <span class="text-red-500">*</span>
+                            </label>
+                            <InputText
+                                id="batch_prefix"
+                                v-model="batchForm.section_prefix"
+                                placeholder="e.g. BSIT-1"
+                                :invalid="!!batchForm.errors.section_prefix"
+                                class="w-full"
+                                @input="onPrefixInput"
+                            />
+                            <small v-if="batchForm.errors.section_prefix" class="text-red-500">
+                                {{ batchForm.errors.section_prefix }}
+                            </small>
+                            <small v-else class="text-slate-400">
+                                Auto-suggested from Program + Year Level — edit freely if your school uses a
+                                different convention.
+                            </small>
+                        </div>
+
+                        <div class="flex flex-col gap-1">
+                            <label for="batch_blocks" class="text-sm font-medium text-slate-700">
+                                Number of Blocks <span class="text-red-500">*</span>
+                            </label>
+                            <InputNumber
+                                id="batch_blocks"
+                                v-model="batchForm.number_of_blocks"
+                                :min="1"
+                                :max="100"
+                                showButtons
+                                buttonLayout="horizontal"
+                                :invalid="!!batchForm.errors.number_of_blocks"
+                                class="w-full"
+                                inputClass="w-full"
+                            />
+                            <small v-if="batchForm.errors.number_of_blocks" class="text-red-500">
+                                {{ batchForm.errors.number_of_blocks }}
+                            </small>
+                        </div>
+
+                        <div class="flex flex-col gap-1">
+                            <label for="batch_students" class="text-sm font-medium text-slate-700">
+                                Est. Students per Block <span class="text-red-500">*</span>
+                            </label>
+                            <InputNumber
+                                id="batch_students"
+                                v-model="batchForm.estimated_students_per_block"
+                                :min="1"
+                                showButtons
+                                buttonLayout="horizontal"
+                                :invalid="!!batchForm.errors.estimated_students_per_block"
+                                class="w-full"
+                                inputClass="w-full"
+                            />
+                            <small v-if="batchForm.errors.estimated_students_per_block" class="text-red-500">
+                                {{ batchForm.errors.estimated_students_per_block }}
+                            </small>
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-2">
+                        Classly automatically generates the next available section letters (A, B, C, ...), skipping
+                        any that already exist for this Program, Academic Year and Semester. You can edit the
+                        generated names below before saving.
+                    </p>
+                </div>
+
+                <!-- Live Preview -->
+                <div v-if="batchForm.section_prefix || previewSections.length" class="rounded-xl border border-slate-200 overflow-hidden">
+                    <div class="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between">
+                        <span class="text-sm font-semibold text-slate-700">Sections to be created</span>
+                        <i v-if="previewLoading" class="pi pi-spin pi-spinner text-slate-400"></i>
+                    </div>
+
+                    <p v-if="previewError" class="text-sm text-red-500 px-4 py-3">{{ previewError }}</p>
+
+                    <p v-else-if="!canPreview" class="text-sm text-slate-400 px-4 py-3">
+                        Fill in the fields above to preview the sections that will be created.
+                    </p>
+
+                    <p v-else-if="!previewSections.length && !previewLoading" class="text-sm text-slate-400 px-4 py-3">
+                        No sections to preview yet.
+                    </p>
+
+                    <div v-else class="divide-y divide-slate-100">
+                        <div
+                            v-for="(row, index) in previewSections"
+                            :key="index"
+                            class="flex items-center gap-3 px-4 py-2"
+                        >
+                            <div class="flex-1 flex flex-col gap-1">
+                                <InputText
+                                    v-model="row.section_code"
+                                    class="w-full"
+                                    :invalid="previewDuplicates.has(index) || !!nameErrors[index] || !row.section_code?.trim()"
+                                />
+                                <small v-if="nameErrors[index]" class="text-red-500">{{ nameErrors[index] }}</small>
+                                <small v-else-if="previewDuplicates.has(index)" class="text-red-500">
+                                    This name is used more than once below.
+                                </small>
+                                <small v-else-if="!row.section_code?.trim()" class="text-red-500">
+                                    Section name is required.
+                                </small>
+                            </div>
+                            <InputNumber
+                                v-model="row.estimated_students"
+                                :min="1"
+                                class="w-32"
+                                inputClass="w-full"
+                                suffix=" students"
+                            />
+                            <Button
+                                icon="pi pi-times"
+                                text
+                                rounded
+                                severity="danger"
+                                size="small"
+                                aria-label="Remove"
+                                @click="removePreviewRow(index)"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Other -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                    <div class="flex flex-col gap-1">
+                        <label for="batch_status" class="text-sm font-medium text-slate-700">
+                            Status <span class="text-red-500">*</span>
+                        </label>
+                        <Select
+                            id="batch_status"
+                            v-model="batchForm.status"
+                            :options="statusOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="w-full"
+                        />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label for="batch_remarks" class="text-sm font-medium text-slate-700">Remarks</label>
+                        <Textarea
+                            id="batch_remarks"
+                            v-model="batchForm.remarks"
+                            autoResize
+                            rows="1"
+                            placeholder="Optional notes"
+                            class="w-full"
+                        />
+                    </div>
+                </div>
+
+                <small v-if="batchForm.errors.sections" class="text-red-500">{{ batchForm.errors.sections }}</small>
+            </form>
+
+            <template #footer>
+                <Button label="Cancel" severity="secondary" outlined @click="closeAddSection" />
+                <Button
+                    :label="previewSections.length > 1 ? `Create ${previewSections.length} Sections` : 'Create Section'"
+                    icon="pi pi-check"
+                    severity="success"
+                    :loading="batchForm.processing"
+                    :disabled="batchForm.processing || !canSaveBatch"
+                    @click="onSaveBatch"
+                />
+            </template>
+        </Dialog>
+
+        <!-- Edit Section Dialog -->
+        <Dialog
+            v-model:visible="editSectionVisible"
+            modal
+            header="Edit Section"
+            :style="{ width: '700px' }"
+            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            @hide="closeEditSection"
+        >
             <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveSection">
                 <!-- Section Code -->
                 <div class="flex flex-col gap-1">
                     <label for="section_code" class="text-sm font-medium text-slate-700">
-                        Section Code <span class="text-red-500">*</span>
+                        Section Name <span class="text-red-500">*</span>
                     </label>
                     <InputText
                         id="section_code"
                         v-model="sectionForm.section_code"
-                        placeholder="e.g. BSIT-1A, BSIT-2B"
+                        placeholder="e.g. BSIT-1A"
                         :invalid="!!sectionForm.errors.section_code"
                         class="w-full"
                     />
                     <small v-if="sectionForm.errors.section_code" class="text-red-500">
                         {{ sectionForm.errors.section_code }}
-                    </small>
-                </div>
-
-                <!-- Section Name -->
-                <div class="flex flex-col gap-1">
-                    <label for="section_name" class="text-sm font-medium text-slate-700">
-                        Section Name <span class="text-red-500">*</span>
-                    </label>
-                    <InputText
-                        id="section_name"
-                        v-model="sectionForm.section_name"
-                        placeholder="e.g. Section A"
-                        :invalid="!!sectionForm.errors.section_name"
-                        class="w-full"
-                    />
-                    <small v-if="sectionForm.errors.section_name" class="text-red-500">
-                        {{ sectionForm.errors.section_name }}
                     </small>
                 </div>
 
@@ -526,7 +1165,7 @@ const onDeleteSection = (section) => {
                 <!-- Major -->
                 <div class="flex flex-col gap-1">
                     <label for="major_id" class="text-sm font-medium text-slate-700">
-                        Major <span class="text-red-500">*</span>
+                        College / Program <span class="text-red-500">*</span>
                     </label>
                     <Select
                         id="major_id"
@@ -535,7 +1174,7 @@ const onDeleteSection = (section) => {
                         optionLabel="name"
                         optionValue="id"
                         filter
-                        placeholder="Select a major"
+                        placeholder="Select a program"
                         :invalid="!!sectionForm.errors.major_id"
                         class="w-full"
                     />
@@ -547,7 +1186,7 @@ const onDeleteSection = (section) => {
                 <!-- Curriculum -->
                 <div class="flex flex-col gap-1">
                     <label for="curriculum_id" class="text-sm font-medium text-slate-700">
-                        Curriculum <span class="text-red-500">*</span>
+                        Prospectus <span class="text-red-500">*</span>
                     </label>
                     <Select
                         id="curriculum_id"
@@ -557,7 +1196,7 @@ const onDeleteSection = (section) => {
                         optionValue="value"
                         filter
                         :disabled="!sectionForm.major_id"
-                        :placeholder="sectionForm.major_id ? 'Select a curriculum' : 'Select a major first'"
+                        :placeholder="sectionForm.major_id ? 'Select a prospectus' : 'Select a program first'"
                         :invalid="!!sectionForm.errors.curriculum_id"
                         class="w-full"
                     />
@@ -685,9 +1324,9 @@ const onDeleteSection = (section) => {
             </form>
 
             <template #footer>
-                <Button label="Cancel" severity="secondary" outlined @click="closeAddSection" />
+                <Button label="Cancel" severity="secondary" outlined @click="closeEditSection" />
                 <Button
-                    :label="editingSection ? 'Update Section' : 'Save Section'"
+                    label="Update Section"
                     icon="pi pi-check"
                     severity="success"
                     :loading="sectionForm.processing"

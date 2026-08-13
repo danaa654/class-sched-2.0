@@ -133,6 +133,8 @@ class AutoScheduleService
                 'is_merged' => false,
                 'merged_into_section_subject_id' => null,
                 'merge_recommendation' => null,
+                'capacity_confirmed' => false,
+                'hours_confirmed' => false,
             ]);
     }
 
@@ -360,6 +362,12 @@ class AutoScheduleService
             'status' => 'Draft',
             'is_auto_generated' => true,
             'auto_generated_meta' => $meta,
+            // A fresh Auto Generate assignment has never been reviewed
+            // by the Registrar — any prior Capacity/Hours confirmation
+            // applied to a different Room/Days/Time and must not carry
+            // over silently.
+            'capacity_confirmed' => false,
+            'hours_confirmed' => false,
         ]);
 
         return [

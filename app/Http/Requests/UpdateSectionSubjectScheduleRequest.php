@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\SchoolYear;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -27,6 +28,16 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
         return true;
     }
 
+    private static function windowStart(): string
+    {
+        return SchoolYear::active()?->classStartTime() ?? SchoolYear::DEFAULT_CLASS_START_TIME;
+    }
+
+    private static function windowEnd(): string
+    {
+        return SchoolYear::active()?->classEndTime() ?? SchoolYear::DEFAULT_CLASS_END_TIME;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -37,14 +48,25 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             'room_id' => ['sometimes', 'nullable', 'integer', 'exists:rooms,id'],
             'days' => ['sometimes', 'nullable', 'array'],
             'days.*' => [Rule::in(self::DAY_TOKENS)],
-            'start_time' => ['sometimes', 'nullable', 'date_format:H:i'],
-            'end_time' => ['sometimes', 'nullable', 'date_format:H:i', 'after:start_time'],
+            // Hard-bounded to the Active School Year's Scheduling
+            // Window (Class Start/End Time) — a manual edit on the
+            // spreadsheet can never save a time outside it, matching
+            // the same boundary enforced on the Auto Generate review
+            // panel's Day & Time editor (SectionSubjectController::overrideTime()).
+            'start_time' => ['sometimes', 'nullable', 'date_format:H:i', 'after_or_equal:' . self::windowStart()],
+            'end_time' => ['sometimes', 'nullable', 'date_format:H:i', 'after:start_time', 'before_or_equal:' . self::windowEnd()],
             'capacity' => ['sometimes', 'nullable', 'integer', 'min:1'],
             // Set true once the Registrar has explicitly acknowledged a
             // Room Capacity warning (Section Capacity > Room Capacity) —
             // lets the save proceed despite the warning. See
             // SectionSubjectController::updateSchedule().
             'capacity_confirmed' => ['sometimes', 'boolean'],
+            // Set true once the Registrar has explicitly acknowledged a
+            // Weekly Hours Mismatch (scheduled Days x Time doesn't add
+            // up to the Subject's required weekly hours) — lets the
+            // save proceed despite the warning. See
+            // SectionSubjectController::updateSchedule().
+            'hours_confirmed' => ['sometimes', 'boolean'],
             // Set true once an Administrator has explicitly acknowledged
             // a Teaching Load Limit warning ("⚠ Teaching Load Limit
             // Exceeded") — lets the save proceed despite the faculty
@@ -62,6 +84,8 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
     {
         return [
             'end_time.after' => 'End Time must be later than Start Time.',
+            'start_time.after_or_equal' => 'Start Time must be within this School Year\'s Scheduling Window (starts at ' . self::windowStart() . ').',
+            'end_time.before_or_equal' => 'End Time must be within this School Year\'s Scheduling Window (ends at ' . self::windowEnd() . ').',
             'capacity.min' => 'Capacity must be at least 1.',
         ];
     }

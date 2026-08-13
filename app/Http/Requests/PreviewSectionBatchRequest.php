@@ -7,39 +7,23 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
-class UpdateSectionRequest extends FormRequest
+class PreviewSectionBatchRequest extends FormRequest
 {
-    /**
-     * Determine if the user is authorized to make this request.
-     */
     public function authorize(): bool
     {
         return true;
     }
 
     /**
-     * Get the validation rules that apply to the request.
-     *
      * @return array<string, mixed>
      */
     public function rules(): array
     {
-        // The {section} route parameter is available via the bound model.
-        $sectionId = $this->route('section')?->id;
-
         return [
-            'section_code' => [
-                'required',
-                'string',
-                'max:20',
-                // whereNull('deleted_at') — same reasoning as
-                // StoreSectionRequest: don't let a soft-deleted
-                // Section's old code block reuse.
-                Rule::unique('sections', 'section_code')->ignore($sectionId)->whereNull('deleted_at'),
-            ],
-            'section_name' => ['required', 'string', 'max:255'],
-            'section_type' => ['required', Rule::in(StoreSectionRequest::SECTION_TYPES)],
             'major_id' => ['required', 'integer', 'exists:majors,id'],
+            'section_type' => ['required', Rule::in(StoreSectionRequest::SECTION_TYPES)],
+            // Required for Regular sections; optional/reference-only
+            // for Irregular sections.
             'curriculum_id' => [
                 Rule::requiredIf(fn () => $this->input('section_type') === 'Regular'),
                 'nullable',
@@ -49,16 +33,16 @@ class UpdateSectionRequest extends FormRequest
             'year_level' => ['required', Rule::in(StoreSectionRequest::YEAR_LEVELS)],
             'academic_year' => ['required', 'string', 'max:20'],
             'semester' => ['required', Rule::in(StoreSectionRequest::SEMESTERS)],
-            'estimated_students' => ['required', 'integer', 'min:1'],
-            'status' => ['required', Rule::in(['Active', 'Inactive'])],
-            'remarks' => ['nullable', 'string'],
+            'section_prefix' => ['required', 'string', 'max:20'],
+            'number_of_blocks' => ['required', 'integer', 'min:1', 'max:100'],
+            'estimated_students_per_block' => ['required', 'integer', 'min:1'],
+            // Present when re-previewing while editing one Section
+            // that already exists in the batch — excludes it from its
+            // own "already used" check.
+            'exclude_section_id' => ['nullable', 'integer'],
         ];
     }
 
-    /**
-     * Cross-field check: the selected Curriculum must belong to the
-     * selected Major.
-     */
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator) {
@@ -69,7 +53,7 @@ class UpdateSectionRequest extends FormRequest
             $curriculum = Curriculum::find($this->input('curriculum_id'));
 
             if ($curriculum && (int) $curriculum->major_id !== (int) $this->input('major_id')) {
-                $validator->errors()->add('curriculum_id', 'The selected curriculum does not belong to the selected major.');
+                $validator->errors()->add('curriculum_id', 'The selected prospectus does not belong to the selected program.');
             }
         });
     }

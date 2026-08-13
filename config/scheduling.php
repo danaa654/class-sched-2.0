@@ -36,8 +36,16 @@ return [
         | 4-hour/week Capstone (Type "special", 1x/week default)
         | becomes 2 meetings of 2 hours each rather than one 4-hour
         | block. Set to 0 to disable this bump entirely.
+        |
+        | Raised to 5 so Special subjects (Capstone, Thesis, OJT,
+        | Practicum, ...) with up to 5 hours/week — e.g. CAP102's
+        | 2 lecture + 3 laboratory hours — can still legitimately be
+        | scheduled as ONE continuous block/week instead of always
+        | being bumped to 2x/week and flagged as a pattern mismatch.
+        | Subjects needing more than 5 continuous hours still get
+        | bumped to additional meetings as before.
         */
-        'max_continuous_hours' => 3,
+        'max_continuous_hours' => 5,
 
         /*
         |----------------------------------------------------------------

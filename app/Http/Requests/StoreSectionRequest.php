@@ -71,7 +71,15 @@ class StoreSectionRequest extends FormRequest
             'section_name' => ['required', 'string', 'max:255'],
             'section_type' => ['required', Rule::in(self::SECTION_TYPES)],
             'major_id' => ['required', 'integer', 'exists:majors,id'],
-            'curriculum_id' => ['required', 'integer', 'exists:curriculums,id'],
+            // Required for Regular sections; optional/reference-only
+            // for Irregular sections, whose subjects are picked
+            // manually rather than loaded from one Prospectus.
+            'curriculum_id' => [
+                Rule::requiredIf(fn () => $this->input('section_type') === 'Regular'),
+                'nullable',
+                'integer',
+                'exists:curriculums,id',
+            ],
             'year_level' => ['required', Rule::in(self::YEAR_LEVELS)],
             'academic_year' => ['required', 'string', 'max:20'],
             'semester' => ['required', Rule::in(self::SEMESTERS)],

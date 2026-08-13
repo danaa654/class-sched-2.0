@@ -17,7 +17,7 @@
  * and flagged as a Manual Override, exactly like an out-of-pool
  * Faculty/Room pick, so the Registrar can see why and still decide.
  */
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import Popover from 'primevue/popover';
 import MultiSelect from 'primevue/multiselect';
 import DatePicker from 'primevue/datepicker';
@@ -30,6 +30,23 @@ const props = defineProps({
     sectionId: { type: [Number, String], required: true },
     sectionSubjectId: { type: [Number, String], required: true },
     modelValue: { type: Object, required: true }, // current time meta (days, start_time, end_time, score, confidence, reasons, ...)
+    // Other subjects already scheduled for this same section in the
+    // review panel — [{ subject_code, days, start_time, end_time }].
+    // Used purely client-side so a manual Day/Time edit that overlaps
+    // one of them warns immediately, without blocking Apply; the real
+    // block happens at "Accept All & Save" via the table's own
+    // Section Conflict detection once this is persisted.
+    siblingSchedules: { type: Array, default: () => [] },
+    // Active School Year's Scheduling Window — { start_time, end_time }
+    // as "H:i" strings. A HARD boundary, unlike Faculty/Room/Section
+    // conflicts: a Day/Time outside this window can never be applied,
+    // not even as a Manual Override — mirrors the same
+    // after_or_equal/before_or_equal check the server enforces in
+    // SectionSubjectController::overrideTime().
+    schedulingWindow: { type: Object, default: () => ({ start_time: '08:00', end_time: '19:00' }) },
+    // Controlled by the parent (Show.vue) — one "Show details" toggle
+    // per subject drives Faculty/Room/Time together.
+    showDetails: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['updated']);
@@ -166,6 +183,34 @@ const lunchConflict = computed(() => {
     return startMin < LUNCH_END_MIN && endMin > LUNCH_START_MIN;
 });
 
+// True only while openEditor() is populating the fields from the
+// current recommendation — suppresses the auto-adjust-End watcher
+// below so opening the popover never overwrites the End that came
+// with the recommendation.
+const openingEditor = ref(false);
+
+// Editing Start manually keeps the SAME per-meeting duration and
+// slides End along with it — e.g. Start 8:00-10:30 (2h30m), retype
+// Start to 1:00 PM -> End auto-becomes 3:30 PM — instead of leaving
+// End stale (or equal to Start, which used to make Apply impossible
+// since Start must be before End). Duration comes from the weekly
+// total baseline (same source the day-count redistribution above
+// uses) so it stays correct even after a day was just added/removed.
+watch(editStart, (newStart, oldStart) => {
+    if (adjustingForDayChange.value || openingEditor.value) return;
+    if (!newStart || !oldStart) return;
+
+    const count = editDays.value?.length || 1;
+    const perMeetingMinutes = totalWeeklyMinutes.value
+        ? Math.round(totalWeeklyMinutes.value / count)
+        : minutesBetween(oldStart, editEnd.value);
+    if (perMeetingMinutes <= 0) return;
+
+    adjustingForDayChange.value = true;
+    editEnd.value = addMinutes(newStart, perMeetingMinutes);
+    adjustingForDayChange.value = false;
+});
+
 // Adding/removing a day NEVER removes another already-selected day —
 // each day picked becomes its own meeting occurrence, up to MAX_MEETINGS.
 // Duration is redistributed evenly across whatever days remain so the
@@ -200,6 +245,7 @@ watch([editStart, editEnd], ([start, end]) => {
 });
 
 const openEditor = (event) => {
+    openingEditor.value = true;
     editDays.value = [...(current.value?.days ?? [])];
     editStart.value = timeStringToDate(current.value?.start_time);
     editEnd.value = timeStringToDate(current.value?.end_time);
@@ -228,6 +274,9 @@ const openEditor = (event) => {
     }
 
     popover.value?.toggle(event);
+    nextTick(() => {
+        openingEditor.value = false;
+    });
 };
 
 const applyPreset = (preset) => {
@@ -239,7 +288,41 @@ const applyPreset = (preset) => {
         : [...preset.value];
 };
 
-const canApply = computed(() => editDays.value.length > 0 && editStart.value && editEnd.value && editStart.value < editEnd.value);
+// --- Scheduling Window (hard boundary) -------------------------------
+// Unlike the lunch break / sibling-overlap warnings below (which are
+// flagged but still applicable), a pick outside the Active School
+// Year's Class Start/End Time is never valid — Apply is disabled
+// outright, exactly like the MAX_MEETINGS day cap above.
+const windowStartMin = computed(() => {
+    const [h, m] = (props.schedulingWindow?.start_time ?? '08:00').split(':').map(Number);
+    return h * 60 + m;
+});
+const windowEndMin = computed(() => {
+    const [h, m] = (props.schedulingWindow?.end_time ?? '19:00').split(':').map(Number);
+    return h * 60 + m;
+});
+
+const outsideSchedulingWindow = computed(() => {
+    const startMin = toMinutesOfDay(editStart.value);
+    const endMin = toMinutesOfDay(editEnd.value);
+    if (startMin === null || endMin === null) return false;
+    return startMin < windowStartMin.value || endMin > windowEndMin.value;
+});
+
+const schedulingWindowLabel = computed(() => formatTimeRange(props.schedulingWindow?.start_time, props.schedulingWindow?.end_time));
+
+const schedulingWindowError = computed(() => {
+    if (!outsideSchedulingWindow.value) return null;
+    return `Class time must fall within this School Year's Scheduling Window (${schedulingWindowLabel.value}).`;
+});
+
+const canApply = computed(
+    () => editDays.value.length > 0
+        && editStart.value
+        && editEnd.value
+        && editStart.value < editEnd.value
+        && !outsideSchedulingWindow.value
+);
 
 const isManualOverride = computed(() => current.value?.manual_override === true);
 
@@ -280,7 +363,108 @@ const activeConflictReason = computed(() => {
     return null;
 });
 
-const hasConflict = computed(() => activeConflictReason.value !== null);
+// Overlap check against this section's *other* already-scheduled
+// subjects (siblingSchedules). This is the same day+time overlap
+// rule Show.vue's tableConflicts uses for "Section Conflict" — kept
+// in sync here so the popover warns the instant the Registrar types
+// an overlapping time, instead of only after Apply persists it.
+const timeRangesOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
+
+const sectionConflictSibling = computed(() => {
+    const startMin = toMinutesOfDay(editStart.value);
+    const endMin = toMinutesOfDay(editEnd.value);
+    if (startMin === null || endMin === null || endMin <= startMin || editDays.value.length === 0) return null;
+
+    return (props.siblingSchedules || []).find((sibling) => {
+        const sameDay = (sibling.days || []).some((d) => editDays.value.includes(d));
+        if (!sameDay) return false;
+        const [sh, sm] = sibling.start_time.split(':').map(Number);
+        const [eh, em] = sibling.end_time.split(':').map(Number);
+        return timeRangesOverlap(startMin, endMin, sh * 60 + sm, eh * 60 + em);
+    }) ?? null;
+});
+
+// Non-blocking — flexible by design: the Registrar can still Apply an
+// overlapping time (e.g. while working through a first draft), it's
+// just flagged here, then caught for real by the Section Conflict
+// check in the main table, which disables "Accept All & Save" until
+// it's resolved.
+const sectionConflictReason = computed(() => {
+    const sibling = sectionConflictSibling.value;
+    if (!sibling) return null;
+    return `Conflicts with ${sibling.subject_code} — this section already meets ${formatDays(sibling.days)} ${formatTimeRange(sibling.start_time, sibling.end_time)}.`;
+});
+
+// --- Conflict state for the CLOSED trigger box (button) ---------------
+// The computeds above (lunchConflict, sectionConflictSibling,
+// schedulingWindowError) all read the *popover draft* fields
+// (editStart/editEnd/editDays). Those only get populated once
+// openEditor() runs for that row — before that they're null/[]. That
+// meant the red border on the trigger button reflected "has this row's
+// popover been opened yet", not "does this row's *applied* time
+// actually conflict" — rows never opened stayed un-red even with a
+// real overlap, and rows that were opened-then-closed could stay
+// stuck red from stale draft values. The trigger button must instead
+// always reflect `current` (the applied time), independent of whether
+// the popover has ever been opened.
+const toMinutesFromString = (value) => {
+    if (!value) return null;
+    const [h, m] = value.split(':').map(Number);
+    return h * 60 + m;
+};
+
+const currentLunchConflict = computed(() => {
+    const startMin = toMinutesFromString(current.value?.start_time);
+    const endMin = toMinutesFromString(current.value?.end_time);
+    if (startMin === null || endMin === null || endMin <= startMin) return false;
+    return startMin < LUNCH_END_MIN && endMin > LUNCH_START_MIN;
+});
+
+const currentSectionConflictSibling = computed(() => {
+    const startMin = toMinutesFromString(current.value?.start_time);
+    const endMin = toMinutesFromString(current.value?.end_time);
+    const days = current.value?.days ?? [];
+    if (startMin === null || endMin === null || endMin <= startMin || days.length === 0) return null;
+
+    return (props.siblingSchedules || []).find((sibling) => {
+        const sameDay = (sibling.days || []).some((d) => days.includes(d));
+        if (!sameDay) return false;
+        const [sh, sm] = sibling.start_time.split(':').map(Number);
+        const [eh, em] = sibling.end_time.split(':').map(Number);
+        return timeRangesOverlap(startMin, endMin, sh * 60 + sm, eh * 60 + em);
+    }) ?? null;
+});
+
+const currentOutsideWindow = computed(() => {
+    const startMin = toMinutesFromString(current.value?.start_time);
+    const endMin = toMinutesFromString(current.value?.end_time);
+    if (startMin === null || endMin === null) return false;
+    return startMin < windowStartMin.value || endMin > windowEndMin.value;
+});
+
+// Tooltip/reason text for the closed trigger box — mirrors
+// activeConflictReason/sectionConflictReason but sourced from `current`
+// instead of the draft fields, for the same reason as above.
+const currentConflictReason = computed(() => {
+    if (currentSectionConflictSibling.value) {
+        const sibling = currentSectionConflictSibling.value;
+        return `Conflicts with ${sibling.subject_code} — this section already meets ${formatDays(sibling.days)} ${formatTimeRange(sibling.start_time, sibling.end_time)}.`;
+    }
+    if (currentLunchConflict.value) {
+        return `${formatDays(current.value?.days)} ${formatTimeRange(current.value?.start_time, current.value?.end_time)} overlaps the 12:00 PM - 1:00 PM lunch break.`;
+    }
+    if (currentOutsideWindow.value) {
+        return `Class time falls outside this School Year's Scheduling Window (${schedulingWindowLabel.value}).`;
+    }
+    return null;
+});
+
+const hasConflict = computed(() => currentConflictReason.value !== null);
+
+// Used only *inside* the popover, while actively editing — reflects the
+// live draft (editStart/editEnd/editDays) so feedback updates as the
+// Registrar types, before Apply is even clicked.
+const hasDraftConflict = computed(() => activeConflictReason.value !== null || sectionConflictReason.value !== null || schedulingWindowError.value !== null);
 
 // Passed to the recommendation modal: keep single-day alternatives
 // the same length as whatever's currently in the editor. (We
@@ -299,10 +483,18 @@ const openRecommendations = () => {
 
 /** Populates the editor with the Registrar's picked recommendation; Apply is still a separate, explicit click (spec item 7). */
 const applyRecommendation = ({ days, start_time, end_time }) => {
+    // Reuse the same guard openEditor() uses — this sets Start AND
+    // End together from an explicit recommendation, so the
+    // auto-adjust-End-from-Start watcher above must not override the
+    // End it was just given.
+    openingEditor.value = true;
     editDays.value = [...days];
     editStart.value = timeStringToDate(start_time);
     editEnd.value = timeStringToDate(end_time);
     applyError.value = null;
+    nextTick(() => {
+        openingEditor.value = false;
+    });
 };
 
 
@@ -356,7 +548,9 @@ const apply = async () => {
              "FRI · 1:00 PM–3:00 PM / SAT · 1:00 PM–3:00 PM" review format. -->
         <button
             type="button"
-            class="w-full text-left text-sm font-medium text-slate-800 mb-1 border border-slate-200 rounded-md px-2.5 py-1.5 hover:border-primary-400 hover:bg-slate-50 transition-colors time-recommendation-trigger"
+            class="w-full text-left text-sm font-medium mb-1 border rounded-md px-2.5 py-1.5 hover:border-primary-400 hover:bg-slate-50 transition-colors time-recommendation-trigger"
+            :class="hasConflict ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 text-slate-800'"
+            :title="hasConflict ? currentConflictReason : undefined"
             @click="openEditor"
         >
             <div v-if="(current.days ?? []).length > 1" class="space-y-0.5">
@@ -366,7 +560,8 @@ const apply = async () => {
             </div>
             <div v-else class="flex items-center justify-between gap-2">
                 <span>{{ formatDays(current.days) }} · {{ formatTimeRange(current.start_time, current.end_time) }}</span>
-                <i class="pi pi-pencil text-slate-400 text-xs"></i>
+                <i v-if="hasConflict" class="pi pi-exclamation-triangle text-red-500 text-xs"></i>
+                <i v-else class="pi pi-pencil text-slate-400 text-xs"></i>
             </div>
         </button>
 
@@ -419,13 +614,28 @@ const apply = async () => {
                 <div class="grid grid-cols-2 gap-2 mb-1">
                     <div>
                         <label class="text-xs text-slate-500 mb-1 block">Start</label>
-                        <DatePicker v-model="editStart" timeOnly hourFormat="12" class="w-full" inputClass="w-full text-sm" />
+                        <DatePicker
+                            v-model="editStart"
+                            timeOnly
+                            hourFormat="12"
+                            class="w-full"
+                            :inputClass="['w-full text-sm', outsideSchedulingWindow ? '!border-red-400 !text-red-700' : '']"
+                        />
                     </div>
                     <div>
                         <label class="text-xs text-slate-500 mb-1 block">End</label>
-                        <DatePicker v-model="editEnd" timeOnly hourFormat="12" class="w-full" inputClass="w-full text-sm" />
+                        <DatePicker
+                            v-model="editEnd"
+                            timeOnly
+                            hourFormat="12"
+                            class="w-full"
+                            :inputClass="['w-full text-sm', outsideSchedulingWindow ? '!border-red-400 !text-red-700' : '']"
+                        />
                     </div>
                 </div>
+                <p class="text-[11px] text-slate-400 mb-1">
+                    Scheduling Window: {{ schedulingWindowLabel }}
+                </p>
 
                 <p v-if="liveWeeklyHours !== null" class="text-[11px] mb-2" :class="requiredWeeklyHours && liveWeeklyHours !== requiredWeeklyHours ? 'text-amber-600' : 'text-slate-400'">
                     Total: {{ liveWeeklyHours }} {{ liveWeeklyHours === 1 ? 'hour' : 'hours' }}/week
@@ -436,8 +646,25 @@ const apply = async () => {
                     </template>
                 </p>
 
-                <div v-if="hasConflict" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-2">
-                    <p class="flex items-start gap-1 mb-1.5">
+                <!-- HARD block — outside the Scheduling Window can never be
+                     applied, unlike the flexible warnings below. -->
+                <div v-if="schedulingWindowError" class="text-xs text-red-800 bg-red-100 border border-red-300 rounded-md px-2 py-1.5 mb-2 flex items-start gap-1">
+                    <i class="pi pi-ban mt-0.5"></i>
+                    <span>{{ schedulingWindowError }}</span>
+                </div>
+
+                <div v-if="sectionConflictReason" class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 mb-2">
+                    <p class="flex items-start gap-1">
+                        <i class="pi pi-exclamation-triangle mt-0.5"></i>
+                        <span>
+                            {{ sectionConflictReason }}
+                            You can still apply this — it'll be flagged as a Section Conflict and "Accept All &amp; Save" will be blocked until it's resolved.
+                        </span>
+                    </p>
+                </div>
+
+                <div v-if="hasDraftConflict" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-2">
+                    <p v-if="activeConflictReason" class="flex items-start gap-1 mb-1.5">
                         <i class="pi pi-exclamation-triangle mt-0.5"></i>
                         <span>{{ activeConflictReason }}</span>
                     </p>
@@ -485,7 +712,7 @@ const apply = async () => {
             :pt="{ value: { style: `background:${scoreColor(current.score ?? 0)}` } }"
         />
 
-        <ul class="mt-2 space-y-0.5">
+        <ul v-if="showDetails" class="mt-1 space-y-0.5">
             <li
                 v-for="(reason, idx) in current.reasons ?? []"
                 :key="idx"

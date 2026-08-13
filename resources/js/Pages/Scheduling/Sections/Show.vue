@@ -165,8 +165,8 @@ const generating = ref(false);
 
 const onGenerateCurriculumSubjects = () => {
     Swal.fire({
-        title: 'Generate Curriculum Subjects?',
-        html: `This will load every subject from <b>${props.section.curriculum?.code ?? 'the selected curriculum'}</b> for <b>${props.section.year_level}</b>, <b>${props.section.semester}</b>.<br><br>Subjects already assigned to this section will be skipped — no duplicates will be added.`,
+        title: 'Load From Prospectus?',
+        html: `This will load every subject from <b>${props.section.curriculum?.code ?? 'the selected prospectus'}</b> for <b>${props.section.year_level}</b>, <b>${props.section.semester}</b>.<br><br>Subjects already assigned to this section will be skipped — no duplicates will be added.`,
         icon: 'question',
         showCancelButton: true,
         confirmButtonColor: '#16A34A',
@@ -346,7 +346,7 @@ const scheduleRows = computed(() => props.sectionSubjects);
                                     <!-- Major -->
                                     <div class="flex flex-col gap-1">
                                         <label for="major_id" class="text-sm font-medium text-slate-700">
-                                            Major <span class="text-red-500">*</span>
+                                            College / Program <span class="text-red-500">*</span>
                                         </label>
                                         <Select
                                             id="major_id"
@@ -364,10 +364,10 @@ const scheduleRows = computed(() => props.sectionSubjects);
                                         </small>
                                     </div>
 
-                                    <!-- Curriculum -->
+                                    <!-- Prospectus -->
                                     <div class="flex flex-col gap-1">
                                         <label for="curriculum_id" class="text-sm font-medium text-slate-700">
-                                            Curriculum <span class="text-red-500">*</span>
+                                            Prospectus <span class="text-red-500">*</span>
                                         </label>
                                         <Select
                                             id="curriculum_id"
@@ -377,7 +377,7 @@ const scheduleRows = computed(() => props.sectionSubjects);
                                             optionValue="value"
                                             filter
                                             :disabled="!infoForm.major_id"
-                                            :placeholder="infoForm.major_id ? 'Select a curriculum' : 'Select a major first'"
+                                            :placeholder="infoForm.major_id ? 'Select a prospectus' : 'Select a program first'"
                                             :invalid="!!infoForm.errors.curriculum_id"
                                             class="w-full"
                                         />
@@ -541,7 +541,7 @@ const scheduleRows = computed(() => props.sectionSubjects);
                                                 aria-label="Refresh"
                                             />
                                             <Button
-                                                label="Generate Curriculum Subjects"
+                                                label="Load From Prospectus"
                                                 icon="pi pi-sync"
                                                 severity="secondary"
                                                 :loading="generating"
@@ -566,11 +566,11 @@ const scheduleRows = computed(() => props.sectionSubjects);
                                         <div class="text-center py-10">
                                             <p class="text-slate-500 font-medium">No subjects assigned yet.</p>
                                             <p class="text-slate-400 text-sm mt-1">
-                                                Use "Generate Curriculum Subjects" to load this section's curriculum, or "Add Subject" to add one manually.
+                                                Use "Load From Prospectus" to load this section's prospectus, or "Add Subject" to add one manually.
                                             </p>
                                             <div class="flex items-center justify-center gap-2 mt-3">
                                                 <Button
-                                                    label="Generate Curriculum Subjects"
+                                                    label="Load From Prospectus"
                                                     icon="pi pi-sync"
                                                     severity="secondary"
                                                     @click="onGenerateCurriculumSubjects"

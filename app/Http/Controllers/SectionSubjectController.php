@@ -13,6 +13,7 @@ use App\Models\Major;
 use App\Models\Room;
 use App\Models\Section;
 use App\Models\SectionSubject;
+use App\Models\SchoolYear;
 use App\Models\Subject;
 use App\Services\AutoScheduleService;
 use App\Services\EDPCodeService;
@@ -23,6 +24,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -230,6 +232,18 @@ class SectionSubjectController extends Controller
             ->orderBy('room_code')
             ->get(['id', 'room_code', 'room_name', 'room_type', 'capacity']);
 
+        // Active School Year's Scheduling Window — the hard 8:00 AM–7:00 PM
+        // (or whatever's configured) boundary the manual Day & Time editor
+        // must never let the Registrar pick outside of. Same source the
+        // scheduling engine's own candidateStartTimes() reads from, so the
+        // frontend and the overrideTime() server check never disagree.
+        $activeSchoolYear = SchoolYear::active();
+        $schedulingWindow = [
+            'start_time' => $activeSchoolYear?->classStartTime() ?? SchoolYear::DEFAULT_CLASS_START_TIME,
+            'end_time' => $activeSchoolYear?->classEndTime() ?? SchoolYear::DEFAULT_CLASS_END_TIME,
+            'available_days' => $activeSchoolYear?->allowedDays() ?? SchoolYear::DEFAULT_CLASS_DAYS,
+        ];
+
         return Inertia::render('Scheduling/SectionSubjects/Show', [
             'section' => $section,
             'sectionSubjects' => $sectionSubjects,
@@ -242,6 +256,7 @@ class SectionSubjectController extends Controller
             'yearLevelMap' => self::YEAR_LEVEL_MAP,
             'sectionYearLevel' => self::YEAR_LEVEL_MAP[$section->year_level] ?? null,
             'sectionSemester' => $section->semester,
+            'schedulingWindow' => $schedulingWindow,
             // Section Information tab (Tab 1) options.
             'activeMajors' => Major::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name', 'code']),
             'yearLevels' => StoreSectionRequest::YEAR_LEVELS,
@@ -314,6 +329,29 @@ class SectionSubjectController extends Controller
             $subject->id
         ));
 
+        // Weekly Hours Mismatch Warning — the scheduled Days x
+        // (End-Start) doesn't add up to what the Subject's curriculum
+        // hours require (e.g. curriculum needs 5 hrs/week, the
+        // Registrar could only fit 4 because of Room/Faculty
+        // availability). Same "flagged, not blocked" pattern as
+        // Room Capacity above — needs an explicit hours_confirmed=true
+        // to save anyway.
+        if (! empty($dayTokens) && $startTime && $endTime) {
+            $subject->loadMissing('subject');
+            $requiredHours = ((int) $subject->subject->lecture_hours) + ((int) $subject->subject->laboratory_hours);
+            if ($requiredHours <= 0) {
+                $requiredHours = 3; // matches RecommendationService::scoreArbitraryTime()'s fallback
+            }
+
+            $actualMinutes = $this->minutesBetween($startTime, $endTime) * count($dayTokens);
+            $actualHours = round($actualMinutes / 60, 2);
+
+            if ($actualHours !== (float) $requiredHours && ! $request->boolean('hours_confirmed')) {
+                $errors['hours'] = "This schedule totals {$actualHours} hrs/week, but {$subject->subject->subject_code} requires {$requiredHours} hrs/week. "
+                    .'Confirm to save anyway.';
+            }
+        }
+
         if (! empty($errors)) {
             return response()->json(['errors' => $errors], 422);
         }
@@ -354,6 +392,15 @@ class SectionSubjectController extends Controller
             'end_time' => $endTime,
             'capacity' => $capacity,
             'status' => $status,
+            // Persist the Registrar's confirmation so an acknowledged
+            // Capacity/Hours warning stays acknowledged (doesn't turn
+            // yellow again) the next time this page loads — see the
+            // 2026_08_13_120000 migration's docblock. Both simply
+            // mirror whatever was just confirmed/re-validated above;
+            // if this save didn't need a confirmation (no mismatch),
+            // the boolean falls back to false, which is correct too.
+            'capacity_confirmed' => $request->boolean('capacity_confirmed'),
+            'hours_confirmed' => $request->boolean('hours_confirmed'),
             // A hand-edited row is no longer purely "Auto Generated" —
             // untag it so Clear Generated Schedule / Regenerate never
             // touch what the Registrar just chose themselves.
@@ -544,6 +591,10 @@ class SectionSubjectController extends Controller
         $subject->update([
             'room_id' => $room->id,
             'auto_generated_meta' => $meta,
+            // A changed Room may or may not still fit the Section's
+            // Capacity — re-flag rather than carrying over a
+            // confirmation that applied to the previous Room.
+            'capacity_confirmed' => false,
         ]);
 
         return response()->json([
@@ -568,9 +619,32 @@ class SectionSubjectController extends Controller
      * Faculty/Room are left exactly as Auto Generate produced them;
      * only Days/Start/End and the Time scoring metadata change.
      */
+    /**
+     * "H:i" (24-hour) -> "g:i A" (e.g. "08:00" -> "8:00 AM"), for the
+     * Scheduling Window message in overrideTime().
+     */
+    /**
+     * Minutes between two "H:i" times — shared by the Weekly Hours
+     * Mismatch check in updateSchedule() and batchUpdateSchedule().
+     */
+    private function minutesBetween(string $start, string $end): int
+    {
+        [$sh, $sm] = array_map('intval', explode(':', $start));
+        [$eh, $em] = array_map('intval', explode(':', $end));
+
+        return ($eh * 60 + $em) - ($sh * 60 + $sm);
+    }
+
+    private function formatWindowTime(string $time): string
+    {
+        return \Carbon\Carbon::createFromFormat('H:i', $time)->format('g:i A');
+    }
+
     public function overrideTime(Request $request, Section $section, SectionSubject $subject): JsonResponse
     {
         abort_unless($subject->section_id === $section->id, 404);
+
+        $schoolYear = SchoolYear::active();
 
         $validated = $request->validate([
             'days' => ['required', 'array', 'min:1', 'max:3'],
@@ -578,6 +652,24 @@ class SectionSubjectController extends Controller
             'start_time' => ['required', 'date_format:H:i'],
             'end_time' => ['required', 'date_format:H:i', 'after:start_time'],
         ]);
+
+        // Hard institutional boundary — unlike a Faculty/Room/Section
+        // conflict (flagged as a Manual Override and still saved), a
+        // time outside the Active School Year's Class Start/End Time
+        // is never savable at all. This mirrors the same window the
+        // scheduling engine's own candidateStartTimes() is built from,
+        // so a manual pick can never end up somewhere Auto Generate
+        // itself would never have offered.
+        if ($schoolYear) {
+            $windowStart = $schoolYear->classStartTime();
+            $windowEnd = $schoolYear->classEndTime();
+
+            if ($validated['start_time'] < $windowStart || $validated['end_time'] > $windowEnd) {
+                throw ValidationException::withMessages([
+                    'start_time' => "Class time must fall within this School Year's Scheduling Window ({$this->formatWindowTime($windowStart)} – {$this->formatWindowTime($windowEnd)}).",
+                ]);
+            }
+        }
 
         $subject->loadMissing(['subject', 'section.major.department']);
 
@@ -613,6 +705,11 @@ class SectionSubjectController extends Controller
             'start_time' => $scored['start_time'],
             'end_time' => $scored['end_time'],
             'auto_generated_meta' => $meta,
+            // A changed Day/Time may or may not still add up to the
+            // Subject's required weekly hours — re-flag it rather than
+            // silently carrying over a confirmation that applied to
+            // the previous Day/Time.
+            'hours_confirmed' => false,
         ]);
 
         return response()->json([
@@ -857,6 +954,26 @@ class SectionSubjectController extends Controller
                     }
                 }
 
+                // Weekly Hours Mismatch Warning — same rule/gate as
+                // updateSchedule() above, run here too since a batch
+                // save can persist rows that never went through the
+                // single-cell endpoint (e.g. Auto Generate results
+                // accepted as-is).
+                if (! empty($days) && $startTime && $endTime) {
+                    $requiredHours = ((int) $subject->subject->lecture_hours) + ((int) $subject->subject->laboratory_hours);
+                    if ($requiredHours <= 0) {
+                        $requiredHours = 3;
+                    }
+
+                    $dayCount = count(array_filter(explode(',', (string) $days)));
+                    $actualHours = round(($this->minutesBetween($startTime, $endTime) * $dayCount) / 60, 2);
+
+                    if ($actualHours !== (float) $requiredHours && empty($rowData['hours_confirmed'])) {
+                        $rowErrors['hours'] = "This schedule totals {$actualHours} hrs/week, but {$subject->subject->subject_code} requires {$requiredHours} hrs/week. "
+                            .'Confirm to save anyway.';
+                    }
+                }
+
                 $dayTokens = array_filter(explode(',', (string) $days));
 
                 // Same shared ScheduleConflictService the single-cell
@@ -918,6 +1035,11 @@ class SectionSubjectController extends Controller
                     'end_time' => $endTime,
                     'capacity' => $capacity,
                     'status' => $status,
+                    // Same persisted-confirmation pattern as
+                    // updateSchedule() above — see the
+                    // 2026_08_13_120000 migration's docblock.
+                    'capacity_confirmed' => ! empty($rowData['capacity_confirmed']),
+                    'hours_confirmed' => ! empty($rowData['hours_confirmed']),
                     // "Save Schedule" finalizes any Auto Generated rows
                     // it saves — once saved they're a normal schedule,
                     // no longer a pending suggestion to clear/regenerate.

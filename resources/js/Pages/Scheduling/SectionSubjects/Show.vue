@@ -43,6 +43,11 @@ const props = defineProps({
     // Scheduling table options — Faculty/Room dropdowns.
     activeFaculty: { type: Array, default: () => [] },
     activeRooms: { type: Array, default: () => [] },
+    // Active School Year's Scheduling Window — { start_time, end_time,
+    // available_days } — the hard boundary the manual Day & Time
+    // editor (TimeRecommendationSelector) must never let the
+    // Registrar save outside of.
+    schedulingWindow: { type: Object, default: () => ({ start_time: '08:00', end_time: '19:00', available_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] }) },
 });
 
 const toast = useToast();
@@ -106,23 +111,37 @@ const onRefresh = () => reload();
 
 const toDaysArray = (days) => (days ? days.split(',').filter(Boolean) : []);
 
+// Per-row, per-field validation error + saving indicator, keyed by row id.
+const rowState = reactive({});
+const stateFor = (rowId) => {
+    if (!rowState[rowId]) {
+        rowState[rowId] = { errors: {}, capacityConfirmed: false, workloadConfirmed: false, hoursConfirmed: false };
+    }
+    return rowState[rowId];
+};
+
+// Seeds this row's local Capacity/Hours confirmation state from what
+// the server has persisted (section_subjects.capacity_confirmed /
+// hours_confirmed — see the 2026_08_13_120000 migration). Without
+// this, a Registrar's "Save Anyway" confirmation would only last for
+// that one save request; the very next page load would re-flag the
+// exact same, already-acknowledged mismatch as if it were new.
+const seedRowConfirmedState = (row) => {
+    const state = stateFor(row.id);
+    state.capacityConfirmed = Boolean(row.capacity_confirmed);
+    state.hoursConfirmed = Boolean(row.hours_confirmed);
+};
+
 const rows = ref(props.sectionSubjects.map((row) => ({ ...row, days: toDaysArray(row.days) })));
+rows.value.forEach(seedRowConfirmedState);
 
 watch(
     () => props.sectionSubjects,
     (fresh) => {
         rows.value = fresh.map((row) => ({ ...row, days: toDaysArray(row.days) }));
+        rows.value.forEach(seedRowConfirmedState);
     },
 );
-
-// Per-row, per-field validation error + saving indicator, keyed by row id.
-const rowState = reactive({});
-const stateFor = (rowId) => {
-    if (!rowState[rowId]) {
-        rowState[rowId] = { errors: {}, capacityConfirmed: false, workloadConfirmed: false };
-    }
-    return rowState[rowId];
-};
 
 /* --- Days --- */
 
@@ -245,9 +264,20 @@ const roomGroupsFor = (row) => {
 
 /* --- Time pickers — DatePicker bound to a JS Date, converted to "HH:mm" on save --- */
 
+// Server-side start_time/end_time are normalized to "HH:mm" by the
+// SectionSubject model's accessors, but this is a cheap safety net —
+// strips any stray seconds (e.g. "13:00:00") before the value is used
+// anywhere, so a row that's never touched via the Time picker can't
+// silently carry a raw DB-shaped string into the Save Schedule payload
+// and fail the backend's date_format:H:i rule ("Nothing saved").
+const normalizeTimeString = (value) => {
+    if (!value) return value;
+    return value.slice(0, 5);
+};
+
 const timeStringToDate = (value) => {
     if (!value) return null;
-    const [hours, minutes] = value.split(':').map(Number);
+    const [hours, minutes] = normalizeTimeString(value).split(':').map(Number);
     const date = new Date();
     date.setHours(hours, minutes, 0, 0);
     return date;
@@ -336,10 +366,51 @@ const hasActiveConflict = (row) => {
 const roomsById = computed(() => Object.fromEntries(props.activeRooms.map((room) => [room.id, room])));
 const facultyById = computed(() => Object.fromEntries(props.activeFaculty.map((f) => [f.id, f])));
 
+// Sibling schedules for the Auto Schedule review panel — lets each
+// row's TimeRecommendationSelector warn about a Section Conflict
+// (this section double-booked against one of its own other subjects)
+// the instant the Registrar manually types a time, without waiting
+// for a server round trip. Excludes merged rows (no time of their
+// own) and the row being edited itself.
+const siblingSchedulesFor = (sectionSubjectId) => {
+    if (!autoSummary.value?.results?.length) return [];
+    return autoSummary.value.results
+        .filter((r) => r.section_subject_id !== sectionSubjectId && !r.is_merged && r.time?.days?.length && r.time?.start_time && r.time?.end_time)
+        .map((r) => ({
+            subject_code: r.subject_code,
+            days: r.time.days,
+            start_time: r.time.start_time,
+            end_time: r.time.end_time,
+        }));
+};
+
 const daysOverlap = (a, b) => (a ?? []).some((day) => (b ?? []).includes(day));
 const timeOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
 const rowIsSchedulable = (row) => row.days?.length > 0 && row.start_time && row.end_time;
+
+// Required weekly hours from the Subject's curriculum-defined
+// Lecture/Laboratory hours — same fallback (3) RecommendationService's
+// scoreArbitraryTime() uses server-side, so the client-side warning
+// and the server's hours_confirmed gate never disagree.
+const requiredWeeklyHoursFor = (row) => {
+    const lecture = Number(row.subject?.lecture_hours ?? 0);
+    const lab = Number(row.subject?.laboratory_hours ?? 0);
+    const total = lecture + lab;
+    return total > 0 ? total : 3;
+};
+
+// Actual scheduled weekly hours from the row's current Days x
+// (End-Start), rounded to 2 decimals to avoid float-noise false
+// mismatches (e.g. 4.999999 vs 5).
+const actualWeeklyHoursFor = (row) => {
+    if (!rowIsSchedulable(row)) return null;
+    const [sh, sm] = row.start_time.split(':').map(Number);
+    const [eh, em] = row.end_time.split(':').map(Number);
+    const perMeetingMinutes = (eh * 60 + em) - (sh * 60 + sm);
+    if (perMeetingMinutes <= 0) return null;
+    return Math.round(((perMeetingMinutes * row.days.length) / 60) * 100) / 100;
+};
 
 // { faculty: Map<rowId, [{type, message, otherRowId}]>, ... } — built as
 // a flat list of conflict entries, each naming the row(s) it applies to.
@@ -350,8 +421,12 @@ const tableConflicts = computed(() => {
     for (let i = 0; i < data.length; i++) {
         const a = data[i];
 
-        // Room Capacity Warning — independent of other rows.
-        if (a.room_id && a.capacity) {
+        // Room Capacity Warning — independent of other rows. Skipped
+        // once the Registrar has explicitly confirmed it (either just
+        // now via "Save Anyway", or persisted from a previous save —
+        // see seedRowConfirmedState above) so an acknowledged warning
+        // stops showing as an open "Scheduling Issue".
+        if (a.room_id && a.capacity && !stateFor(a.id).capacityConfirmed) {
             const room = roomsById.value[a.room_id];
             if (room && Number(a.capacity) > Number(room.capacity)) {
                 list.push({
@@ -359,6 +434,27 @@ const tableConflicts = computed(() => {
                     rowIds: [a.id],
                     label: 'Capacity Warning',
                     detail: `${a.subject?.subject_code ?? 'Subject'} — Section Capacity ${a.capacity}, Room Capacity ${room.capacity} (${room.room_code})`,
+                });
+            }
+        }
+
+        // Weekly Hours Mismatch Warning — the scheduled Days x
+        // (End-Start) doesn't add up to what the Subject's curriculum
+        // requires (e.g. a 5-hr/week Subject only fits 4 because a
+        // Room/Faculty was only free for a shorter block). Same
+        // confirmable, non-blocking pattern as Capacity above — flagged
+        // here so it's visible in the Conflict Panel and on the row,
+        // not just buried in the Time popover. Skipped once confirmed,
+        // same reasoning as Capacity above.
+        if (rowIsSchedulable(a) && !stateFor(a.id).hoursConfirmed) {
+            const requiredHours = requiredWeeklyHoursFor(a);
+            const actualHours = actualWeeklyHoursFor(a);
+            if (requiredHours && actualHours !== null && actualHours !== requiredHours) {
+                list.push({
+                    type: 'hours',
+                    rowIds: [a.id],
+                    label: 'Hours Mismatch',
+                    detail: `${a.subject?.subject_code ?? 'Subject'} — scheduled ${actualHours} ${actualHours === 1 ? 'hr' : 'hrs'}/week, requires ${requiredHours} ${requiredHours === 1 ? 'hr' : 'hrs'}/week`,
                 });
             }
         }
@@ -422,10 +518,17 @@ const unconfirmedCapacityRowIds = computed(() =>
     tableConflicts.value.filter((c) => c.type === 'capacity').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).capacityConfirmed),
 );
 
+// Rows with an unconfirmed Hours Mismatch — same confirmable pattern
+// as Capacity above.
+const unconfirmedHoursRowIds = computed(() =>
+    tableConflicts.value.filter((c) => c.type === 'hours').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).hoursConfirmed),
+);
+
 // A row is "blocking" (true Conflict — Faculty/Room/Section) if it
-// appears in any non-capacity conflict entry.
+// appears in any non-capacity, non-hours conflict entry. Capacity
+// and Hours Mismatch are both confirmable warnings, never hard blocks.
 const blockingConflictRowIds = computed(
-    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity').flatMap((c) => c.rowIds)),
+    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity' && c.type !== 'hours').flatMap((c) => c.rowIds)),
 );
 
 const rowHasBlockingConflict = (rowId) => blockingConflictRowIds.value.has(rowId);
@@ -456,6 +559,7 @@ const facultyConflictRowIds = computed(() => new Set(tableConflicts.value.filter
 const roomConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'room').flatMap((c) => c.rowIds)));
 const sectionConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'section').flatMap((c) => c.rowIds)));
 const rowHasCapacityWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'capacity' && c.rowIds.includes(rowId));
+const rowHasHoursWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'hours' && c.rowIds.includes(rowId));
 
 const conflictTooltip = (rowId) => {
     const clientMessages = tableConflicts.value
@@ -687,15 +791,20 @@ const onDaysChange = (row, value) => {
     row.days = value;
     markDirty(row, 'days');
     autoFillEndTime(row);
+    // A different day count changes the weekly total — any previous
+    // Hours Mismatch confirmation no longer applies.
+    stateFor(row.id).hoursConfirmed = false;
 };
 const onStartTimeChange = (row, date) => {
     row.start_time = dateToTimeString(date);
     markDirty(row, 'start_time');
     autoFillEndTime(row);
+    stateFor(row.id).hoursConfirmed = false;
 };
 const onEndTimeChange = (row, date) => {
     row.end_time = dateToTimeString(date);
     markDirty(row, 'end_time');
+    stateFor(row.id).hoursConfirmed = false;
 };
 
 /* --- Save Schedule — validates every row client-side, then saves        */
@@ -789,6 +898,32 @@ const saveSchedule = async () => {
         });
     }
 
+    // Weekly Hours Mismatch Warnings — same "flag, then confirm to
+    // save anyway" pattern as Room Capacity above.
+    const stillUnconfirmedHours = unconfirmedHoursRowIds.value;
+    if (stillUnconfirmedHours.length > 0) {
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Weekly Hours Mismatch',
+            html: tableConflicts.value
+                .filter((c) => c.type === 'hours' && stillUnconfirmedHours.includes(c.rowIds[0]))
+                .map((c) => `<div class="text-left text-sm">${c.detail}</div>`)
+                .join(''),
+            showCancelButton: true,
+            confirmButtonText: 'Save Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+        });
+
+        if (!result.isConfirmed) {
+            return;
+        }
+
+        stillUnconfirmedHours.forEach((rowId) => {
+            stateFor(rowId).hoursConfirmed = true;
+        });
+    }
+
     savingSchedule.value = true;
 
     const buildPayload = () =>
@@ -797,11 +932,12 @@ const saveSchedule = async () => {
             faculty_id: row.faculty_id || null,
             room_id: row.room_id || null,
             days: row.days ?? [],
-            start_time: row.start_time || null,
-            end_time: row.end_time || null,
+            start_time: normalizeTimeString(row.start_time) || null,
+            end_time: normalizeTimeString(row.end_time) || null,
             capacity: row.capacity || null,
             capacity_confirmed: Boolean(stateFor(row.id).capacityConfirmed),
             workload_confirmed: Boolean(stateFor(row.id).workloadConfirmed),
+            hours_confirmed: Boolean(stateFor(row.id).hoursConfirmed),
         }));
 
     const submit = async () => {
@@ -917,6 +1053,18 @@ const autoGenerating = ref(false);
 const autoClearing = ref(false);
 const autoSummaryVisible = ref(false);
 const autoSummary = ref(null); // { total, scheduled, results, unresolved, message }
+
+// Tracks whether the combined Faculty/Room/Time "Show details"
+// checklist is expanded, per subject (keyed by section_subject_id).
+// One toggle per subject controls all three selectors together,
+// instead of each selector having its own independent toggle.
+const detailsExpanded = ref({});
+const toggleDetails = (sectionSubjectId) => {
+    detailsExpanded.value = {
+        ...detailsExpanded.value,
+        [sectionSubjectId]: !detailsExpanded.value[sectionSubjectId],
+    };
+};
 
 const applyFreshRows = (fresh) => {
     fresh.forEach((freshRow) => {
@@ -1204,7 +1352,14 @@ const onTimeOverride = (result, { time, overall_score }) => {
 
     const row = rows.value.find((r) => r.id === result.section_subject_id);
     if (row) {
-        row.days = time.days.join(',');
+        // rows[].days is an array everywhere else in this file
+        // (toDaysArray() on load, onFacultyOverride-style handlers,
+        // manual edits) — daysOverlap() and every other conflict
+        // check rely on that. Storing a joined string here was the
+        // one place that broke that contract, crashing
+        // daysOverlap()'s `.some()` call the next time tableConflicts
+        // recomputed.
+        row.days = [...time.days];
         row.start_time = time.start_time;
         row.end_time = time.end_time;
     }
@@ -1496,7 +1651,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         >
                             <Tag
                                 :value="conflict.label"
-                                :severity="conflict.type === 'capacity' ? 'warning' : 'danger'"
+                                :severity="conflict.type === 'capacity' || conflict.type === 'hours' ? 'warning' : 'danger'"
                                 class="!text-xs shrink-0"
                             />
                             <span class="text-slate-600">{{ conflict.detail }}</span>
@@ -1543,7 +1698,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             (row) =>
                                 rowIsInConflict(row)
                                     ? '!bg-red-50 conflict-row-clickable'
-                                    : rowHasCapacityWarning(row.id)
+                                    : rowHasCapacityWarning(row.id) || rowHasHoursWarning(row.id)
                                       ? '!bg-amber-50'
                                       : dirtyRowIds.has(row.id)
                                         ? '!bg-amber-50'
@@ -1575,52 +1730,52 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
                         <Column style="width: 100%">
                             <template #body="{ data }">
-                                <div class="flex flex-col gap-2.5 py-1.5">
+                                <div class="flex flex-col gap-3 py-2.5">
                                     <!-- Line 1: EDP Code / Subject Code / Subject Title / Category / Units / Status / Source / Actions -->
-                                    <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+                                    <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
                                         <div class="min-w-[7rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">EDP Code</p>
-                                            <span v-if="data.edp_code" class="font-mono text-xs font-semibold text-indigo-700">
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">EDP Code</p>
+                                            <span v-if="data.edp_code" class="font-mono text-sm font-semibold text-indigo-700">
                                                 {{ data.edp_code }}
                                             </span>
-                                            <Tag v-else value="Pending" severity="secondary" class="!text-[0.65rem]" />
+                                            <Tag v-else value="Pending" severity="secondary" class="!text-xs" />
                                         </div>
                                         <div class="min-w-[7rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Subject Code</p>
-                                            <span class="text-xs font-medium text-slate-700">{{ data.subject?.subject_code }}</span>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Subject Code</p>
+                                            <span class="text-sm font-medium text-slate-700">{{ data.subject?.subject_code }}</span>
                                         </div>
                                         <div class="min-w-[12rem] flex-1">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Subject Title</p>
-                                            <span class="text-xs text-slate-700">{{ data.subject?.subject_title }}</span>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Subject Title</p>
+                                            <span class="text-sm text-slate-700">{{ data.subject?.subject_title }}</span>
                                         </div>
                                         <div class="min-w-[7rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Category</p>
-                                            <Tag :value="data.subject?.category" :severity="categorySeverity(data.subject?.category)" class="!text-[0.65rem]" />
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Category</p>
+                                            <Tag :value="data.subject?.category" :severity="categorySeverity(data.subject?.category)" class="!text-xs" />
                                         </div>
                                         <div class="w-10">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Units</p>
-                                            <span class="text-xs text-slate-700">{{ data.subject?.units }}</span>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Units</p>
+                                            <span class="text-sm text-slate-700">{{ data.subject?.units }}</span>
                                         </div>
                                         <div class="min-w-[8rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Status</p>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Status</p>
                                             <div class="flex items-center gap-1 flex-wrap">
-                                                <Tag :value="displayStatus(data)" :severity="statusSeverity(displayStatus(data))" class="!text-[0.65rem]" />
+                                                <Tag :value="displayStatus(data)" :severity="statusSeverity(displayStatus(data))" class="!text-xs" />
                                                 <Tag
                                                     v-if="data.is_auto_generated"
                                                     value="⚡ Auto"
                                                     severity="help"
-                                                    class="!text-[0.65rem]"
+                                                    class="!text-xs"
                                                     title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Clear Generated Schedule to discard it."
                                                 />
                                                 <i
-                                                    v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id)"
+                                                    v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id) || rowHasHoursWarning(data.id)"
                                                     class="pi pi-exclamation-triangle"
                                                     :class="rowIsInConflict(data) ? 'text-red-500' : 'text-amber-500'"
                                                     :title="rowIsInConflict(data) ? (conflictTooltip(data.id) || 'Conflict — click the row to find the best schedule') : (conflictTooltip(data.id) || 'Unresolved scheduling conflict')"
                                                 ></i>
                                                 <span
                                                     v-if="rowIsInConflict(data)"
-                                                    class="text-[0.65rem] text-red-500 underline decoration-dotted cursor-pointer"
+                                                    class="text-xs text-red-500 underline decoration-dotted cursor-pointer"
                                                     @click.stop="openRecommendDrawer(data)"
                                                 >
                                                     Click to find best schedule
@@ -1628,8 +1783,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                             </div>
                                         </div>
                                         <div class="min-w-[6rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400">Source</p>
-                                            <Tag :value="data.source" :severity="sourceSeverity(data.source)" class="!text-[0.65rem]" />
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Source</p>
+                                            <Tag :value="data.source" :severity="sourceSeverity(data.source)" class="!text-xs" />
                                         </div>
                                         <div class="ml-auto flex items-center gap-1 self-end">
                                             <Button
@@ -1654,10 +1809,10 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     </div>
 
                                     <!-- Line 2: Faculty / Room / Days / Start Time / End Time -->
-                                    <div class="flex flex-wrap items-start gap-3 pt-2 border-t border-slate-100">
+                                    <div class="flex flex-wrap items-start gap-4 pt-3 border-t border-slate-200">
                                         <!-- Faculty -->
                                         <div class="flex-1 min-w-[15rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Faculty</p>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Faculty</p>
                                             <div class="flex items-start gap-1">
                                                 <Select
                                                     v-model="data.faculty_id"
@@ -1681,7 +1836,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     </template>
                                                     <template #option="{ option }">
                                                         <span>{{ option.label }}</span>
-                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
+                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-xs" />
                                                     </template>
                                                 </Select>
                                                 <Button
@@ -1696,17 +1851,17 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     @click="toggleFacultySuggestions($event, data)"
                                                 />
                                             </div>
-                                            <p v-if="stateFor(data.id).errors.faculty_id" class="text-red-500 text-xs mt-1">
+                                            <p v-if="stateFor(data.id).errors.faculty_id" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.faculty_id }}
                                             </p>
-                                            <p v-else-if="facultyConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                            <p v-else-if="facultyConflictRowIds.has(data.id)" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>Faculty already booked this day/time.
                                             </p>
                                         </div>
 
                                         <!-- Room -->
                                         <div class="flex-1 min-w-[14rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Room</p>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Room</p>
                                             <div class="flex items-start gap-1">
                                                 <Select
                                                     v-model="data.room_id"
@@ -1730,7 +1885,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     </template>
                                                     <template #option="{ option }">
                                                         <span>{{ option.label }}</span>
-                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
+                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-xs" />
                                                     </template>
                                                 </Select>
                                                 <Button
@@ -1745,20 +1900,20 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     @click="toggleRoomSuggestions($event, data)"
                                                 />
                                             </div>
-                                            <p v-if="stateFor(data.id).errors.room_id" class="text-red-500 text-xs mt-1">
+                                            <p v-if="stateFor(data.id).errors.room_id" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.room_id }}
                                             </p>
-                                            <p v-else-if="roomConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                            <p v-else-if="roomConflictRowIds.has(data.id)" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>Room already booked this day/time.
                                             </p>
-                                            <p v-else-if="rowHasCapacityWarning(data.id)" class="text-amber-600 text-xs mt-1">
+                                            <p v-else-if="rowHasCapacityWarning(data.id)" class="text-amber-600 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>Section capacity exceeds this room's capacity.
                                             </p>
                                         </div>
 
                                         <!-- Days -->
                                         <div class="flex-1 min-w-[12rem]">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Days</p>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Days</p>
                                             <div class="flex items-start gap-1">
                                                 <MultiSelect
                                                     v-model="data.days"
@@ -1800,17 +1955,17 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     @click="toggleTimeSuggestions($event, data)"
                                                 />
                                             </div>
-                                            <p v-if="stateFor(data.id).errors.days" class="text-red-500 text-xs mt-1">
+                                            <p v-if="stateFor(data.id).errors.days" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.days }}
                                             </p>
-                                            <p v-else-if="sectionConflictRowIds.has(data.id)" class="text-red-500 text-xs mt-1">
+                                            <p v-else-if="sectionConflictRowIds.has(data.id)" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>Overlaps another class in this section.
                                             </p>
                                         </div>
 
                                         <!-- Start Time -->
                                         <div class="w-36">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Start Time</p>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Start Time</p>
                                             <DatePicker
                                                 :modelValue="startTimeModel(data)"
                                                 timeOnly
@@ -1822,14 +1977,14 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 :class="{ 'p-invalid': stateFor(data.id).errors.start_time }"
                                                 @update:modelValue="(v) => onStartTimeChange(data, v)"
                                             />
-                                            <p v-if="stateFor(data.id).errors.start_time" class="text-red-500 text-xs mt-1">
+                                            <p v-if="stateFor(data.id).errors.start_time" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.start_time }}
                                             </p>
                                         </div>
 
                                         <!-- End Time -->
                                         <div class="w-36">
-                                            <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">End Time</p>
+                                            <p class="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">End Time</p>
                                             <DatePicker
                                                 :modelValue="endTimeModel(data)"
                                                 timeOnly
@@ -1841,8 +1996,12 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 :class="{ 'p-invalid': stateFor(data.id).errors.end_time }"
                                                 @update:modelValue="(v) => onEndTimeChange(data, v)"
                                             />
-                                            <p v-if="stateFor(data.id).errors.end_time" class="text-red-500 text-xs mt-1">
+                                            <p v-if="stateFor(data.id).errors.end_time" class="text-red-500 text-sm mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.end_time }}
+                                            </p>
+                                            <p v-else-if="rowHasHoursWarning(data.id)" class="text-amber-600 text-sm mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>
+                                                {{ actualWeeklyHoursFor(data) }} of {{ requiredWeeklyHoursFor(data) }} required hrs/week.
                                             </p>
                                         </div>
                                     </div>
@@ -2555,6 +2714,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     :section-id="section.id"
                                     :section-subject-id="result.section_subject_id"
                                     :model-value="result.faculty"
+                                    :show-details="!!detailsExpanded[result.section_subject_id]"
                                     @updated="onFacultyOverride(result, $event)"
                                 />
                             </div>
@@ -2565,6 +2725,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     :section-id="section.id"
                                     :section-subject-id="result.section_subject_id"
                                     :model-value="result.room"
+                                    :show-details="!!detailsExpanded[result.section_subject_id]"
                                     @updated="onRoomOverride(result, $event)"
                                 />
                             </div>
@@ -2575,7 +2736,25 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     :section-id="section.id"
                                     :section-subject-id="result.section_subject_id"
                                     :model-value="result.time"
+                                    :sibling-schedules="siblingSchedulesFor(result.section_subject_id)"
+                                    :scheduling-window="schedulingWindow"
+                                    :show-details="!!detailsExpanded[result.section_subject_id]"
                                     @updated="onTimeOverride(result, $event)"
+                                />
+                            </div>
+
+                            <!-- Single toggle for this subject's whole row — expands/collapses
+                                 the Faculty/Room/Time checklists together. -->
+                            <div class="sm:col-span-3 -mt-1">
+                                <Button
+                                    type="button"
+                                    :label="detailsExpanded[result.section_subject_id] ? 'Hide details' : 'Show details'"
+                                    :icon="detailsExpanded[result.section_subject_id] ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                                    icon-pos="right"
+                                    size="small"
+                                    text
+                                    class="!text-xs !py-1 !px-0"
+                                    @click="toggleDetails(result.section_subject_id)"
                                 />
                             </div>
 
@@ -2665,26 +2844,35 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
     background-color: rgb(254 226 226) !important; /* red-100 */
 }
 
+/* Make striped rows clearly distinct so it's easy to tell one
+   subject's row apart from the next at a glance. */
+.schedule-table :deep(.p-datatable-tbody > tr.p-row-odd) {
+    background-color: rgb(248 250 252); /* slate-50 */
+}
+
 .schedule-table :deep(.p-select),
 .schedule-table :deep(.p-multiselect),
 .schedule-table :deep(.p-datepicker-input) {
-    font-size: 0.8rem;
+    font-size: 0.9rem;
 }
 
-/* Slightly tighter row height/padding + smaller base font so more of
-   the table is visible at once and it's easier to scan/read. */
+/* Comfortable row height/padding + larger base font so the table is
+   easy to scan and read at a glance. */
 .schedule-table :deep(.p-datatable-thead > tr > th) {
-    padding: 0.6rem 0.75rem;
-    font-size: 0.8rem;
+    padding: 0.85rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 700;
 }
 .schedule-table :deep(.p-datatable-tbody > tr > td) {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8rem;
+    padding: 0.9rem 1rem;
+    font-size: 0.9rem;
+    border-bottom: 1px solid rgb(226 232 240); /* slate-200 — clearer row separation */
 }
 .schedule-table :deep(.p-select-label),
 .schedule-table :deep(.p-multiselect-label),
 .schedule-table :deep(.p-inputtext) {
-    padding-top: 0.4rem;
-    padding-bottom: 0.4rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    font-size: 0.9rem;
 }
 </style>

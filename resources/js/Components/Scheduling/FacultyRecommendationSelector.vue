@@ -17,11 +17,16 @@ import { ref, computed, watch, onMounted } from 'vue';
 import AutoComplete from 'primevue/autocomplete';
 import Tag from 'primevue/tag';
 import ProgressBar from 'primevue/progressbar';
+import Button from 'primevue/button';
 
 const props = defineProps({
     sectionId: { type: [Number, String], required: true },
     sectionSubjectId: { type: [Number, String], required: true },
     modelValue: { type: Object, required: true }, // current faculty meta (id, name, score, confidence, reasons, tier, badge, ...)
+    // Controlled by the parent (Show.vue) — one "Show details" toggle
+    // per subject drives Faculty/Room/Time together instead of each
+    // selector having its own independent toggle.
+    showDetails: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['updated']);
@@ -229,7 +234,7 @@ const select = async (event) => {
             :pt="{ value: { style: `background:${scoreColor(current.score ?? 0)}` } }"
         />
 
-        <ul class="mt-2 space-y-0.5">
+        <ul v-if="showDetails" class="mt-1 space-y-0.5">
             <li
                 v-for="(reason, idx) in current.reasons ?? []"
                 :key="idx"

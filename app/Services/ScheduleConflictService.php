@@ -64,6 +64,15 @@ use Illuminate\Support\Collection;
 class ScheduleConflictService
 {
     /**
+     * Per-request cache for activeSemesterSectionIds() — see that
+     * method's docblock. Reset is never needed: a single HTTP request
+     * (and the single ScheduleConflictService instance Laravel's
+     * container resolves for it) never spans more than one Active
+     * Academic Term.
+     */
+    private ?Collection $activeSemesterSectionIdsCache = null;
+
+    /**
      * Run every conflict/availability check for one schedule slot, in
      * strict priority order, and return the errors keyed the way the
      * scheduling workspace's form expects (faculty_id / room_id /
@@ -263,11 +272,23 @@ class ScheduleConflictService
      */
     public function activeSemesterSectionIds(): Collection
     {
+        // Memoized per-request — a single overrideTime()/save call can
+        // invoke this 2-3x (Faculty check, Room check, and indirectly
+        // via recommendTimes()'s own candidate scoring). Without this,
+        // every one of those re-runs AcademicTerm::active() plus the
+        // full matching-Sections query from scratch even though the
+        // active Academic Term never changes mid-request — the main
+        // reason "Apply" on the Edit Day & Time popover feels slower
+        // than it needs to.
+        if ($this->activeSemesterSectionIdsCache !== null) {
+            return $this->activeSemesterSectionIdsCache;
+        }
+
         $activeTerm = AcademicTerm::active();
 
         $query = $activeTerm ? $activeTerm->matchingSectionsQuery() : Section::query();
 
-        return $query->pluck('id');
+        return $this->activeSemesterSectionIdsCache = $query->pluck('id');
     }
 
     /**

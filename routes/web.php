@@ -120,6 +120,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/scheduling/rooms/{room}/recommendations/{recommendation}', [RoomRecommendationController::class, 'destroy'])->name('scheduling.rooms.recommendations.destroy');
     Route::get('/scheduling/sections', [SectionController::class, 'index'])->name('scheduling.sections');
     Route::post('/scheduling/sections', [SectionController::class, 'store'])->name('scheduling.sections.store');
+    Route::post('/scheduling/sections/preview-batch', [SectionController::class, 'previewBatch'])->name('scheduling.sections.preview-batch');
+    Route::post('/scheduling/sections/batch', [SectionController::class, 'storeBatch'])->name('scheduling.sections.store-batch');
     Route::put('/scheduling/sections/{section}', [SectionController::class, 'update'])->name('scheduling.sections.update');
     Route::delete('/scheduling/sections/{section}', [SectionController::class, 'destroy'])->name('scheduling.sections.destroy');
     Route::get('/scheduling/section-subjects', [SectionSubjectController::class, 'index'])->name('scheduling.section-subjects');

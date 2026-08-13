@@ -66,7 +66,7 @@ watch(
     { immediate: true }
 );
 
-defineExpose({ reload: loadRecommendations });
+defineExpose({ reload: loadRecommendations, openAdd });
 
 /* ------------------------------------------------------------------ */
 /* Add Subject Recommendation modal                                   */
@@ -182,7 +182,7 @@ async function confirmRemove() {
 
 <template>
     <div>
-        <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center justify-between mb-2 gap-2 flex-wrap">
             <p class="text-sm font-semibold text-slate-700">Recommended Subjects</p>
             <Tag :value="`${count} subject${count === 1 ? '' : 's'} recommended`" severity="info" />
         </div>
@@ -197,10 +197,9 @@ async function confirmRemove() {
 
         <div v-else-if="recommendations.length === 0" class="rounded-xl border border-dashed border-slate-200 p-5 text-center">
             <p class="text-sm font-medium text-slate-600">No subject recommendations yet</p>
-            <p class="text-xs text-slate-400 mt-1 mb-3">
+            <p class="text-xs text-slate-400 mt-1">
                 Add subjects that should be prioritized for this room during automatic scheduling.
             </p>
-            <Button v-if="canManage" label="Add Subject Recommendation" icon="pi pi-plus" size="small" @click="openAdd" />
         </div>
 
         <div v-else class="space-y-2">
@@ -232,16 +231,6 @@ async function confirmRemove() {
                     @click="askRemove(row)"
                 />
             </div>
-
-            <Button
-                v-if="canManage"
-                label="Add Subject Recommendation"
-                icon="pi pi-plus"
-                size="small"
-                outlined
-                class="mt-1"
-                @click="openAdd"
-            />
         </div>
 
         <!-- Add Subject Recommendation modal -->

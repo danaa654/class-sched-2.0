@@ -27,11 +27,15 @@ import { ref, computed, watch, onMounted } from 'vue';
 import AutoComplete from 'primevue/autocomplete';
 import Tag from 'primevue/tag';
 import ProgressBar from 'primevue/progressbar';
+import Button from 'primevue/button';
 
 const props = defineProps({
     sectionId: { type: [Number, String], required: true },
     sectionSubjectId: { type: [Number, String], required: true },
     modelValue: { type: Object, required: true }, // current room meta (id, name, score, confidence, reasons, match_tier, badge, ...)
+    // Controlled by the parent (Show.vue) — one "Show details" toggle
+    // per subject drives Faculty/Room/Time together.
+    showDetails: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['updated']);
@@ -261,21 +265,23 @@ const select = async (event) => {
             :pt="{ value: { style: `background:${scoreColor(current.score ?? 0)}` } }"
         />
 
-        <ul class="mt-2 space-y-0.5">
-            <li
-                v-for="(reason, idx) in current.reasons ?? []"
-                :key="idx"
-                class="text-xs flex items-center gap-1"
-                :class="reason.type === 'warning' ? 'text-amber-600' : (reason.met ? 'text-green-600' : 'text-slate-400')"
-            >
-                <i :class="reason.type === 'warning' ? 'pi pi-exclamation-triangle' : (reason.met ? 'pi pi-check' : 'pi pi-times')"></i>{{ reason.label }}
-            </li>
-        </ul>
+        <template v-if="showDetails">
+            <ul class="mt-1 space-y-0.5">
+                <li
+                    v-for="(reason, idx) in current.reasons ?? []"
+                    :key="idx"
+                    class="text-xs flex items-center gap-1"
+                    :class="reason.type === 'warning' ? 'text-amber-600' : (reason.met ? 'text-green-600' : 'text-slate-400')"
+                >
+                    <i :class="reason.type === 'warning' ? 'pi pi-exclamation-triangle' : (reason.met ? 'pi pi-check' : 'pi pi-times')"></i>{{ reason.label }}
+                </li>
+            </ul>
 
-        <!-- Why this room? -->
-        <p v-if="current.explanation && !isManualOverride" class="text-xs text-slate-500 mt-2 leading-relaxed">
-            <i class="pi pi-info-circle text-slate-400 mr-1"></i>{{ current.explanation }}
-        </p>
+            <!-- Why this room? -->
+            <p v-if="current.explanation && !isManualOverride" class="text-xs text-slate-500 mt-2 leading-relaxed">
+                <i class="pi pi-info-circle text-slate-400 mr-1"></i>{{ current.explanation }}
+            </p>
+        </template>
     </div>
 </template>
 

@@ -31,11 +31,13 @@ class SectionSubject extends Model
         'subject_id',
         'source',
         'capacity',
+        'capacity_confirmed',
         'faculty_id',
         'room_id',
         'days',
         'start_time',
         'end_time',
+        'hours_confirmed',
         'status',
         'remarks',
         'edp_code',
@@ -53,11 +55,44 @@ class SectionSubject extends Model
     {
         return [
             'capacity' => 'integer',
+            'capacity_confirmed' => 'boolean',
+            'hours_confirmed' => 'boolean',
             'is_auto_generated' => 'boolean',
             'auto_generated_meta' => 'array',
             'is_merged' => 'boolean',
             'merge_recommendation' => 'array',
         ];
+    }
+
+    /**
+     * start_time/end_time are DB `time` columns, so MySQL/PDO hands
+     * back "HH:mm:ss" (with seconds) on every read. Left as-is, that
+     * raw string leaks straight through to the frontend and, for any
+     * row the Registrar never re-touches via the Time picker, straight
+     * back out to the Save Schedule payload — where it fails the
+     * "HH:mm"-only date_format:H:i rule in Update/BatchUpdate...Request
+     * ("Nothing saved — the rows.0.start_time field must match the
+     * format H:i").
+     *
+     * These are plain Attribute accessors (not a `datetime:H:i` cast)
+     * so start_time/end_time keep returning plain "HH:mm" *strings*
+     * everywhere — several call sites (e.g.
+     * SectionSubjectController::minutesBetween()) type-hint `string`
+     * and do `explode(':', $value)`, which a Carbon object would
+     * silently corrupt.
+     */
+    protected function startTime(): \Illuminate\Database\Eloquent\Casts\Attribute
+    {
+        return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+            get: fn (?string $value) => $value ? substr($value, 0, 5) : $value,
+        );
+    }
+
+    protected function endTime(): \Illuminate\Database\Eloquent\Casts\Attribute
+    {
+        return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+            get: fn (?string $value) => $value ? substr($value, 0, 5) : $value,
+        );
     }
 
     /**

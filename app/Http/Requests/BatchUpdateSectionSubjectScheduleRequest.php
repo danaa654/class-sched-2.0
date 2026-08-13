@@ -52,6 +52,10 @@ class BatchUpdateSectionSubjectScheduleRequest extends FormRequest
             // this row — lets that row save despite the warning. See
             // SectionSubjectController::batchUpdateSchedule().
             'rows.*.capacity_confirmed' => ['nullable', 'boolean'],
+            // Same acknowledgment pattern as capacity_confirmed above,
+            // for a Weekly Hours Mismatch (scheduled Days x Time
+            // doesn't add up to the Subject's required weekly hours).
+            'rows.*.hours_confirmed' => ['nullable', 'boolean'],
         ];
     }
 

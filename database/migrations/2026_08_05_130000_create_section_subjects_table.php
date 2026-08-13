@@ -34,11 +34,31 @@ return new class extends Migration
             // added — Faculty, Room, and Time are assigned later by
             // the scheduling engine, never automatically here.
             $table->unsignedInteger('capacity')->nullable();
+
+            // Room Capacity Warning (Section Capacity > Room Capacity)
+            // is a confirmable, non-blocking warning — the Registrar
+            // can "Save Anyway". This persists that acknowledgment so
+            // it stays resolved across page loads instead of
+            // re-flagging the exact same, already-confirmed mismatch
+            // every time the schedule is reloaded. Reset to false the
+            // moment the Room actually changes (see overrideRoom() /
+            // onRoomChange()), since a new Room may or may not still
+            // fit.
+            $table->boolean('capacity_confirmed')->default(false);
+
             $table->foreignId('faculty_id')->nullable()->constrained('faculties')->nullOnDelete();
             $table->foreignId('room_id')->nullable()->constrained('rooms')->nullOnDelete();
             $table->string('days')->nullable();
             $table->time('start_time')->nullable();
             $table->time('end_time')->nullable();
+
+            // Weekly Hours Mismatch (scheduled Days x Start/End total
+            // doesn't equal the Subject's required weekly hours) — the
+            // same confirmable/non-blocking/persisted pattern as
+            // capacity_confirmed above. Reset to false whenever
+            // Days/Start/End actually change.
+            $table->boolean('hours_confirmed')->default(false);
+
             $table->enum('status', ['Draft', 'Scheduled', 'Conflict'])->default('Draft');
 
             // Auto Generate Schedule (Prompt 8.9) — set when the Faculty,

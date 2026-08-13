@@ -23,7 +23,12 @@ return new class extends Migration
             $table->string('section_code');
             $table->string('section_name');
             $table->foreignId('major_id')->constrained('majors');
-            $table->foreignId('curriculum_id')->constrained('curriculums');
+            // Nullable — Regular sections require a Prospectus
+            // (enforced in StoreSectionRequest/StoreSectionBatchRequest,
+            // not here), but Irregular sections don't necessarily
+            // follow one Prospectus, so this stays optional at the DB
+            // level.
+            $table->foreignId('curriculum_id')->nullable()->constrained('curriculums');
             $table->string('academic_year');
             $table->enum('semester', ['First Semester', 'Second Semester', 'Summer'])->default('First Semester');
             $table->enum('year_level', [
