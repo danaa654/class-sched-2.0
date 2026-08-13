@@ -165,7 +165,21 @@ Route::middleware('auth')->group(function () {
     // transaction (Prompt 8.4 — Manual Scheduling Per Subject).
     Route::post('/scheduling/section-subjects/{section}/schedule/batch', [SectionSubjectController::class, 'batchUpdateSchedule'])->name('scheduling.section-subjects.schedule.batch');
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
+
+    // SETTINGS — system-wide configuration only (see SettingsController
+    // and App\Services\SettingsService). GET renders the page; each PUT
+    // saves one tab's group of settings; the POST is a non-destructive
+    // "refresh configuration cache" action for Administrators.
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
+    Route::put('/settings/general', [SettingsController::class, 'updateGeneral'])->name('settings.general.update');
+    Route::put('/settings/academic', [SettingsController::class, 'updateAcademic'])->name('settings.academic.update');
+    Route::put('/settings/meeting-frequency', [SettingsController::class, 'updateMeetingFrequency'])->name('settings.meeting.update');
+    Route::put('/settings/workload', [SettingsController::class, 'updateWorkload'])->name('settings.workload.update');
+    Route::put('/settings/rooms', [SettingsController::class, 'updateRooms'])->name('settings.rooms.update');
+    Route::put('/settings/auto-schedule', [SettingsController::class, 'updateAutoSchedule'])->name('settings.autoschedule.update');
+    Route::put('/settings/irregular', [SettingsController::class, 'updateIrregular'])->name('settings.irregular.update');
+    Route::put('/settings/notifications', [SettingsController::class, 'updateNotifications'])->name('settings.notifications.update');
+    Route::post('/settings/system/refresh-cache', [SettingsController::class, 'refreshCache'])->name('settings.system.refresh-cache');
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });
