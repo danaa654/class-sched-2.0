@@ -10,6 +10,7 @@ const props = defineProps({
         // { faculty_conflicts, room_conflicts, time_conflicts,
         //   unscheduled_subjects, missing_faculty, missing_rooms }
     },
+    isDark: { type: Boolean, default: false },
 });
 
 // Every conflict type currently routes to the Section Subjects
@@ -28,17 +29,29 @@ const items = computed(() => [
 const totalIssues = computed(() =>
     Object.values(props.conflicts).reduce((sum, count) => sum + count, 0)
 );
+
+const cardPt = computed(() => ({
+    body: { class: props.isDark ? '!bg-transparent' : '' },
+}));
 </script>
 
 <template>
-    <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+    <Card
+        class="!rounded-2xl border shadow-sm transition-colors duration-300"
+        :class="isDark ? '!border-white/10 !bg-white/[0.06] !backdrop-blur-xl' : '!border-slate-100 !bg-white'"
+        :pt="cardPt"
+    >
         <template #title>
-            <span class="text-lg font-bold text-[#1E293B]">Attention Needed</span>
+            <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Attention Needed</span>
         </template>
         <template #content>
-            <div v-if="totalIssues === 0" class="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-5">
-                <i class="pi pi-check-circle text-2xl text-emerald-600"></i>
-                <p class="font-medium text-emerald-800">No scheduling conflicts detected.</p>
+            <div
+                v-if="totalIssues === 0"
+                class="flex items-center gap-3 rounded-xl border px-4 py-5"
+                :class="isDark ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-emerald-100 bg-emerald-50'"
+            >
+                <i class="pi pi-check-circle text-2xl" :class="isDark ? 'text-emerald-400' : 'text-emerald-600'"></i>
+                <p class="font-medium" :class="isDark ? 'text-emerald-300' : 'text-emerald-800'">No scheduling conflicts detected.</p>
             </div>
 
             <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -48,20 +61,22 @@ const totalIssues = computed(() =>
                     :href="route('scheduling.section-subjects')"
                     class="flex items-center gap-3 rounded-xl border p-4 transition-colors"
                     :class="conflicts[item.key] > 0
-                        ? 'border-red-100 bg-red-50 hover:bg-red-100'
-                        : 'border-slate-100 hover:bg-slate-50'"
+                        ? (isDark ? 'border-red-400/20 bg-red-500/10 hover:bg-red-500/20' : 'border-red-100 bg-red-50 hover:bg-red-100')
+                        : (isDark ? 'border-white/10 hover:bg-white/[0.06]' : 'border-slate-100 hover:bg-slate-50')"
                 >
                     <span
                         class="flex h-10 w-10 flex-none items-center justify-center rounded-full"
-                        :class="conflicts[item.key] > 0 ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-400'"
+                        :class="conflicts[item.key] > 0
+                            ? (isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-600')
+                            : (isDark ? 'bg-white/10 text-slate-400' : 'bg-slate-100 text-slate-400')"
                     >
                         <i :class="['pi', item.icon]"></i>
                     </span>
                     <div>
-                        <p class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{{ item.label }}</p>
+                        <p class="text-xs font-semibold tracking-wide uppercase" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ item.label }}</p>
                         <p
                             class="text-xl font-bold"
-                            :class="conflicts[item.key] > 0 ? 'text-red-700' : 'text-[#1E293B]'"
+                            :class="conflicts[item.key] > 0 ? (isDark ? 'text-red-400' : 'text-red-700') : (isDark ? 'text-white' : 'text-[#1E293B]')"
                         >
                             {{ conflicts[item.key] }}
                         </p>

@@ -21,6 +21,10 @@ import Dialog from 'primevue/dialog';
 import Select from 'primevue/select';
 import FloatLabel from 'primevue/floatlabel';
 import Toast from 'primevue/toast';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     colleges: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
@@ -512,10 +516,10 @@ const onRestoreMajor = (major) => {
         <Toast />
 
         <template #header>
-            <span class="text-lg font-semibold text-[#1E293B]">Academic Structure</span>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Academic Structure</span>
         </template>
 
-        <div class="max-w-7xl mx-auto w-full">
+        <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-6">
                 <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Academic Structure</h1>
@@ -902,9 +906,10 @@ const onRestoreMajor = (major) => {
             :style="{ width: '600px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
         >
             <template #header>
-                <span class="text-lg font-bold text-[#1E293B]">
+                <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     {{ collegeDialogMode === 'add' ? 'Add College' : 'Edit College' }}
                 </span>
             </template>
@@ -1000,9 +1005,10 @@ const onRestoreMajor = (major) => {
             :style="{ width: '600px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
         >
             <template #header>
-                <span class="text-lg font-bold text-[#1E293B]">
+                <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     {{ departmentDialogMode === 'add' ? 'Add Department' : 'Edit Department' }}
                 </span>
             </template>
@@ -1115,9 +1121,10 @@ const onRestoreMajor = (major) => {
             :style="{ width: '600px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
         >
             <template #header>
-                <span class="text-lg font-bold text-[#1E293B]">
+                <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     {{ majorDialogMode === 'add' ? 'Add Major' : 'Edit Major' }}
                 </span>
             </template>
@@ -1254,3 +1261,58 @@ const onRestoreMajor = (major) => {
         </Dialog>
     </AppLayout>
 </template>
+<style scoped>
+/* Dark-mode overrides. Wrapping an element in the "dark-scope" class
+   (added conditionally via isDark) recolors the shared light-mode
+   Tailwind utility classes and PrimeVue component chrome used
+   throughout this page — including inside Dialogs, which PrimeVue
+   teleports to <body> but keeps as one contiguous subtree, so these
+   descendant selectors still reach them. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.bg-white) { background-color: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.bg-slate-50) { background-color: rgba(255, 255, 255, 0.04) !important; }
+.dark-scope :deep(.bg-slate-100) { background-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
+
+.dark-scope :deep(.p-card) { background: rgba(255, 255, 255, 0.06) !important; color: #F8FAFC; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+
+.dark-scope :deep(.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-inputtext),
+.dark-scope :deep(.p-password-input),
+.dark-scope :deep(.p-select),
+.dark-scope :deep(.p-multiselect),
+.dark-scope :deep(.p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-select-label),
+.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-divider.p-divider-horizontal:before) { border-color: rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-tab) { color: #94A3B8 !important; }
+.dark-scope :deep(.p-tab-active) { color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.04) !important; color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #E2E8F0 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.03) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.p-paginator) { background: transparent !important; color: #CBD5E1 !important; }
+
+.dark-scope :deep(.p-menu) { background: #0F1730 !important; border-color: rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-menu .p-menu-item-link) { color: #E2E8F0 !important; }
+.dark-scope :deep(.p-menu .p-menu-item-link:hover) { background: rgba(255, 255, 255, 0.06) !important; }
+</style>

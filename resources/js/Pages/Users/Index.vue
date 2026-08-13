@@ -25,6 +25,10 @@ import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Menu from 'primevue/menu';
 import Swal from 'sweetalert2';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     users: { type: Array, default: () => [] },
@@ -379,14 +383,14 @@ const onUpdateAccount = () => {
         <Toast />
 
         <template #header>
-            <span class="text-lg font-semibold text-[#1E293B]">User Management</span>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">User Management</span>
         </template>
 
-        <div class="max-w-7xl mx-auto w-full">
+        <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">User Management</h1>
-                <p class="mt-1 text-slate-500">
+                <h1 class="text-2xl font-bold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">User Management</h1>
+                <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage system accounts and role assignments.
                 </p>
             </div>
@@ -400,7 +404,9 @@ const onUpdateAccount = () => {
                 <TabPanels>
                     <!-- Users Tab -->
                     <TabPanel value="users">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <Card
+                            :pt="{ root: { class: ['app-glass-card', 'max-w-full', isDark ? 'is-dark' : 'is-light'] } }"
+                        >
                             <template #content>
                                 <!-- Top Toolbar -->
                                 <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4">
@@ -479,10 +485,12 @@ const onUpdateAccount = () => {
 
                     <!-- Manage Account Tab (Administrator only) -->
                     <TabPanel v-if="isAdministrator" value="account">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm max-w-2xl">
+                        <Card
+                            :pt="{ root: { class: ['app-glass-card', 'max-w-2xl', isDark ? 'is-dark' : 'is-light'] } }"
+                        >
                             <template #content>
-                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Manage Account</h2>
-                                <p class="text-sm text-slate-500 mb-5">
+                                <h2 class="text-lg font-bold mb-1" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Manage Account</h2>
+                                <p class="text-sm mb-5" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                                     Update your own Administrator profile and password.
                                 </p>
 
@@ -605,9 +613,10 @@ const onUpdateAccount = () => {
             :style="{ width: '800px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: ['app-glass-dialog', isDark ? 'is-dark dark-scope' : 'is-light'] } }"
         >
             <template #header>
-                <span class="text-lg font-bold text-[#1E293B]">Create System User</span>
+                <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Create System User</span>
             </template>
 
             <form class="pt-2" autocomplete="off" @submit.prevent="onCreateUser">
@@ -837,9 +846,10 @@ const onUpdateAccount = () => {
             :style="{ width: '800px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: ['app-glass-dialog', isDark ? 'is-dark dark-scope' : 'is-light'] } }"
         >
             <template #header>
-                <span class="text-lg font-bold text-[#1E293B]">Edit System User</span>
+                <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Edit System User</span>
             </template>
 
             <form class="pt-2" autocomplete="off" @submit.prevent="onUpdateUser">
@@ -1061,3 +1071,143 @@ const onUpdateAccount = () => {
         </Dialog>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides. Wrapping an element in the "dark-scope" class
+   (added conditionally via isDark) recolors the shared light-mode
+   Tailwind utility classes and PrimeVue component chrome used
+   throughout this page — including inside Dialogs, which PrimeVue
+   teleports to <body> but keeps as one contiguous subtree, so these
+   descendant selectors still reach them. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.bg-white) { background-color: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.bg-slate-50) { background-color: rgba(255, 255, 255, 0.04) !important; }
+.dark-scope :deep(.bg-slate-100) { background-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
+
+/* ------------------------------------------------------------------ */
+/* Glassmorphism — Card                                                */
+/* Plain CSS (no Tailwind arbitrary-value classes) so this reliably    */
+/* beats PrimeVue's own injected component styles regardless of        */
+/* cascade-layer/build quirks. app-glass-card sits on the Card's own   */
+/* root element (it IS .p-card), so plain class selectors below target */
+/* it directly — no :deep() needed for the root itself.                */
+/* ------------------------------------------------------------------ */
+.app-glass-card {
+    border-radius: 1rem !important;
+    border-width: 1px !important;
+    border-style: solid !important;
+    margin-top: 1.25rem;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.app-glass-card.is-light {
+    background: rgba(255, 255, 255, 0.6) !important;
+    border-color: rgba(255, 255, 255, 0.7) !important;
+    box-shadow: 0 8px 32px rgba(30, 41, 59, 0.08);
+}
+.app-glass-card.is-dark {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+/* The Card body/content wrapper inside it must stay transparent so the
+   translucency above actually shows through. */
+:deep(.app-glass-card .p-card-body),
+:deep(.app-glass-card .p-card-content) {
+    background: transparent !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Glassmorphism — Dialogs (Add/Edit User)                             */
+/* Dialog is teleported through PrimeVue's internal Portal/Transition   */
+/* wrappers, several component layers removed from this file's own     */
+/* template. Vue's scoped "data-v-xxxx" attribute isn't guaranteed to   */
+/* propagate that deep, so scoped selectors (even :deep()) can silently */
+/* match nothing. :global() sidesteps that entirely — these rules key   */
+/* off the app-glass-dialog/is-dark/is-light classes we pass in via pt, */
+/* with no dependency on Vue's scope attribute being present.           */
+/* ------------------------------------------------------------------ */
+:global(.app-glass-dialog) {
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-width: 1px !important;
+    border-style: solid !important;
+    border-radius: 1rem !important;
+}
+:global(.app-glass-dialog.is-light) {
+    background: rgba(255, 255, 255, 0.8) !important;
+    border-color: rgba(255, 255, 255, 0.6) !important;
+    box-shadow: 0 8px 32px rgba(30, 41, 59, 0.18);
+}
+:global(.app-glass-dialog.is-dark) {
+    background: rgba(15, 23, 48, 0.8) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+    color: #F8FAFC !important;
+}
+:global(.app-glass-dialog .p-dialog-header),
+:global(.app-glass-dialog .p-dialog-content),
+:global(.app-glass-dialog .p-dialog-footer) {
+    background: transparent !important;
+}
+:global(.app-glass-dialog.is-light .p-dialog-header) { border-bottom: 1px solid rgba(30, 41, 59, 0.08) !important; }
+:global(.app-glass-dialog.is-light .p-dialog-footer) { border-top: 1px solid rgba(30, 41, 59, 0.08) !important; }
+:global(.app-glass-dialog.is-dark .p-dialog-header) { border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+:global(.app-glass-dialog.is-dark .p-dialog-content) { color: #F8FAFC !important; }
+:global(.app-glass-dialog.is-dark .p-dialog-footer) { border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+
+/* Inputs inside the dialog get a frosted look matching each mode. */
+:global(.app-glass-dialog.is-light .p-inputtext),
+:global(.app-glass-dialog.is-light .p-password-input),
+:global(.app-glass-dialog.is-light .p-select),
+:global(.app-glass-dialog.is-light .p-multiselect) {
+    background: rgba(255, 255, 255, 0.6) !important;
+    border-color: rgba(30, 41, 59, 0.12) !important;
+}
+:global(.app-glass-dialog.is-dark .p-inputtext),
+:global(.app-glass-dialog.is-dark .p-password-input),
+:global(.app-glass-dialog.is-dark .p-select),
+:global(.app-glass-dialog.is-dark .p-multiselect),
+:global(.app-glass-dialog.is-dark .p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+:global(.app-glass-dialog.is-dark .p-select-label),
+:global(.app-glass-dialog.is-dark .p-multiselect-label) { color: #F8FAFC !important; }
+:global(.app-glass-dialog.is-dark .p-divider.p-divider-horizontal:before) { border-color: rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-tab) { color: #94A3B8 !important; }
+.dark-scope :deep(.p-tab-active) { color: #F8FAFC !important; }
+
+/* The TabPanels wrapper paints its own opaque white background + padding
+   by default — that was hiding the glass Card sitting inside it. Strip
+   it out in both modes so the Card's own translucent surface is what
+   the user actually sees. */
+:deep(.p-tabpanels) {
+    background: transparent !important;
+    padding: 0 !important;
+}
+:deep(.p-tabpanel) {
+    background: transparent !important;
+}
+
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.04) !important; color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #E2E8F0 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.03) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.p-paginator) { background: transparent !important; color: #CBD5E1 !important; }
+
+.dark-scope :deep(.p-menu) { background: #0F1730 !important; border-color: rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-menu .p-menu-item-link) { color: #E2E8F0 !important; }
+.dark-scope :deep(.p-menu .p-menu-item-link:hover) { background: rgba(255, 255, 255, 0.06) !important; }
+</style>

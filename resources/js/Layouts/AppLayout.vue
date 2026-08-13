@@ -87,7 +87,7 @@ const isActive = (routeName) => {
 <template>
     <div class="min-h-screen transition-colors duration-300" :class="isDark ? 'bg-[#0B1120]' : 'bg-[#F8FAFC]'">
         <!-- Top Navigation Bar -->
-        <header class="h-16 w-full bg-[#121358] shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
+        <header class="h-16 w-full bg-[#13005A] shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
             <div class="flex items-center gap-4">
                 <button
                     type="button"
@@ -121,7 +121,7 @@ const isActive = (routeName) => {
 
         <!-- Left Sidebar -->
         <aside
-            class="fixed top-16 left-0 bottom-0 bg-[#121358] text-slate-200 overflow-hidden transition-all duration-200 z-20"
+            class="fixed top-16 left-0 bottom-0 bg-[#13005A] text-slate-200 overflow-hidden transition-all duration-200 z-20"
             :class="sidebarOpen ? 'w-[260px]' : 'w-0 overflow-hidden'"
         >
             <nav class="h-full overflow-hidden py-3 px-2 space-y-0.5 w-[260px] text-[13px]">

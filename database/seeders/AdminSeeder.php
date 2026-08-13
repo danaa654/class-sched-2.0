@@ -23,7 +23,7 @@ class AdminSeeder extends Seeder
             ['email' => 'admin@classly.local'],
             [
                 'name' => 'Administrator',
-                'password' => Hash::make('Admin@123'),
+                'password' => Hash::make('admin@classly.local'),
                 'email_verified_at' => now(),
             ]
         );

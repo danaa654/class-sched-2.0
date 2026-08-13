@@ -17,6 +17,10 @@ import Select from 'primevue/select';
 import FloatLabel from 'primevue/floatlabel';
 import Toast from 'primevue/toast';
 import Checkbox from 'primevue/checkbox';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     academicTerms: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
@@ -306,30 +310,35 @@ const onRestoreAcademicTerm = (academicTerm) => {
         <Toast />
 
         <template #header>
-            <span class="text-lg font-semibold text-[#1E293B]">Academic Calendar</span>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Academic Calendar</span>
         </template>
 
         <div class="max-w-7xl mx-auto w-full">
             <!-- Page Title -->
             <div class="mb-6">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Academic Calendar</h1>
-                <p class="mt-1 text-slate-500">
+                <h1 class="text-2xl font-bold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Academic Calendar</h1>
+                <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage academic terms — School Year, Semester, and Scheduling Preferences all in one place.
                 </p>
             </div>
 
             <!-- Academic Terms -->
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <Card
+                class="!rounded-2xl border shadow-sm transition-colors duration-300"
+                :class="isDark ? '!border-white/10 !bg-white/[0.06] !backdrop-blur-xl' : '!border-slate-100 !bg-white'"
+                :pt="{ body: { class: isDark ? '!bg-transparent' : '' } }"
+            >
                 <template #content>
                     <!-- Top Toolbar -->
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                         <template #start>
                             <span class="relative w-full sm:w-80">
-                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                 <InputText
                                     v-model="academicTermSearch"
                                     placeholder="Search by school year or semester"
                                     class="w-full !pl-9"
+                                    :class="isDark ? '!border-white/15 !bg-white/[0.06] !text-white placeholder:!text-slate-500' : ''"
                                 />
                             </span>
                         </template>
@@ -354,6 +363,7 @@ const onRestoreAcademicTerm = (academicTerm) => {
                         :loading="academicTermLoading"
                         dataKey="id"
                         class="rounded-xl overflow-hidden"
+                        :class="isDark ? 'academic-calendar-table-dark' : ''"
                         stripedRows
                         responsiveLayout="scroll"
                         lazy
@@ -365,7 +375,7 @@ const onRestoreAcademicTerm = (academicTerm) => {
                     >
                         <template #empty>
                             <div class="text-center py-10">
-                                <p class="text-slate-500 font-medium">No academic terms found.</p>
+                                <p class="font-medium" :class="isDark ? 'text-slate-400' : 'text-slate-500'">No academic terms found.</p>
                                 <Button
                                     label="Add Academic Term"
                                     icon="pi pi-plus"
@@ -397,17 +407,17 @@ const onRestoreAcademicTerm = (academicTerm) => {
                         </Column>
                         <Column header="Scheduling Window" style="width: 16rem">
                             <template #body="{ data }">
-                                <span class="text-slate-500 text-sm">
+                                <span class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                                     {{ formatTimeLabel(data.school_year?.class_start_time?.slice(0, 5)) }} – {{ formatTimeLabel(data.school_year?.class_end_time?.slice(0, 5)) }}
                                 </span>
-                                <div class="text-xs text-slate-400 mt-0.5">
+                                <div class="text-xs mt-0.5" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                                     {{ (data.school_year?.available_days ?? []).join(', ') || '—' }}
                                 </div>
                             </template>
                         </Column>
                         <Column field="remarks" header="Remarks">
                             <template #body="{ data }">
-                                <span class="text-slate-500">{{ data.remarks || '—' }}</span>
+                                <span :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ data.remarks || '—' }}</span>
                             </template>
                         </Column>
                         <Column header="Actions" style="width: 9rem">
@@ -458,9 +468,15 @@ const onRestoreAcademicTerm = (academicTerm) => {
             :style="{ width: '620px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{
+                root: { class: isDark ? '!bg-[#0F1730] !border !border-white/10 !text-white' : '' },
+                header: { class: isDark ? '!bg-[#0F1730] !border-b !border-white/10' : '' },
+                content: { class: isDark ? '!bg-[#0F1730]' : '' },
+                footer: { class: isDark ? '!bg-[#0F1730] !border-t !border-white/10' : '' },
+            }"
         >
             <template #header>
-                <span class="text-lg font-bold text-[#1E293B]">
+                <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     {{ academicTermDialogMode === 'add' ? 'Add Academic Term' : 'Edit Academic Term' }}
                 </span>
             </template>
@@ -496,9 +512,9 @@ const onRestoreAcademicTerm = (academicTerm) => {
                 </div>
 
                 <!-- Read-only preview of the derived School Year name -->
-                <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">School Year</p>
-                    <p class="text-lg font-bold text-[#1E293B]">{{ schoolYearNamePreview }}</p>
+                <div class="mt-3 rounded-xl border px-4 py-3" :class="isDark ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-slate-50'">
+                    <p class="text-xs font-medium uppercase tracking-wider" :class="isDark ? 'text-slate-400' : 'text-slate-500'">School Year</p>
+                    <p class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">{{ schoolYearNamePreview }}</p>
                 </div>
 
                 <!-- Semester -->
@@ -533,7 +549,7 @@ const onRestoreAcademicTerm = (academicTerm) => {
                         <label for="academicTermStatus">Status *</label>
                     </FloatLabel>
                     <small v-if="academicTermForm.errors.status" class="text-red-500 -mt-4">{{ academicTermForm.errors.status }}</small>
-                    <p v-if="academicTermForm.status === 'Active'" class="text-xs text-slate-400 -mt-4">
+                    <p v-if="academicTermForm.status === 'Active'" class="text-xs -mt-4" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         Setting this Academic Term Active will automatically set every other Academic Term to Inactive.
                     </p>
                 </div>
@@ -554,9 +570,9 @@ const onRestoreAcademicTerm = (academicTerm) => {
                 </div>
 
                 <!-- Scheduling Preferences — used by the Auto Schedule AI -->
-                <div class="mt-6 pt-5 border-t border-slate-100">
-                    <p class="text-sm font-bold text-[#1E293B]">Scheduling Preferences</p>
-                    <p class="text-xs text-slate-400 mt-1">
+                <div class="mt-6 pt-5 border-t" :class="isDark ? 'border-white/10' : 'border-slate-100'">
+                    <p class="text-sm font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Scheduling Preferences</p>
+                    <p class="text-xs mt-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         These rules are used by the Auto Schedule AI when generating class schedules for this School Year.
                     </p>
                 </div>
@@ -594,31 +610,31 @@ const onRestoreAcademicTerm = (academicTerm) => {
                 </div>
 
                 <!-- Lunch Break — locked information row, never editable -->
-                <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div class="mt-5 rounded-xl border px-4 py-3" :class="isDark ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-slate-50'">
                     <div class="flex items-center justify-between">
-                        <span class="text-sm font-medium text-slate-700">Lunch Break</span>
-                        <i class="pi pi-lock text-slate-400 text-xs" title="Not editable"></i>
+                        <span class="text-sm font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">Lunch Break</span>
+                        <i class="pi pi-lock text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'" title="Not editable"></i>
                     </div>
-                    <p class="text-sm text-slate-500 mt-1">{{ lunchBreakLabel }}</p>
-                    <p class="text-xs text-slate-400 mt-1">
+                    <p class="text-sm mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ lunchBreakLabel }}</p>
+                    <p class="text-xs mt-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         The Auto Schedule AI will never generate a class that overlaps this period.
                     </p>
                 </div>
 
                 <!-- Time Interval — locked information row, always 30 Minutes -->
-                <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div class="mt-5 rounded-xl border px-4 py-3" :class="isDark ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-slate-50'">
                     <div class="flex items-center justify-between">
-                        <span class="text-sm font-medium text-slate-700">Time Interval</span>
-                        <i class="pi pi-lock text-slate-400 text-xs" title="Not editable"></i>
+                        <span class="text-sm font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">Time Interval</span>
+                        <i class="pi pi-lock text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'" title="Not editable"></i>
                     </div>
-                    <p class="text-sm text-slate-500 mt-1">30 Minutes</p>
-                    <p class="text-xs text-slate-400 mt-1">
+                    <p class="text-sm mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">30 Minutes</p>
+                    <p class="text-xs mt-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         The Auto Schedule AI slices the day into 30-minute slots when generating class schedules.
                     </p>
                 </div>
 
                 <div class="mt-5">
-                    <label class="text-sm font-medium text-slate-700">Class Days *</label>
+                    <label class="text-sm font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">Class Days *</label>
                     <div class="grid grid-cols-2 gap-3 mt-2">
                         <div v-for="day in props.schedulingSettingsOptions.days" :key="day" class="flex items-center gap-2">
                             <Checkbox
@@ -626,7 +642,7 @@ const onRestoreAcademicTerm = (academicTerm) => {
                                 :inputId="`academicTermDay_${day}`"
                                 :value="day"
                             />
-                            <label :for="`academicTermDay_${day}`" class="text-sm text-slate-600">{{ dayLabels[day] }}</label>
+                            <label :for="`academicTermDay_${day}`" class="text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-600'">{{ dayLabels[day] }}</label>
                         </div>
                     </div>
                     <small v-if="academicTermForm.errors.available_days" class="text-red-500 block mt-2">{{ academicTermForm.errors.available_days }}</small>
@@ -640,3 +656,35 @@ const onRestoreAcademicTerm = (academicTerm) => {
         </Dialog>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides for the PrimeVue DataTable on this page. Scoped
+   classes on the DataTable root don't reach its internal elements, so
+   these target PrimeVue's own classes — kept local to this file via
+   the .academic-calendar-table-dark wrapper class. */
+.academic-calendar-table-dark :deep(.p-datatable-table) {
+    background: transparent;
+}
+.academic-calendar-table-dark :deep(.p-datatable-thead > tr > th) {
+    background: rgba(255, 255, 255, 0.04);
+    color: #cbd5e1;
+    border-color: rgba(255, 255, 255, 0.1);
+}
+.academic-calendar-table-dark :deep(.p-datatable-tbody > tr) {
+    background: transparent;
+    color: #e2e8f0;
+}
+.academic-calendar-table-dark :deep(.p-datatable-tbody > tr.p-datatable-row-striped) {
+    background: rgba(255, 255, 255, 0.03);
+}
+.academic-calendar-table-dark :deep(.p-datatable-tbody > tr > td) {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+.academic-calendar-table-dark :deep(.p-datatable-tbody > tr:hover) {
+    background: rgba(255, 255, 255, 0.06);
+}
+.academic-calendar-table-dark :deep(.p-paginator) {
+    background: transparent;
+    color: #cbd5e1;
+}
+</style>
