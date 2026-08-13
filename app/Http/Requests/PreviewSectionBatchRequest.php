@@ -34,8 +34,34 @@ class PreviewSectionBatchRequest extends FormRequest
             'academic_year' => ['required', 'string', 'max:20'],
             'semester' => ['required', Rule::in(StoreSectionRequest::SEMESTERS)],
             'section_prefix' => ['required', 'string', 'max:20'],
-            'number_of_blocks' => ['required', 'integer', 'min:1', 'max:100'],
-            'estimated_students_per_block' => ['required', 'integer', 'min:1'],
+            // Only meaningful for Regular sections (A/B/C block
+            // generation). An Irregular section is a single
+            // scheduling group — see
+            // SectionBatchGeneratorService::nextIrregularName() — so
+            // neither field applies to it.
+            'number_of_blocks' => [
+                Rule::requiredIf(fn () => $this->input('section_type') === 'Regular'),
+                'nullable',
+                'integer',
+                'min:1',
+                'max:100',
+            ],
+            'estimated_students_per_block' => [
+                Rule::requiredIf(fn () => $this->input('section_type') === 'Regular'),
+                'nullable',
+                'integer',
+                'min:1',
+            ],
+            // Irregular counterpart of estimated_students_per_block —
+            // a single count for the one section being generated,
+            // defaulting to 5 in the UI (spec section 3) but always
+            // required here once section_type is Irregular.
+            'estimated_students' => [
+                Rule::requiredIf(fn () => $this->input('section_type') === 'Irregular'),
+                'nullable',
+                'integer',
+                'min:1',
+            ],
             // Present when re-previewing while editing one Section
             // that already exists in the batch — excludes it from its
             // own "already used" check.

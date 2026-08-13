@@ -17,9 +17,30 @@ use Illuminate\Support\Str;
  * This does NOT introduce a new "Prospectus" table. The existing
  * Curriculum/Curriculum Items models already represent the school's
  * prospectus — only the user-facing label changes.
+ *
+ * Irregular sections don't get this A/B/C block treatment at all —
+ * see nextIrregularName() below.
  */
 class SectionBatchGeneratorService
 {
+    /**
+     * Irregular counterpart to nextBlockNames() above — an Irregular
+     * section is a single scheduling group, not a set of A/B/C blocks,
+     * so no letter suffix is ever appended. Whatever the registrar
+     * typed into Section Prefix (e.g. "BSIT-4-IRREG") IS the generated
+     * name, verbatim and still fully editable before saving. If that
+     * exact name is already taken, this deliberately does NOT auto-
+     * dedupe it (no "-2" suffix) — the normal section_code uniqueness
+     * check on save will flag it and the registrar can just edit the
+     * name themselves, same as any other naming collision.
+     *
+     * @return list<string> always exactly one name
+     */
+    public function nextIrregularName(string $prefix): array
+    {
+        return [trim($prefix)];
+    }
+
     /**
      * Work out the next available block letters for a prefix, skipping
      * any letter suffix that's already in use by an existing (non

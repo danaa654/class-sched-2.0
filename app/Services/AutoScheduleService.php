@@ -47,6 +47,7 @@ class AutoScheduleService
         private readonly ScheduleConflictService $conflictService,
         private readonly FacultyWorkloadService $workloadService,
         private readonly IrregularSectionMergeService $mergeService,
+        private readonly SiblingSectionPatternService $siblingPatternService,
     ) {
     }
 
@@ -133,8 +134,6 @@ class AutoScheduleService
                 'is_merged' => false,
                 'merged_into_section_subject_id' => null,
                 'merge_recommendation' => null,
-                'capacity_confirmed' => false,
-                'hours_confirmed' => false,
             ]);
     }
 
@@ -207,13 +206,77 @@ class AutoScheduleService
             $sectionSubject->update(['merge_recommendation' => $mergeOutcome]);
         }
 
+        return $this->searchIndependent($section, $sectionSubject);
+    }
+
+    /**
+     * Public entry point for "Create Independent Schedule Instead" —
+     * the Administrator has already declined every merge candidate
+     * offered by the Merge Recommendation modal, so this skips the
+     * merge evaluation entirely and goes straight to the same
+     * Faculty/Room/Time search generateOne() would otherwise fall
+     * through to. Safe to call on any SectionSubject, Irregular
+     * section or not.
+     */
+    public function scheduleIndependently(Section $section, SectionSubject $sectionSubject): array
+    {
+        return $this->searchIndependent($section, $sectionSubject);
+    }
+
+    /**
+     * The actual independent Faculty+Room+Time search — Sibling
+     * Section Pattern Matching first, then the general
+     * RecommendationService-ranked "Smart Search". Shared by
+     * generateOne() (after its merge-evaluation gate) and the public
+     * scheduleIndependently() entry point above, so both paths stay
+     * in exact agreement about what "independent" means.
+     */
+    private function searchIndependent(Section $section, SectionSubject $sectionSubject): array
+    {
         $subject = $sectionSubject->subject;
+
+        // SIBLING SECTION PATTERN MATCHING — before ever consulting
+        // the general Faculty/Room/Time ranking, check whether a
+        // sibling Section of the same cohort (same Major, Curriculum,
+        // Academic Year, Semester, Year Level — e.g. 4A/4B/4C/4D)
+        // already has this exact Subject fully scheduled. If so,
+        // reuse that Faculty, Room, and — critically — the sibling's
+        // ACTUAL saved duration (which may have been manually
+        // trimmed shorter than the Subject's declared hours), only
+        // searching for a different Day. This keeps a cohort's
+        // sections consistently taught by the same Faculty in the
+        // same Room whenever possible, which is what the Registrar
+        // wants far more often than whatever the general engine would
+        // otherwise rank highest. Falls straight through to the
+        // normal search below the moment no usable donor pattern
+        // exists.
+        $siblingPattern = $this->siblingPatternService->findPattern($sectionSubject);
+        $siblingDiagnostics = $this->siblingPatternService->getDiagnostics();
+
+        if ($siblingPattern) {
+            $errors = $this->conflictService->validate([
+                'section_id' => $section->id,
+                'faculty_id' => $siblingPattern['faculty_id'],
+                'room_id' => $siblingPattern['room_id'],
+                'days' => $siblingPattern['days'],
+                'start_time' => $siblingPattern['start_time'],
+                'end_time' => $siblingPattern['end_time'],
+            ], $sectionSubject->id);
+
+            if (empty($errors)) {
+                $faculty = \App\Models\Faculty::find($siblingPattern['faculty_id']);
+
+                if ($faculty && ! $this->workloadService->wouldExceed($faculty, $subject, $sectionSubject->id)) {
+                    return $this->applySiblingPattern($sectionSubject, $siblingPattern);
+                }
+            }
+        }
 
         $facultyRec = $this->recommendationService->recommendFaculty($subject, $section, $sectionSubject);
         $facultyCandidates = $facultyRec['recommendations'];
 
         if (empty($facultyCandidates)) {
-            return $this->unresolved($sectionSubject, $facultyRec['message'] ?? 'No qualified or college-matched faculty available.');
+            return $this->unresolved($sectionSubject, $facultyRec['message'] ?? 'No qualified or college-matched faculty available.', [], $siblingDiagnostics);
         }
 
         $roomRec = $this->recommendationService->recommendRooms($subject, $section, $sectionSubject);
@@ -223,7 +286,7 @@ class AutoScheduleService
             $reasons = $roomRec['reasons'] ?? [];
             $detail = $reasons ? implode(' ', $reasons) : 'No available room of the correct type was found for this subject.';
 
-            return $this->unresolved($sectionSubject, $detail, $reasons);
+            return $this->unresolved($sectionSubject, $detail, $reasons, $siblingDiagnostics);
         }
 
         foreach (array_slice($facultyCandidates, 0, self::CANDIDATE_FACULTY) as $facultyCandidate) {
@@ -282,7 +345,9 @@ class AutoScheduleService
 
         return $this->unresolved(
             $sectionSubject,
-            'No conflict-free day/time combination could be found among the qualified faculty and available rooms.'
+            'No conflict-free day/time combination could be found among the qualified faculty and available rooms.',
+            [],
+            $siblingDiagnostics ?? []
         );
     }
 
@@ -362,12 +427,72 @@ class AutoScheduleService
             'status' => 'Draft',
             'is_auto_generated' => true,
             'auto_generated_meta' => $meta,
-            // A fresh Auto Generate assignment has never been reviewed
-            // by the Registrar — any prior Capacity/Hours confirmation
-            // applied to a different Room/Days/Time and must not carry
-            // over silently.
-            'capacity_confirmed' => false,
-            'hours_confirmed' => false,
+        ]);
+
+        return [
+            'success' => true,
+            'result' => array_merge($meta, [
+                'section_subject_id' => $sectionSubject->id,
+                'subject_code' => $sectionSubject->subject->subject_code,
+                'subject_title' => $sectionSubject->subject->subject_title,
+                'is_merged' => false,
+                'merge_recommendation' => $sectionSubject->merge_recommendation,
+            ]),
+        ];
+    }
+
+    /**
+     * Persist a Faculty + Room + Days + Time combination copied from
+     * a sibling Section's already-scheduled row (see
+     * SiblingSectionPatternService), and build the same review-panel
+     * shape apply() produces so the frontend needs no special-casing
+     * — it just additionally sees `pattern_source` identifying which
+     * sibling Section this assignment was copied from.
+     */
+    private function applySiblingPattern(SectionSubject $sectionSubject, array $pattern): array
+    {
+        $faculty = \App\Models\Faculty::find($pattern['faculty_id']);
+        $room = \App\Models\Room::find($pattern['room_id']);
+
+        $meta = [
+            'faculty' => [
+                'id' => $faculty->id,
+                'name' => $faculty->full_name ?? $faculty->name ?? '',
+                'score' => 100,
+                'confidence' => 'High',
+                'reasons' => ["Copied from {$pattern['donor_section_code']}, which already teaches this subject with this faculty member."],
+            ],
+            'room' => [
+                'id' => $room->id,
+                'name' => $room->room_name ?? $room->name ?? '',
+                'score' => 100,
+                'confidence' => 'High',
+                'reasons' => ["Copied from {$pattern['donor_section_code']}'s existing schedule for this subject."],
+            ],
+            'time' => [
+                'days' => $pattern['days'],
+                'start_time' => $pattern['start_time'],
+                'end_time' => $pattern['end_time'],
+                'score' => 100,
+                'confidence' => 'High',
+                'reasons' => ["Same duration as {$pattern['donor_section_code']}'s schedule for this subject, on a different day to avoid conflicts."],
+            ],
+            'overall_score' => 100,
+            'pattern_source' => [
+                'donor_section_id' => $pattern['donor_section_id'],
+                'donor_section_code' => $pattern['donor_section_code'],
+            ],
+        ];
+
+        $sectionSubject->update([
+            'faculty_id' => $pattern['faculty_id'],
+            'room_id' => $pattern['room_id'],
+            'days' => implode(',', $pattern['days']),
+            'start_time' => $pattern['start_time'],
+            'end_time' => $pattern['end_time'],
+            'status' => 'Draft',
+            'is_auto_generated' => true,
+            'auto_generated_meta' => $meta,
         ]);
 
         return [
@@ -420,8 +545,17 @@ class AutoScheduleService
      *                                       Empty when the single $reason string
      *                                       already says everything (faculty/time
      *                                       cases untouched by this task).
+     * @param  list<array<string, mixed>>  $siblingDiagnostics  The full trace from
+     *                                       SiblingSectionPatternService::getDiagnostics()
+     *                                       for this row — every donor considered and
+     *                                       every Day candidate tried against it, with
+     *                                       the exact conflict (Section/Faculty/Room)
+     *                                       that rejected each one. Surfaced so the
+     *                                       Registrar can see *why* a subject didn't
+     *                                       inherit a sibling section's pattern instead
+     *                                       of having to dig through the log file.
      */
-    private function unresolved(SectionSubject $sectionSubject, string $reason, array $reasonDetails = []): array
+    private function unresolved(SectionSubject $sectionSubject, string $reason, array $reasonDetails = [], array $siblingDiagnostics = []): array
     {
         return [
             'success' => false,
@@ -431,6 +565,7 @@ class AutoScheduleService
                 'subject_title' => $sectionSubject->subject->subject_title,
                 'reason' => $reason,
                 'reason_details' => $reasonDetails,
+                'sibling_pattern_diagnostics' => $siblingDiagnostics,
                 'merge_recommendation' => $sectionSubject->merge_recommendation,
             ],
         ];

@@ -132,6 +132,22 @@ class SectionController extends Controller
     {
         $data = $request->validated();
 
+        // Irregular sections are a single scheduling group, not a set
+        // of A/B/C blocks — see nextIrregularName()'s docblock. This
+        // keeps that branch entirely separate from the Regular
+        // block-generation path below rather than forcing
+        // number_of_blocks=1 through the same letter-suffixing logic.
+        if ($data['section_type'] === 'Irregular') {
+            $names = $generator->nextIrregularName($data['section_prefix']);
+
+            $sections = collect($names)->map(fn (string $name) => [
+                'section_code' => $name,
+                'estimated_students' => $data['estimated_students'],
+            ])->values();
+
+            return response()->json(['sections' => $sections]);
+        }
+
         $names = $generator->nextBlockNames(
             prefix: $data['section_prefix'],
             numberOfBlocks: $data['number_of_blocks'],

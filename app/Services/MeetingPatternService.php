@@ -313,8 +313,29 @@ class MeetingPatternService
      */
     public function dayGroups(Subject $subject): array
     {
-        $meetings = $this->meetingsPerWeek($subject);
+        return $this->dayGroupsForCount($this->meetingsPerWeek($subject));
+    }
 
+    /**
+     * Same day-combination lookup as dayGroups(), but keyed directly
+     * by a meeting COUNT rather than derived from a Subject's
+     * textbook classification.
+     *
+     * This exists for callers like SiblingSectionPatternService that
+     * need to match an already-scheduled donor's ACTUAL meeting
+     * frequency — which the Registrar may have manually overridden
+     * away from the Subject's normal pattern (e.g. a Lecture subject
+     * trimmed from 2x/week down to a single Saturday session). Using
+     * dayGroups($subject) there would only ever offer combinations
+     * for the subject's "should be" frequency, so a donor that's
+     * already an override could never be copied — this method lets
+     * the copy honor whatever frequency the donor was actually saved
+     * with, not what the subject's declared hours say it should be.
+     *
+     * @return list<list<string>>
+     */
+    public function dayGroupsForCount(int $meetings): array
+    {
         $configured = config("scheduling.meeting_patterns.day_groups.{$meetings}");
         $candidates = (is_array($configured) && ! empty($configured))
             ? $configured
@@ -322,12 +343,10 @@ class MeetingPatternService
 
         $allowedDays = $this->allowedDays();
 
-        $filtered = array_values(array_filter(
+        return array_values(array_filter(
             $candidates,
             fn (array $days) => empty(array_diff($days, $allowedDays))
         ));
-
-        return ! empty($filtered) ? $filtered : [];
     }
 
     /**

@@ -318,6 +318,18 @@ const scheduleLoading = ref(false);
 const scheduleRoom = ref(null);
 const scheduleSummary = ref(null);
 const scheduleTimetable = ref({});
+
+function formatTime12h(time) {
+    if (!time) return time;
+    const parts = String(time).split(':');
+    let hours = parseInt(parts[0], 10);
+    const minutes = parts[1] ?? '00';
+    if (isNaN(hours)) return time;
+    const suffix = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    return `${hours}:${minutes.padStart(2, '0')} ${suffix}`;
+}
 const roomRecommendedSubjectsRef = ref(null);
 
 const openSchedule = async (room) => {
@@ -932,7 +944,7 @@ const closeSchedule = () => {
                                     :key="slot.section_subject_id"
                                     class="flex items-center justify-between text-xs bg-slate-50 rounded px-2 py-1"
                                 >
-                                    <span class="font-medium text-slate-700">{{ slot.start_time }}–{{ slot.end_time }}</span>
+                                    <span class="font-medium text-slate-700">{{ formatTime12h(slot.start_time) }}–{{ formatTime12h(slot.end_time) }}</span>
                                     <span class="text-slate-600">{{ slot.subject }} · {{ slot.section }}</span>
                                     <span class="text-slate-500">{{ slot.faculty }}</span>
                                 </div>
@@ -945,7 +957,7 @@ const closeSchedule = () => {
                                     :key="i"
                                     class="text-[11px] rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5"
                                 >
-                                    {{ gap.start_time }}–{{ gap.end_time }} open
+                                    {{ formatTime12h(gap.start_time) }}–{{ formatTime12h(gap.end_time) }} open
                                 </span>
                             </div>
                         </div>

@@ -481,8 +481,22 @@ const openRecommendations = () => {
     showRecommendModal.value = true;
 };
 
-/** Populates the editor with the Registrar's picked recommendation; Apply is still a separate, explicit click (spec item 7). */
-const applyRecommendation = ({ days, start_time, end_time }) => {
+/**
+ * Populates the editor with the Registrar's picked recommendation AND
+ * applies it immediately.
+ *
+ * This used to only stage the values and leave a separate "Apply"
+ * click in the small popover editor as the real save step — but the
+ * "Recommended Day & Time" dialog renders outside the popover (via
+ * Teleport), so PrimeVue's Popover sees the "Select" click as
+ * happening *outside* itself and auto-closes before this handler even
+ * runs. With the popover gone, there was no "Apply" button left to
+ * click, so the pick was silently lost and the row stayed exactly as
+ * conflicted as before. Since apply() only reads the editDays/
+ * editStart/editEnd refs (not the popover's visibility), calling it
+ * here works regardless of whether the popover is still on screen.
+ */
+const applyRecommendation = async ({ days, start_time, end_time }) => {
     // Reuse the same guard openEditor() uses — this sets Start AND
     // End together from an explicit recommendation, so the
     // auto-adjust-End-from-Start watcher above must not override the
@@ -492,9 +506,9 @@ const applyRecommendation = ({ days, start_time, end_time }) => {
     editStart.value = timeStringToDate(start_time);
     editEnd.value = timeStringToDate(end_time);
     applyError.value = null;
-    nextTick(() => {
-        openingEditor.value = false;
-    });
+    await nextTick();
+    openingEditor.value = false;
+    await apply();
 };
 
 

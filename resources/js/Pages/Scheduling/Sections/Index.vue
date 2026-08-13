@@ -286,11 +286,21 @@ watch(
 // Irregular so a stale selection doesn't linger unseen; the field
 // stays visible (disabled+optional) rather than disappearing, since
 // the admin may still want to reference one.
+//
+// Irregular sections are also a single scheduling group, not a set of
+// A/B/C blocks (spec section 3) — Number of Blocks doesn't apply, and
+// "Estimated Students per Block" becomes a single "Estimated Students"
+// count defaulting to 5. Switching back to Regular restores its own
+// defaults so re-toggling the type doesn't leave stale values behind.
 watch(
     () => batchForm.section_type,
     (type) => {
         if (type === 'Irregular') {
             batchForm.curriculum_id = null;
+            batchForm.number_of_blocks = 1;
+            batchForm.estimated_students_per_block = 5;
+        } else {
+            batchForm.estimated_students_per_block = 35;
         }
     },
 );
@@ -316,7 +326,13 @@ const suggestedPrefix = computed(() => {
         return '';
     }
 
-    return `${major.code}-${ordinal}`;
+    const base = `${major.code}-${ordinal}`;
+
+    // Irregular sections are a single named group (e.g. "BSIT-4-IRREG"),
+    // not a letter-suffixed block — see nextIrregularName()'s docblock
+    // on the backend. The base "BSIT-4" suggestion still applies, just
+    // with the "-IRREG" marker appended.
+    return batchForm.section_type === 'Irregular' ? `${base}-IRREG` : base;
 });
 
 watch(suggestedPrefix, (suggestion) => {
@@ -399,6 +415,13 @@ const refreshPreview = () => {
                     section_prefix: batchForm.section_prefix,
                     number_of_blocks: batchForm.number_of_blocks,
                     estimated_students_per_block: batchForm.estimated_students_per_block,
+                    // Irregular's single-count field — reuses the same
+                    // batchForm value as estimated_students_per_block
+                    // (relabeled "Estimated Students" in the template
+                    // for Irregular) so there's only one input to keep
+                    // in sync; the backend picks whichever key its
+                    // section_type branch actually needs.
+                    estimated_students: batchForm.estimated_students_per_block,
                 }),
             });
 
@@ -948,7 +971,7 @@ const onDeleteSection = (section) => {
                             <InputText
                                 id="batch_prefix"
                                 v-model="batchForm.section_prefix"
-                                placeholder="e.g. BSIT-1"
+                                :placeholder="batchForm.section_type === 'Regular' ? 'e.g. BSIT-1' : 'e.g. BSIT-4-IRREG'"
                                 :invalid="!!batchForm.errors.section_prefix"
                                 class="w-full"
                                 @input="onPrefixInput"
@@ -962,7 +985,7 @@ const onDeleteSection = (section) => {
                             </small>
                         </div>
 
-                        <div class="flex flex-col gap-1">
+                        <div v-if="batchForm.section_type === 'Regular'" class="flex flex-col gap-1">
                             <label for="batch_blocks" class="text-sm font-medium text-slate-700">
                                 Number of Blocks <span class="text-red-500">*</span>
                             </label>
@@ -984,7 +1007,8 @@ const onDeleteSection = (section) => {
 
                         <div class="flex flex-col gap-1">
                             <label for="batch_students" class="text-sm font-medium text-slate-700">
-                                Est. Students per Block <span class="text-red-500">*</span>
+                                {{ batchForm.section_type === 'Regular' ? 'Est. Students per Block' : 'Estimated Students' }}
+                                <span class="text-red-500">*</span>
                             </label>
                             <InputNumber
                                 id="batch_students"
@@ -992,19 +1016,26 @@ const onDeleteSection = (section) => {
                                 :min="1"
                                 showButtons
                                 buttonLayout="horizontal"
-                                :invalid="!!batchForm.errors.estimated_students_per_block"
+                                :invalid="!!batchForm.errors.estimated_students_per_block || !!batchForm.errors.estimated_students"
                                 class="w-full"
                                 inputClass="w-full"
                             />
-                            <small v-if="batchForm.errors.estimated_students_per_block" class="text-red-500">
-                                {{ batchForm.errors.estimated_students_per_block }}
+                            <small v-if="batchForm.errors.estimated_students_per_block || batchForm.errors.estimated_students" class="text-red-500">
+                                {{ batchForm.errors.estimated_students_per_block || batchForm.errors.estimated_students }}
                             </small>
                         </div>
                     </div>
                     <p class="text-xs text-slate-400 mt-2">
-                        Classly automatically generates the next available section letters (A, B, C, ...), skipping
-                        any that already exist for this Program, Academic Year and Semester. You can edit the
-                        generated names below before saving.
+                        <template v-if="batchForm.section_type === 'Regular'">
+                            Classly automatically generates the next available section letters (A, B, C, ...), skipping
+                            any that already exist for this Program, Academic Year and Semester. You can edit the
+                            generated names below before saving.
+                        </template>
+                        <template v-else>
+                            An Irregular section is a single scheduling group, not a set of lettered blocks — the name
+                            below is exactly what you typed as the Section Prefix. Edit it freely before saving if your
+                            school uses a different naming convention.
+                        </template>
                     </p>
                 </div>
 

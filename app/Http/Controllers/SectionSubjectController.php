@@ -18,6 +18,7 @@ use App\Models\Subject;
 use App\Services\AutoScheduleService;
 use App\Services\EDPCodeService;
 use App\Services\FacultyWorkloadService;
+use App\Services\IrregularSectionMergeService;
 use App\Services\RecommendationService;
 use App\Services\ScheduleConflictService;
 use Illuminate\Http\JsonResponse;
@@ -35,7 +36,8 @@ class SectionSubjectController extends Controller
         private readonly ScheduleConflictService $conflictService,
         private readonly RecommendationService $recommendationService,
         private readonly AutoScheduleService $autoScheduleService,
-        private readonly FacultyWorkloadService $workloadService
+        private readonly FacultyWorkloadService $workloadService,
+        private readonly IrregularSectionMergeService $mergeService
     ) {
     }
 
@@ -160,7 +162,7 @@ class SectionSubjectController extends Controller
         $search = trim((string) $request->query('subject_search', ''));
 
         $sectionSubjects = $section->sectionSubjects()
-            ->with(['subject', 'faculty', 'room'])
+            ->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])
             ->when($search !== '', function ($query) use ($search) {
                 $query->whereHas('subject', function ($subjectQuery) use ($search) {
                     $subjectQuery->where('subject_code', 'like', "%{$search}%")
@@ -326,7 +328,11 @@ class SectionSubjectController extends Controller
                 'start_time' => $startTime,
                 'end_time' => $endTime,
             ],
-            $subject->id
+            // Merge-aware — a merged row sharing its host's exact
+            // Faculty/Room/Time is by design, never a conflict to
+            // flag against itself. See ScheduleConflictService::
+            // mergeExclusionIds().
+            $this->conflictService->mergeExclusionIds($subject)
         ));
 
         // Weekly Hours Mismatch Warning — the scheduled Days x
@@ -694,6 +700,15 @@ class SectionSubjectController extends Controller
             'reasons' => $scored['reasons'],
             'manual_override' => $scored['manual_override'],
             'override_reason' => $scored['override_reason'],
+            // See scoreArbitraryTime()'s docblock — persisted here too
+            // so a genuine Faculty/Room/Section double-booking is
+            // still recognized as blocking after a page reload, not
+            // just in the moment Apply is clicked.
+            'hard_conflict' => $scored['hard_conflict'],
+            // Which existing Section/Subject the conflict(s) above
+            // belong to — lets the UI name exactly what's already
+            // occupying the slot instead of a generic "already booked".
+            'conflict_details' => $scored['conflict_details'] ?? [],
         ];
 
         if (isset($meta['faculty']['score'], $meta['room']['score'])) {
@@ -829,7 +844,99 @@ class SectionSubjectController extends Controller
     }
 
     /**
-     * "⚡ Auto Generate Schedule" (Prompt 8.9).
+     * INTELLIGENT IRREGULAR SECTION SCHEDULING — "Merge Recommendation"
+     * modal data. Always runs IrregularSectionMergeService::recommend()
+     * fresh (never just returns the row's stored merge_recommendation
+     * snapshot from the last Auto Generate) so the candidate list, and
+     * every candidate's compatibility, reflects the section's CURRENT
+     * data — another class's schedule may have changed since this row
+     * was last generated.
+     */
+    public function mergeRecommendation(Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+        abort_unless($section->isIrregular(), 422, 'Merge recommendations only apply to Irregular sections.');
+
+        $subject->loadMissing('subject');
+
+        return response()->json($this->mergeService->recommend($subject));
+    }
+
+    /**
+     * "Merge Into This Section" — the Administrator picks one of the
+     * candidates IrregularSectionMergeService::recommend() offered.
+     * Re-runs recommend() server-side (never trusts the candidate the
+     * client already had in memory) and only proceeds if that exact
+     * target is still a COMPATIBLE candidate — closes the same race a
+     * stale modal could otherwise slip through (e.g. the host class's
+     * room capacity filled up from another merge in between).
+     */
+    public function applyMerge(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+        abort_unless($section->isIrregular(), 422, 'Merge recommendations only apply to Irregular sections.');
+
+        $subject->loadMissing('subject');
+
+        $validated = $request->validate([
+            'target_section_subject_id' => ['required', 'integer', 'exists:section_subjects,id'],
+        ]);
+
+        $outcome = $this->mergeService->recommend($subject);
+        $candidate = collect($outcome['candidates'])
+            ->firstWhere('section_subject_id', (int) $validated['target_section_subject_id']);
+
+        if (! $candidate) {
+            return response()->json([
+                'message' => 'That class is no longer a recognized merge candidate for this subject. Please refresh and try again.',
+            ], 422);
+        }
+
+        if (! $candidate['compatible']) {
+            return response()->json([
+                'message' => $candidate['blocking_reason'] ?? 'That class is no longer a compatible merge target.',
+            ], 422);
+        }
+
+        $host = SectionSubject::find($candidate['section_subject_id']);
+        abort_unless($host, 404);
+        $host->loadMissing('section');
+
+        $this->mergeService->applyMerge($subject, $host, $outcome);
+
+        return response()->json([
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
+            'message' => "Merged {$subject->subject->subject_code} into {$host->section->section_code}.",
+        ]);
+    }
+
+    /**
+     * "Create Independent Schedule Instead" — the Administrator
+     * declines every merge candidate offered and asks Classly to give
+     * this subject its own independent Faculty/Room/Time instead. Runs
+     * the same search AutoScheduleService's Auto Generate uses, just
+     * with the merge evaluation itself skipped since that decision has
+     * already been made here.
+     */
+    public function scheduleIndependently(Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+        abort_unless($section->isIrregular(), 422, 'This action only applies to Irregular sections.');
+
+        $subject->loadMissing('subject');
+
+        $outcome = $this->autoScheduleService->scheduleIndependently($section, $subject);
+
+        return response()->json([
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
+            'message' => $outcome['success']
+                ? "{$subject->subject->subject_code} was scheduled independently."
+                : ($outcome['result']['reason'] ?? 'Could not find a conflict-free independent schedule for this subject.'),
+        ], $outcome['success'] ? 200 : 422);
+    }
+
+    /**
+     * ⚡ Auto Generate Schedule (Prompt 8.9).
      *
      * Runs AutoScheduleService for every currently unscheduled subject
      * in this Section — Faculty, Room, and Time are chosen and WRITTEN
@@ -851,7 +958,7 @@ class SectionSubjectController extends Controller
 
         return response()->json([
             ...$summary,
-            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room'])->get(),
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
         ]);
     }
 
@@ -866,7 +973,7 @@ class SectionSubjectController extends Controller
 
         return response()->json([
             ...$summary,
-            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room'])->get(),
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
         ]);
     }
 
@@ -884,7 +991,7 @@ class SectionSubjectController extends Controller
             'message' => $cleared > 0
                 ? "{$cleared} auto-generated ".($cleared === 1 ? 'schedule was' : 'schedules were')." cleared."
                 : 'No auto-generated schedules to clear.',
-            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room'])->get(),
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
         ]);
     }
 
@@ -989,7 +1096,13 @@ class SectionSubjectController extends Controller
                         'start_time' => $startTime,
                         'end_time' => $endTime,
                     ],
-                    $subject->id
+                    // Merge-aware — see ScheduleConflictService::
+                    // mergeExclusionIds(): a merged Irregular-section
+                    // row intentionally shares its host's exact
+                    // Faculty/Room/Time, which must never be reported
+                    // as a Faculty/Room/Section conflict against
+                    // itself.
+                    $this->conflictService->mergeExclusionIds($subject)
                 ));
 
                 if (! empty($rowErrors)) {
@@ -1081,7 +1194,7 @@ class SectionSubjectController extends Controller
         }
 
         $fresh = $section->sectionSubjects()
-            ->with(['subject', 'faculty', 'room'])
+            ->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])
             ->whereIn('id', $rowIds)
             ->get();
 

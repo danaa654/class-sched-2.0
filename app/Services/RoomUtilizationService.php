@@ -156,7 +156,17 @@ class RoomUtilizationService
     {
         $schoolYear = SchoolYear::active();
         $days = $schoolYear ? $schoolYear->allowedDays() : SchoolYear::DEFAULT_CLASS_DAYS;
-        $placements = $this->activeTermPlacementsForRoom($room->id, ['subject:id,subject_code,subject_name', 'section:id,section_code', 'faculty:id,first_name,last_name']);
+        $placements = $this->activeTermPlacementsForRoom($room->id, [
+            'subject:id,subject_code,subject_title',
+            'section:id,section_code',
+            'faculty:id,first_name,last_name',
+            // Every Irregular-section row merged into this one — same
+            // class session, riding along on the exact same booking.
+            // Folded into `section` below so the modal shows every
+            // Section actually sitting in that slot instead of
+            // silently hiding the merged one.
+            'mergedPlacements.section:id,section_code',
+        ]);
 
         $timetable = [];
 
@@ -166,14 +176,22 @@ class RoomUtilizationService
                 ->sortBy('start_time')
                 ->values();
 
-            $booked = $dayPlacements->map(fn (SectionSubject $p) => [
-                'section_subject_id' => $p->id,
-                'start_time' => substr($p->start_time, 0, 5),
-                'end_time' => substr($p->end_time, 0, 5),
-                'subject' => $p->subject?->subject_code ?? '—',
-                'section' => $p->section?->section_code ?? '—',
-                'faculty' => $p->faculty?->full_name ?? 'Unassigned',
-            ])->all();
+            $booked = $dayPlacements->map(function (SectionSubject $p) {
+                $sectionCodes = collect([$p->section?->section_code])
+                    ->merge($p->mergedPlacements->pluck('section.section_code'))
+                    ->filter()
+                    ->unique()
+                    ->values();
+
+                return [
+                    'section_subject_id' => $p->id,
+                    'start_time' => substr($p->start_time, 0, 5),
+                    'end_time' => substr($p->end_time, 0, 5),
+                    'subject' => $p->subject?->subject_code ?? '—',
+                    'section' => $sectionCodes->isNotEmpty() ? $sectionCodes->implode(' & ') : '—',
+                    'faculty' => $p->faculty?->full_name ?? 'Unassigned',
+                ];
+            })->all();
 
             $timetable[$day] = [
                 'booked' => $booked,
@@ -203,6 +221,17 @@ class RoomUtilizationService
      * Term, that is actually scheduled (has Days/Start/End Time) —
      * this is the same "does this row count as a live schedule" test
      * ScheduleConflictService uses.
+     *
+     * INTELLIGENT IRREGULAR SECTION SCHEDULING — a merged Irregular-
+     * section row (`merged_into_section_subject_id` set) occupies the
+     * exact same Room/Day/Time as its host row by design — it's the
+     * same class session, just ridden along on by another Section,
+     * never a second booking. Counting both here double-charges the
+     * Room's scheduled hours and makes hasOverlap() see two rows
+     * sharing one slot and misreport it as a Room conflict /
+     * "Overbooked", even though nothing is actually double-booked.
+     * Excluded here the same way FacultyWorkloadService::
+     * activePlacements() excludes them from Faculty load.
      */
     private function activeTermPlacements(array $with = []): \Illuminate\Database\Eloquent\Builder
     {
@@ -211,6 +240,7 @@ class RoomUtilizationService
             ->whereNotNull('days')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
+            ->whereNull('merged_into_section_subject_id')
             ->whereIn('section_id', $this->conflicts->activeSemesterSectionIds())
             ->with($with);
     }

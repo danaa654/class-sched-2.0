@@ -70,6 +70,17 @@ class FacultyWorkloadService
      * assignedSubjectsCount() so a single call site never issues the
      * query twice for the same evaluation.
      *
+     * INTELLIGENT IRREGULAR SECTION SCHEDULING — a merged Irregular-
+     * section row (`merged_into_section_subject_id` set) is the SAME
+     * class session as its host row, just ridden along on by another
+     * Section — never a second class the Faculty member actually
+     * teaches. Counting both would double the Faculty's load and
+     * "Assigned Subjects" count for a single hour actually spent in
+     * front of a room, so merged riders are excluded here; the host
+     * row alone represents that session's load. See
+     * ScheduleConflictService::mergeExclusionIds() for the matching
+     * "never a conflict" rule this same relationship drives.
+     *
      * @return \Illuminate\Support\Collection<int, SectionSubject>
      */
     private function activePlacements(Faculty $faculty, ?int $excludingSectionSubjectId = null)
@@ -78,6 +89,7 @@ class FacultyWorkloadService
             ->where('faculty_id', $faculty->id)
             ->whereIn('status', ['Scheduled', 'Draft'])
             ->whereIn('section_id', $this->conflictService->activeSemesterSectionIds())
+            ->whereNull('merged_into_section_subject_id')
             ->when($excludingSectionSubjectId, fn ($q) => $q->where('id', '!=', $excludingSectionSubjectId))
             ->with('subject:id,units,lecture_hours,laboratory_hours')
             ->get()
@@ -113,6 +125,16 @@ class FacultyWorkloadService
      * under "Assigned Subjects" so the Registrar can see *which*
      * subjects make up the load figure, not just the count.
      *
+     * INTELLIGENT IRREGULAR SECTION SCHEDULING — same "one class
+     * session, one row" rule as activePlacements(): a merged
+     * Irregular-section row is never listed on its own here (it's
+     * excluded via whereNull('merged_into_section_subject_id') below,
+     * same as activePlacements()); instead its Section Code is folded
+     * into its host row's `section_code`, e.g. "BSIT-4A &
+     * BSIT-4A-IRREG", so the Registrar can see every Section actually
+     * sitting in that one hour without the class being counted (or
+     * its load charged) twice.
+     *
      * @return array<int, array{
      *     id: int, edp_code: ?string, subject_code: ?string,
      *     subject_title: ?string, units: int, load: int,
@@ -126,11 +148,16 @@ class FacultyWorkloadService
             ->where('faculty_id', $faculty->id)
             ->whereIn('status', ['Scheduled', 'Draft'])
             ->whereIn('section_id', $this->conflictService->activeSemesterSectionIds())
+            ->whereNull('merged_into_section_subject_id')
             ->when($excludingSectionSubjectId, fn ($q) => $q->where('id', '!=', $excludingSectionSubjectId))
             ->with([
                 'subject:id,subject_code,subject_title,units,lecture_hours,laboratory_hours',
                 'section:id,section_code',
                 'room:id,room_name',
+                // Every Irregular-section row merged into THIS one —
+                // riding along on the exact same class session, never
+                // a separate one. See mergedPlacements() on the model.
+                'mergedPlacements.section:id,section_code',
             ])
             ->get()
             ->filter(fn (SectionSubject $ss) => $ss->subject !== null)
@@ -139,22 +166,34 @@ class FacultyWorkloadService
 
         $usesHours = $this->usesHours($faculty);
 
-        return $placements->map(fn (SectionSubject $ss) => [
-            'id' => $ss->id,
-            'edp_code' => $ss->edp_code,
-            'subject_code' => $ss->subject->subject_code,
-            'subject_title' => $ss->subject->subject_title,
-            'units' => (int) $ss->subject->units,
-            'load' => $usesHours
-                ? (int) $ss->subject->lecture_hours + (int) $ss->subject->laboratory_hours
-                : (int) $ss->subject->units,
-            'section_code' => $ss->section?->section_code,
-            'room_name' => $ss->room?->room_name,
-            'days' => $ss->days,
-            'start_time' => $ss->start_time,
-            'end_time' => $ss->end_time,
-            'status' => $ss->status,
-        ])->all();
+        return $placements->map(function (SectionSubject $ss) use ($usesHours) {
+            $sectionCodes = collect([$ss->section?->section_code])
+                ->merge($ss->mergedPlacements->pluck('section.section_code'))
+                ->filter()
+                ->unique()
+                ->values();
+
+            return [
+                'id' => $ss->id,
+                'edp_code' => $ss->edp_code,
+                'subject_code' => $ss->subject->subject_code,
+                'subject_title' => $ss->subject->subject_title,
+                'units' => (int) $ss->subject->units,
+                'load' => $usesHours
+                    ? (int) $ss->subject->lecture_hours + (int) $ss->subject->laboratory_hours
+                    : (int) $ss->subject->units,
+                // Host + every merged rider's Section Code, joined
+                // with " & " (e.g. "BSIT-4A & BSIT-4A-IRREG") — falls
+                // back to the plain single Section Code when nothing
+                // is merged into this row.
+                'section_code' => $sectionCodes->implode(' & '),
+                'room_name' => $ss->room?->room_name,
+                'days' => $ss->days,
+                'start_time' => $ss->start_time,
+                'end_time' => $ss->end_time,
+                'status' => $ss->status,
+            ];
+        })->all();
     }
 
     /**

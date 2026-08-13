@@ -81,7 +81,7 @@ class ScheduleConflictService
      * @param  array{section_id:int, faculty_id:?int, room_id:?int, days:list<string>, start_time:?string, end_time:?string, expected_minutes?:?int}  $slot
      * @return array<string, string>
      */
-    public function validate(array $slot, int $excludingSectionSubjectId): array
+    public function validate(array $slot, int|array $excludingSectionSubjectId): array
     {
         $dayTokens = array_values(array_unique(array_filter($slot['days'] ?? [])));
         $startTime = $slot['start_time'] ?? null;
@@ -195,7 +195,7 @@ class ScheduleConflictService
      */
     public function findSectionConflict(
         int $sectionId,
-        int $excludingId,
+        int|array $excludingId,
         array $dayTokens,
         string $startTime,
         string $endTime
@@ -216,7 +216,7 @@ class ScheduleConflictService
      */
     public function findFacultyConflict(
         int $facultyId,
-        int $excludingId,
+        int|array $excludingId,
         array $dayTokens,
         string $startTime,
         string $endTime
@@ -241,7 +241,7 @@ class ScheduleConflictService
      */
     public function findRoomConflict(
         int $roomId,
-        int $excludingId,
+        int|array $excludingId,
         array $dayTokens,
         string $startTime,
         string $endTime
@@ -322,13 +322,13 @@ class ScheduleConflictService
      */
     private function findOverlap(
         Builder $query,
-        int $excludingId,
+        int|array $excludingId,
         array $dayTokens,
         string $startTime,
         string $endTime
     ): ?SectionSubject {
         return $query->with(['subject:id,subject_code', 'section:id,section_code', 'faculty:id,first_name,last_name', 'room:id,room_code'])
-            ->where('id', '!=', $excludingId)
+            ->whereNotIn('id', (array) $excludingId)
             ->whereNotNull('days')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
@@ -353,6 +353,39 @@ class ScheduleConflictService
     private function describeWindow(SectionSubject $conflict): string
     {
         return trim("{$conflict->days} {$conflict->start_time}-{$conflict->end_time}", ' -');
+    }
+
+    /**
+     * INTELLIGENT IRREGULAR SECTION SCHEDULING — Merge Recommendation.
+     *
+     * A merged Irregular-section row (`merged_into_section_subject_id`
+     * set) is DELIBERATELY given the exact same Faculty/Room/Days/
+     * Time as its host Regular-section row — that overlap is the
+     * entire point of merging, not a double-booking. Without this,
+     * every merged row fails validate()/findFacultyConflict()/
+     * findRoomConflict() against its own host the moment it's saved
+     * (see Save Schedule / batchUpdateSchedule), reporting a phantom
+     * "Faculty Conflict" / "Room Conflict" against the very class it
+     * was intentionally merged into.
+     *
+     * Returns every SectionSubject id that must be excluded when
+     * conflict-checking $subject: itself, the host it merged into (if
+     * any), and — symmetrically — every OTHER row merged into it, in
+     * case $subject IS itself a host with riders attached.
+     *
+     * @return list<int>
+     */
+    public function mergeExclusionIds(SectionSubject $subject): array
+    {
+        $ids = [$subject->id];
+
+        if ($subject->merged_into_section_subject_id) {
+            $ids[] = $subject->merged_into_section_subject_id;
+        }
+
+        $riders = $subject->mergedPlacements()->pluck('id')->all();
+
+        return array_values(array_unique(array_merge($ids, $riders)));
     }
 
     private function minutesBetween(string $start, string $end): int

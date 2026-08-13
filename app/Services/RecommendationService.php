@@ -66,6 +66,7 @@ class RecommendationService
         private readonly ScheduleConflictService $conflictService,
         private readonly MeetingPatternService $meetingPatternService,
         private readonly FacultyWorkloadService $workloadService,
+        private readonly SiblingSectionPatternService $siblingPatternService,
     ) {
     }
 
@@ -103,7 +104,127 @@ class RecommendationService
             $subject, $section, $faculty['recommendations'], $room['recommendations'], $sectionSubject
         );
 
-        return compact('faculty', 'room', 'time', 'combined');
+        // SIBLING SECTION PATTERN MATCHING — if another Section in
+        // the same cohort (same Major, Curriculum, Academic Year,
+        // Semester, Year Level) already has this exact Subject fully
+        // scheduled, surface that Faculty+Room+copied-duration
+        // combination as the TOP Combined suggestion (and pin it atop
+        // Faculty/Room individually too), ahead of whatever the
+        // general ranking would otherwise put first. This never
+        // removes the other ranked options — the Registrar still sees
+        // and can pick any of them — it only makes the "match what
+        // the sibling section already does" option the obvious
+        // default. See SiblingSectionPatternService for the full
+        // rationale.
+        $this->applySiblingPatternBoost($sectionSubject, $faculty, $room, $combined);
+
+        // Exposed so the Recommend drawer can offer a "Why wasn't a
+        // sibling section's schedule copied?" explainer even when a
+        // match WAS eventually found via the general engine — the
+        // Registrar can see every donor considered and every Day
+        // candidate tried against it. Empty when no sibling donor
+        // exists at all (nothing to explain).
+        $siblingDiagnostics = $this->siblingPatternService->getDiagnostics();
+
+        return compact('faculty', 'room', 'time', 'combined', 'siblingDiagnostics');
+    }
+
+    /**
+     * Mutates $faculty/$room/$combined in place, pinning the sibling
+     * pattern (if any usable one exists) to the front of each list.
+     */
+    private function applySiblingPatternBoost(SectionSubject $sectionSubject, array &$faculty, array &$room, array &$combined): void
+    {
+        $pattern = $this->siblingPatternService->findPattern($sectionSubject);
+
+        if (! $pattern) {
+            return;
+        }
+
+        $facultyModel = \App\Models\Faculty::find($pattern['faculty_id']);
+        $roomModel = \App\Models\Room::find($pattern['room_id']);
+
+        if (! $facultyModel || ! $roomModel) {
+            return;
+        }
+
+        $note = "Matches {$pattern['donor_section_code']}, which already teaches this subject with this faculty, room, and duration.";
+        $reasonObjects = [['label' => $note, 'met' => true]];
+
+        $facultyEntry = [
+            'id' => $facultyModel->id,
+            'name' => $facultyModel->full_name,
+            'faculty_category' => $facultyModel->faculty_category ?? null,
+            'employment_type' => $facultyModel->employment_type ?? null,
+            'current_load' => null,
+            'max_teaching_units' => null,
+            'score' => 100,
+            'score_max' => 100,
+            'confidence' => 'High',
+            'reasons' => $reasonObjects,
+            'is_sibling_pattern' => true,
+        ];
+
+        $roomEntry = [
+            'id' => $roomModel->id,
+            'name' => $roomModel->room_name,
+            'room_category' => $roomModel->room_category ?? null,
+            'room_type' => $roomModel->room_type ?? null,
+            'capacity' => $roomModel->capacity ?? null,
+            'department' => null,
+            'score' => 100,
+            'score_max' => 100,
+            'confidence' => 'High',
+            'reasons' => $reasonObjects,
+            'is_sibling_pattern' => true,
+        ];
+
+        $faculty['recommendations'] = $this->pinToFront($faculty['recommendations'] ?? [], $facultyEntry);
+        $room['recommendations'] = $this->pinToFront($room['recommendations'] ?? [], $roomEntry);
+
+        $combinedEntry = [
+            'faculty' => $facultyEntry,
+            'room' => $roomEntry,
+            'time' => [
+                'days' => $pattern['days'],
+                'start_time' => $pattern['start_time'],
+                'end_time' => $pattern['end_time'],
+                'score' => 100,
+                'score_max' => 100,
+                'confidence' => 'High',
+                'reasons' => $reasonObjects,
+            ],
+            'score' => 100,
+            'score_max' => 100,
+            'confidence' => 'High',
+            'conflict' => null,
+            'is_sibling_pattern' => true,
+            'pattern_source' => [
+                'donor_section_id' => $pattern['donor_section_id'],
+                'donor_section_code' => $pattern['donor_section_code'],
+            ],
+        ];
+
+        $combined['recommendations'] = array_merge(
+            [$combinedEntry],
+            $combined['recommendations'] ?? []
+        );
+    }
+
+    /**
+     * Removes any existing entry with the same id (avoids a literal
+     * duplicate row) and inserts $entry at index 0.
+     */
+    private function pinToFront(array $recommendations, array $entry): array
+    {
+        $filtered = array_values(array_filter(
+            $recommendations,
+            fn (array $existing) => ($existing['id'] ?? null) !== $entry['id']
+        ));
+
+        array_unshift($filtered, $entry);
+
+        return $filtered;
     }
 
     private const MAX_COMBINED_RESULTS = 5;
@@ -2264,17 +2385,26 @@ class RecommendationService
     ): array {
         $excludingId = $current?->id ?? 0;
 
-        $sectionConflict = $section->id
-            ? (bool) $this->conflictService->findSectionConflict($section->id, $excludingId, $days, $startTime, $endTime)
-            : false;
+        // Keep the actual conflicting SectionSubject (not just a bool)
+        // so the override reason below can name exactly which Section/
+        // Subject already holds that Faculty/Room/Section slot, instead
+        // of a generic "already booked" with no way to tell what to
+        // reschedule around.
+        $sectionConflictRow = $section->id
+            ? $this->conflictService->findSectionConflict($section->id, $excludingId, $days, $startTime, $endTime)
+            : null;
 
-        $facultyConflict = $facultyId
-            ? (bool) $this->conflictService->findFacultyConflict($facultyId, $excludingId, $days, $startTime, $endTime)
-            : false;
+        $facultyConflictRow = $facultyId
+            ? $this->conflictService->findFacultyConflict($facultyId, $excludingId, $days, $startTime, $endTime)
+            : null;
 
-        $roomConflict = $roomId
-            ? (bool) $this->conflictService->findRoomConflict($roomId, $excludingId, $days, $startTime, $endTime)
-            : false;
+        $roomConflictRow = $roomId
+            ? $this->conflictService->findRoomConflict($roomId, $excludingId, $days, $startTime, $endTime)
+            : null;
+
+        $sectionConflict = (bool) $sectionConflictRow;
+        $facultyConflict = (bool) $facultyConflictRow;
+        $roomConflict = (bool) $roomConflictRow;
 
         $expectedMeetings = $this->meetingPatternService->meetingsPerWeek($subject);
         $fitsPattern = count($days) === $expectedMeetings;
@@ -2356,13 +2486,13 @@ class RecommendationService
         if ($isManualOverride) {
             $issues = [];
             if ($facultyConflict) {
-                $issues[] = 'the selected faculty is already booked at this day/time';
+                $issues[] = 'the selected faculty is already booked at this day/time'.$this->conflictSuffix($facultyConflictRow, 'teaching');
             }
             if ($roomConflict) {
-                $issues[] = 'the selected room is already booked at this day/time';
+                $issues[] = 'the selected room is already booked at this day/time'.$this->conflictSuffix($roomConflictRow, 'for');
             }
             if ($sectionConflict) {
-                $issues[] = 'this section already has another subject at this day/time';
+                $issues[] = 'this section already has another subject at this day/time'.$this->conflictSuffix($sectionConflictRow, null);
             }
             if (! $fitsPattern) {
                 $label = $this->meetingPatternService->label($subject);
@@ -2397,6 +2527,80 @@ class RecommendationService
             'confidence' => $this->confidenceFromScore($score),
             'manual_override' => $isManualOverride,
             'override_reason' => $overrideReason,
+            // Distinguishes a genuine double-booking (Faculty, Room, or
+            // this Section already occupied at this exact day/time)
+            // from a merely soft/informational mismatch (off-pattern
+            // meeting count, a trimmed duration, outside class hours).
+            // manual_override alone can't tell these apart — it's true
+            // for both — but only a hard_conflict should ever block
+            // "Accept All & Save"/"Save Schedule"; a soft mismatch
+            // stays a freely-overridable warning by design.
+            'hard_conflict' => $facultyConflict || $roomConflict || $sectionConflict,
+            // Structured version of the same conflicts named in
+            // override_reason above — the review panel uses this to
+            // decide which row(s) to highlight red and to build its
+            // own "already booked by <Subject> — <Section>" copy
+            // without having to re-parse the sentence.
+            'conflict_details' => array_values(array_filter([
+                $facultyConflict ? $this->conflictDetail('faculty', $facultyConflictRow) : null,
+                $roomConflict ? $this->conflictDetail('room', $roomConflictRow) : null,
+                $sectionConflict ? $this->conflictDetail('section', $sectionConflictRow) : null,
+            ])),
+        ];
+    }
+
+    /**
+     * " — currently teaching CS101 for BSIT 2A" style suffix naming
+     * exactly which existing Section/Subject occupies the slot a
+     * Manual Override just conflicted with, so the Registrar knows
+     * what to reschedule instead of just "already booked".
+     */
+    private function conflictSuffix(?SectionSubject $conflict, ?string $verb): string
+    {
+        if (! $conflict) {
+            return '';
+        }
+
+        $conflict->loadMissing(['subject:id,subject_code', 'section:id,section_code']);
+
+        $subjectCode = $conflict->subject?->subject_code;
+        $sectionCode = $conflict->section?->section_code;
+
+        if (! $subjectCode && ! $sectionCode) {
+            return '';
+        }
+
+        $what = $verb ? " ({$verb} " : ' (';
+        $what .= $subjectCode ?? 'another subject';
+        if ($sectionCode) {
+            $what .= " — {$sectionCode}";
+        }
+        $what .= ')';
+
+        return $what;
+    }
+
+    /**
+     * Structured counterpart to conflictSuffix() — one entry per
+     * conflicting resource, for the frontend to render without
+     * string-parsing override_reason.
+     */
+    private function conflictDetail(string $resource, ?SectionSubject $conflict): ?array
+    {
+        if (! $conflict) {
+            return null;
+        }
+
+        $conflict->loadMissing(['subject:id,subject_code,subject_title', 'section:id,section_code']);
+
+        return [
+            'resource' => $resource, // 'faculty' | 'room' | 'section'
+            'subject_code' => $conflict->subject?->subject_code,
+            'subject_title' => $conflict->subject?->subject_title,
+            'section_code' => $conflict->section?->section_code,
+            'days' => $conflict->days,
+            'start_time' => $conflict->start_time,
+            'end_time' => $conflict->end_time,
         ];
     }
 
