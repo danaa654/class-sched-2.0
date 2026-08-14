@@ -1,6 +1,6 @@
 <script setup>
 import { Head, useForm, usePage, router } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import Swal from 'sweetalert2';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -16,6 +16,10 @@ import Column from 'primevue/column';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     faculties: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
@@ -244,7 +248,7 @@ const fullName = (faculty) => {
             <span class="text-lg font-semibold text-[#1E293B]">Faculty Master</span>
         </template>
 
-        <div class="max-w-7xl mx-auto w-full">
+        <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
                 <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Faculty Master</h1>
@@ -273,6 +277,7 @@ const fullName = (faculty) => {
                                     placeholder="Filter by Department / General Education"
                                     showClear
                                     class="w-full sm:w-64"
+                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                 />
                             </div>
                         </template>
@@ -415,6 +420,7 @@ const fullName = (faculty) => {
             :style="{ width: '760px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeAddFaculty"
         >
             <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveFaculty">
@@ -450,6 +456,7 @@ const fullName = (faculty) => {
                         placeholder="Select employment type"
                         :invalid="!!facultyForm.errors.employment_type"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="facultyForm.errors.employment_type" class="text-red-500">
                         {{ facultyForm.errors.employment_type }}
@@ -533,6 +540,7 @@ const fullName = (faculty) => {
                         showClear
                         :invalid="!!facultyForm.errors.college_id"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="facultyForm.errors.college_id" class="text-red-500">
                         {{ facultyForm.errors.college_id }}
@@ -576,6 +584,7 @@ const fullName = (faculty) => {
                         placeholder="Select status"
                         :invalid="!!facultyForm.errors.status"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="facultyForm.errors.status" class="text-red-500">
                         {{ facultyForm.errors.status }}
@@ -644,3 +653,92 @@ const fullName = (faculty) => {
         </Dialog>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides. Wrapping an element in the "dark-scope" class
+   (added conditionally via isDark) recolors the shared light-mode
+   Tailwind utility classes and PrimeVue component chrome used
+   throughout this page. The Dialog is teleported to <body> by
+   PrimeVue, so its rules use :global() with a compound selector
+   instead of :deep() — Vue's scoped-CSS attribute doesn't reliably
+   travel through the teleport boundary. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+
+.dark-scope :deep(.p-inputtext),
+.dark-scope :deep(.p-select),
+.dark-scope :deep(.p-multiselect) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-select-label),
+.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; font-weight: 600; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.035) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.07) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-emptymessage) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page),
+.dark-scope :deep(.p-paginator .p-paginator-prev),
+.dark-scope :deep(.p-paginator .p-paginator-next),
+.dark-scope :deep(.p-paginator .p-paginator-first),
+.dark-scope :deep(.p-paginator .p-paginator-last) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page.p-paginator-page-selected) { background: rgba(37, 99, 235, 0.9) !important; color: #fff !important; }
+
+.dark-scope :deep(.p-button-text.p-button-secondary) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-button-text.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-button-text.p-button-danger) { color: #FCA5A5 !important; }
+.dark-scope :deep(.p-button-text.p-button-danger:hover) { background: rgba(248, 113, 113, 0.12) !important; color: #FECACA !important; }
+.dark-scope :deep(.p-button-text.p-button-info) { color: #7DD3FC !important; }
+.dark-scope :deep(.p-button-text.p-button-info:hover) { background: rgba(56, 189, 248, 0.12) !important; color: #BAE6FD !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+
+/* Add / Edit Faculty modal (teleported to <body>) */
+:global(.dark-scope.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-title) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+
+:global(.dark-scope.p-dialog label) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog p.text-slate-400) { color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .p-inputtext),
+:global(.dark-scope.p-dialog .p-textarea),
+:global(.dark-scope.p-dialog .p-select),
+:global(.dark-scope.p-dialog .p-multiselect),
+:global(.dark-scope.p-dialog .p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    color: #F8FAFC !important;
+}
+:global(.dark-scope.p-dialog .p-inputtext::placeholder),
+:global(.dark-scope.p-dialog .p-textarea::placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-select-label),
+:global(.dark-scope.p-dialog .p-multiselect-label) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-select-label.p-placeholder),
+:global(.dark-scope.p-dialog .p-multiselect-label.p-placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-inputnumber-button) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.18) !important; color: #F8FAFC !important; }
+
+:global(.p-select-overlay.dark-scope),
+:global(.p-multiselect-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-select-overlay.dark-scope .p-select-option),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option) { color: #F1F5F9 !important; }
+:global(.p-select-overlay.dark-scope .p-select-option:hover),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+</style>

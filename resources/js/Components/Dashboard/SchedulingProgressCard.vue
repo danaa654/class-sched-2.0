@@ -41,11 +41,12 @@ const cardPt = computed(() => ({
 </script>
 
 <template>
-    <Card
-        class="!rounded-2xl border shadow-sm transition-colors duration-300"
-        :class="isDark ? '!border-white/10 !bg-white/[0.06] !backdrop-blur-xl' : '!border-slate-100 !bg-white'"
-        :pt="cardPt"
-    >
+    <div class="neon-frame-static rounded-2xl p-[1.5px]">
+        <Card
+            class="!rounded-[15px] transition-colors duration-300"
+            :class="isDark ? '!bg-[#0B1220]/90' : '!bg-white/90'"
+            :pt="cardPt"
+        >
         <template #title>
             <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Scheduling Progress</span>
         </template>
@@ -88,5 +89,6 @@ const cardPt = computed(() => ({
                 </div>
             </div>
         </template>
-    </Card>
+        </Card>
+    </div>
 </template>

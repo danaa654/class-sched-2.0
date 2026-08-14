@@ -9,3 +9,169 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* Thin, colorful scrollbar (site-wide) */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: #2563EB #E0E7FF;
+}
+
+html.dark {
+    scrollbar-color: #38BDF8 #0B1220;
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #E0E7FF;
+}
+
+html.dark ::-webkit-scrollbar-track {
+    background: #0B1220;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #2563EB, #38BDF8);
+    border-radius: 9999px;
+    border: 2px solid #E0E7FF;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #38BDF8, #2563EB);
+    border: 2px solid #0B1220;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #1D4ED8, #0EA5E9);
+}
+
+/* ---- Ambient background particles (shared: Welcome.vue + AppLayout.vue) ---- */
+.firefly {
+    position: absolute;
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(255, 244, 191, 0.95) 0%, rgba(255, 214, 102, 0.55) 45%, transparent 75%);
+    box-shadow: 0 0 6px 2px rgba(255, 221, 130, 0.55);
+    animation-name: firefly-drift;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    will-change: transform, opacity;
+}
+
+@keyframes firefly-drift {
+    0% { transform: translate(0, 0) scale(0.8); opacity: 0; }
+    10% { opacity: 0.9; }
+    25% { transform: translate(calc(var(--drift) * 0.4), -26px) scale(1.1); opacity: 0.4; }
+    50% { transform: translate(var(--drift), -8px) scale(0.9); opacity: 1; }
+    75% { transform: translate(calc(var(--drift) * 0.6), -34px) scale(1); opacity: 0.35; }
+    100% { transform: translate(0, 0) scale(0.8); opacity: 0; }
+}
+
+.grid-light {
+    position: absolute;
+    pointer-events: none;
+    will-change: transform, opacity;
+    --glow-color: #2563EB;
+}
+
+.grid-light--x {
+    left: -80px;
+    height: 2px;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, transparent, var(--glow-color), color-mix(in srgb, var(--glow-color) 60%, white), transparent);
+    box-shadow: 0 0 8px 1px color-mix(in srgb, var(--glow-color) 45%, transparent);
+    animation-name: grid-light-x;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+}
+
+.grid-light--y {
+    top: -80px;
+    width: 2px;
+    border-radius: 9999px;
+    background: linear-gradient(180deg, transparent, var(--glow-color), color-mix(in srgb, var(--glow-color) 60%, white), transparent);
+    box-shadow: 0 0 8px 1px color-mix(in srgb, var(--glow-color) 45%, transparent);
+    animation-name: grid-light-y;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+}
+
+@keyframes grid-light-x {
+    0% { transform: translateX(0); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateX(calc(100vw + 160px)); opacity: 0; }
+}
+
+@keyframes grid-light-y {
+    0% { transform: translateY(0); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateY(calc(100vh + 160px)); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .firefly, .grid-light {
+        animation: none;
+        opacity: 0.35;
+    }
+}
+
+/* ---- Static colored border frame (no rotation) ---- */
+.neon-frame-static {
+    position: relative;
+    background: linear-gradient(135deg, #2563EB, #38BDF8, #7C3AED, #E11D2E);
+}
+
+/* ---- Global button styling: rounded + 3D pressed effect (site-wide) ---- */
+.p-button:not(.p-button-text):not(.p-button-link) {
+    border-radius: 10px !important;
+    box-shadow:
+        0 3px 0 rgba(0, 0, 0, 0.22),
+        0 4px 10px rgba(0, 0, 0, 0.12) !important;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.2s ease !important;
+}
+
+.p-button:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow:
+        0 4px 0 rgba(0, 0, 0, 0.22),
+        0 6px 14px rgba(0, 0, 0, 0.16) !important;
+}
+
+.p-button:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    transform: translateY(2px);
+    box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.22),
+        0 2px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
+.p-button:not(.p-button-text):not(.p-button-link):disabled {
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+/* Outlined buttons: same rounding + lift, lighter shadow so the border still reads */
+.p-button.p-button-outlined {
+    border-radius: 10px !important;
+    box-shadow: 0 2px 0 rgba(0, 0, 0, 0.1) !important;
+    transition: transform 0.12s ease, box-shadow 0.12s ease !important;
+}
+
+.p-button.p-button-outlined:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.12) !important;
+}
+
+.p-button.p-button-outlined:not(:disabled):active {
+    transform: translateY(1px);
+    box-shadow: none !important;
+}
+
+/* Text/link buttons: keep flat, just round the hit area on hover */
+.p-button.p-button-text,
+.p-button.p-button-link {
+    border-radius: 8px !important;
+}

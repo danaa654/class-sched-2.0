@@ -6,6 +6,10 @@ import Card from 'primevue/card';
 import ProgressBar from 'primevue/progressbar';
 import Tag from 'primevue/tag';
 import Button from 'primevue/button';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     activeTerm: { type: Object, default: null },
@@ -76,6 +80,7 @@ const activityStatusSeverity = (status) => {
     <Head title="Scheduling Dashboard" />
 
     <AppLayout>
+        <div :class="isDark ? 'dark-scope' : ''">
         <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
                 <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Scheduling Dashboard</h1>
@@ -330,5 +335,46 @@ const activityStatusSeverity = (status) => {
                 </div>
             </template>
         </Card>
+        </div>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides — same "dark-scope" pattern used on Rooms,
+   Sections, Faculty, etc. Wrapping the page body lets these rules
+   recolor PrimeVue Cards and plain Tailwind utility classes only when
+   the app theme is dark. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-\[\#2563EB\]) { color: #60A5FA !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.text-emerald-600) { color: #34D399 !important; }
+.dark-scope :deep(.text-amber-600) { color: #FBBF24 !important; }
+.dark-scope :deep(.text-amber-800) { color: #FDE68A !important; }
+.dark-scope :deep(.text-amber-500) { color: #FBBF24 !important; }
+.dark-scope :deep(.text-emerald-700) { color: #6EE7B7 !important; }
+
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.15) !important; }
+.dark-scope :deep(.border-amber-200) { border-color: rgba(217, 119, 6, 0.35) !important; }
+.dark-scope :deep(.border-b) { border-color: rgba(255, 255, 255, 0.08) !important; }
+
+.dark-scope :deep(.bg-white) { background-color: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.bg-emerald-50) { background-color: rgba(16, 185, 129, 0.12) !important; }
+.dark-scope :deep(.bg-amber-50) { background-color: rgba(217, 119, 6, 0.14) !important; }
+.dark-scope :deep(.hover\:bg-amber-100:hover) { background-color: rgba(217, 119, 6, 0.22) !important; }
+.dark-scope :deep(.hover\:bg-amber-50\/40:hover) { background-color: rgba(217, 119, 6, 0.1) !important; }
+.dark-scope :deep(.hover\:border-amber-200:hover) { border-color: rgba(217, 119, 6, 0.4) !important; }
+
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+.dark-scope :deep(.p-card .p-card-title) { color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-progressbar) { background: rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; background: transparent !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:disabled) { color: #64748B !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+</style>

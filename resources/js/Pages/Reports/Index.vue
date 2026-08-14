@@ -8,6 +8,10 @@ import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Tag from 'primevue/tag';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     filterOptions: { type: Object, required: true },
@@ -122,6 +126,7 @@ const activeFiltersLabel = computed(() => {
     <Head title="Reports" />
 
     <AppLayout>
+        <div :class="isDark ? 'dark-scope' : ''">
         <div class="flex items-center justify-between no-print">
             <div>
                 <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Reports</h1>
@@ -135,43 +140,43 @@ const activeFiltersLabel = computed(() => {
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
                         <label class="text-xs font-semibold text-slate-500">Academic Year</label>
-                        <Select v-model="form.academic_year" :options="academicYearOptions" optionLabel="label" optionValue="value" placeholder="All Years" showClear class="w-full mt-1" />
+                        <Select v-model="form.academic_year" :options="academicYearOptions" optionLabel="label" optionValue="value" placeholder="All Years" showClear class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
                         <label class="text-xs font-semibold text-slate-500">Semester</label>
-                        <Select v-model="form.semester" :options="semesterOptions" optionLabel="label" optionValue="value" placeholder="All Semesters" showClear class="w-full mt-1" />
+                        <Select v-model="form.semester" :options="semesterOptions" optionLabel="label" optionValue="value" placeholder="All Semesters" showClear class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
                         <label class="text-xs font-semibold text-slate-500">College / Program</label>
-                        <Select v-model="form.college_id" :options="collegeOptions" optionLabel="label" optionValue="value" class="w-full mt-1" />
+                        <Select v-model="form.college_id" :options="collegeOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
                         <label class="text-xs font-semibold text-slate-500">Major</label>
-                        <Select v-model="form.major_id" :options="majorOptions" optionLabel="label" optionValue="value" class="w-full mt-1" />
+                        <Select v-model="form.major_id" :options="majorOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
                         <label class="text-xs font-semibold text-slate-500">Year Level</label>
-                        <Select v-model="form.year_level" :options="yearLevelOptions" optionLabel="label" optionValue="value" class="w-full mt-1" />
+                        <Select v-model="form.year_level" :options="yearLevelOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
                         <label class="text-xs font-semibold text-slate-500">Section Type</label>
-                        <Select v-model="form.section_type" :disabled="forcesIrregular" :options="sectionTypeOptions" optionLabel="label" optionValue="value" class="w-full mt-1" />
+                        <Select v-model="form.section_type" :disabled="forcesIrregular" :options="sectionTypeOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsSection">
                         <label class="text-xs font-semibold text-slate-500">Section</label>
-                        <Select v-model="form.section_id" :options="sectionOptions" optionLabel="label" optionValue="value" class="w-full mt-1" />
+                        <Select v-model="form.section_id" :options="sectionOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsFaculty">
                         <label class="text-xs font-semibold text-slate-500">Faculty</label>
-                        <Select v-model="form.faculty_id" :options="facultyOptions" optionLabel="label" optionValue="value" filter class="w-full mt-1" />
+                        <Select v-model="form.faculty_id" :options="facultyOptions" optionLabel="label" optionValue="value" filter class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsRoom">
                         <label class="text-xs font-semibold text-slate-500">Room</label>
-                        <Select v-model="form.room_id" :options="roomOptions" optionLabel="label" optionValue="value" class="w-full mt-1" />
+                        <Select v-model="form.room_id" :options="roomOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div class="md:col-span-2">
                         <label class="text-xs font-semibold text-slate-500">Report Type</label>
-                        <Select v-model="reportType" :options="reportTypeOptions" optionLabel="label" optionValue="value" optionGroupLabel="label" optionGroupChildren="items" placeholder="Select Report" class="w-full mt-1" />
+                        <Select v-model="reportType" :options="reportTypeOptions" optionLabel="label" optionValue="value" optionGroupLabel="label" optionGroupChildren="items" placeholder="Select Report" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                 </div>
                 <div class="flex gap-2 mt-4">
@@ -254,8 +259,64 @@ const activeFiltersLabel = computed(() => {
                 <p class="text-center text-slate-400 italic py-10">Select filters and a Report Type above, then click "Generate Report".</p>
             </template>
         </Card>
+        </div>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides — same "dark-scope" pattern used across the rest
+   of the app. Wrapping the page body lets these rules recolor
+   PrimeVue Cards/DataTable/Select and plain Tailwind utility classes
+   only when the app theme is dark. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-800) { color: #F1F5F9 !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+
+.dark-scope :deep(.p-select) {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-select-label) { color: #F8FAFC !important; }
+.dark-scope :deep(.p-select-label.p-placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.p-select.p-disabled) { background: rgba(255, 255, 255, 0.03) !important; color: #64748B !important; }
+
+.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; background: transparent !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+
+.dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.035) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.07) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-emptymessage) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page),
+.dark-scope :deep(.p-paginator .p-paginator-prev),
+.dark-scope :deep(.p-paginator .p-paginator-next),
+.dark-scope :deep(.p-paginator .p-paginator-first),
+.dark-scope :deep(.p-paginator .p-paginator-last) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page.p-paginator-page-selected) { background: rgba(37, 99, 235, 0.9) !important; color: #fff !important; }
+
+/* Report summary tiles + row-level "rounded-lg border" blocks */
+.dark-scope :deep(.rounded-lg.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; background: rgba(255, 255, 255, 0.04) !important; }
+
+:global(.p-select-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-select-overlay.dark-scope .p-select-option) { color: #F1F5F9 !important; }
+:global(.p-select-overlay.dark-scope .p-select-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+:global(.p-select-overlay.dark-scope .p-select-option-group) { background: rgba(255, 255, 255, 0.04) !important; color: #94A3B8 !important; }
+:global(.p-select-overlay.dark-scope .p-select-filter) { background: rgba(255, 255, 255, 0.06) !important; color: #F8FAFC !important; border-color: rgba(255, 255, 255, 0.15) !important; }
+:global(.p-select-overlay.dark-scope .p-select-empty-message) { color: #94A3B8 !important; }
+</style>
 
 <style>
 @media print {

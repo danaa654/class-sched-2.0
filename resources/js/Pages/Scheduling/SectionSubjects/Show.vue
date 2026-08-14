@@ -29,6 +29,10 @@ import FacultyRecommendationSelector from '@/Components/Scheduling/FacultyRecomm
 import RoomRecommendationSelector from '@/Components/Scheduling/RoomRecommendationSelector.vue';
 import TimeRecommendationSelector from '@/Components/Scheduling/TimeRecommendationSelector.vue';
 import MergeRecommendationModal from '@/Components/Scheduling/MergeRecommendationModal.vue';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     section: { type: Object, required: true },
@@ -1566,10 +1570,10 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
         <Toast />
 
         <template #header>
-            <span class="text-lg font-semibold text-[#1E293B]">Section Subjects</span>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Section Subjects</span>
         </template>
 
-        <div class="max-w-[100rem] mx-auto w-full">
+        <div class="max-w-[100rem] mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Back link -->
             <div class="mb-4">
                 <Link :href="route('scheduling.sections')" class="text-sm text-slate-500 hover:text-slate-700">
@@ -1595,7 +1599,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         />
                     </h1>
                 </div>
-                <Popover ref="helpPopover">
+                <Popover ref="helpPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
                     <p class="w-80 max-w-[85vw] text-sm text-slate-600 leading-relaxed">
                         Build this section's subject list and assign Faculty, Room, Days, and Time directly in the
                         table, or click "Auto Generate Schedule" to let the recommendation engine propose the best
@@ -1875,6 +1879,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id) }"
                                                     emptyMessage="No active faculty"
                                                     emptyFilterMessage="No matching faculty"
+                                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                                     @update:modelValue="(v) => onFacultyChange(data, v)"
                                                     @show="fetchRecommendations(data)"
                                                 >
@@ -1924,6 +1929,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     :class="{ 'p-invalid': stateFor(data.id).errors.room_id || roomConflictRowIds.has(data.id) }"
                                                     emptyMessage="No active rooms"
                                                     emptyFilterMessage="No matching rooms"
+                                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                                     @update:modelValue="(v) => onRoomChange(data, v)"
                                                     @show="fetchRecommendations(data)"
                                                 >
@@ -1970,6 +1976,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     placeholder="Select days"
                                                     class="w-full"
                                                     :class="{ 'p-invalid': stateFor(data.id).errors.days || sectionConflictRowIds.has(data.id) }"
+                                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                                     @update:modelValue="(v) => onDaysChange(data, v)"
                                                 >
                                                     <template #value="{ value, placeholder }">
@@ -2022,6 +2029,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 placeholder="Start"
                                                 class="w-full"
                                                 :class="{ 'p-invalid': stateFor(data.id).errors.start_time }"
+                                                :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
                                                 @update:modelValue="(v) => onStartTimeChange(data, v)"
                                             />
                                             <p v-if="stateFor(data.id).errors.start_time" class="text-red-500 text-xs mt-1">
@@ -2041,6 +2049,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 placeholder="End"
                                                 class="w-full"
                                                 :class="{ 'p-invalid': stateFor(data.id).errors.end_time }"
+                                                :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
                                                 @update:modelValue="(v) => onEndTimeChange(data, v)"
                                             />
                                             <p v-if="stateFor(data.id).errors.end_time" class="text-red-500 text-xs mt-1">
@@ -2055,7 +2064,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </DataTable>
 
                     <!-- Suggested Time popover (Days column quick-pick) -->
-                    <Popover ref="timePopover">
+                    <Popover ref="timePopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
                         <div class="w-72 max-w-[85vw]">
                             <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
                                 Suggested Times<span v-if="timePopoverRow?.subject?.subject_code"> — {{ timePopoverRow.subject.subject_code }}</span>
@@ -2109,7 +2118,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </Popover>
 
                     <!-- Suggested Faculty popover (Faculty column quick-pick) -->
-                    <Popover ref="facultyPopover">
+                    <Popover ref="facultyPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
                         <div class="w-72 max-w-[85vw]">
                             <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
                                 Suggested Faculty<span v-if="facultyPopoverRow?.subject?.subject_code"> — {{ facultyPopoverRow.subject.subject_code }}</span>
@@ -2161,7 +2170,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </Popover>
 
                     <!-- Suggested Room popover (Room column quick-pick) -->
-                    <Popover ref="roomPopover">
+                    <Popover ref="roomPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
                         <div class="w-72 max-w-[85vw]">
                             <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
                                 Suggested Rooms<span v-if="roomPopoverRow?.subject?.subject_code"> — {{ roomPopoverRow.subject.subject_code }}</span>
@@ -2221,6 +2230,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             position="right"
             :style="{ width: '38rem' }"
             :breakpoints="{ '960px': '90vw', '640px': '100vw' }"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
         >
             <template #header>
                 <div>
@@ -2593,6 +2603,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :style="{ width: '760px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeAddDialog"
         >
             <Tabs v-model:value="activeTab">
@@ -2618,6 +2629,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     filter
                                     placeholder="Select a curriculum"
                                     class="w-full"
+                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                 >
                                     <template #option="{ option }">
                                         <span class="font-medium">{{ option.code }}</span>
@@ -2634,6 +2646,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     optionValue="value"
                                     placeholder="Select year level"
                                     class="w-full"
+                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                 />
                             </div>
                             <div class="flex flex-col gap-1">
@@ -2645,6 +2658,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     optionValue="value"
                                     placeholder="Select semester"
                                     class="w-full"
+                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                 />
                             </div>
                         </div>
@@ -2726,6 +2740,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                 placeholder="Select one or multiple subjects"
                                 :invalid="!!manualForm.errors.subject_ids"
                                 class="w-full"
+                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                             >
                                 <template #option="{ option }">
                                     <span class="font-medium">{{ option.subject_code }}</span>
@@ -2765,6 +2780,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :style="{ width: '860px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
         >
             <div v-if="autoSummary">
                 <div
@@ -3036,4 +3052,147 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
     padding-top: 0.4rem;
     padding-bottom: 0.4rem;
 }
+
+/* Dark-mode overrides. Wrapping the page body in the "dark-scope" class
+   (added conditionally via isDark) recolors PrimeVue chrome and the
+   Tailwind utility classes used throughout the scheduling table, the
+   summary card, the Popovers/Drawer, and both Dialogs. Popovers/Drawer/
+   Dialog/Select overlay panels are teleported to <body>, so they're
+   handled with their own :pt="{ ... : isDark ? 'dark-scope' : '' }"
+   props above and matched here via :global(). */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-800) { color: #F1F5F9 !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.hover\:text-slate-700:hover) { color: #E2E8F0 !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
+.dark-scope :deep(.divide-slate-100 > :not([hidden]) ~ :not([hidden])) { border-color: rgba(255, 255, 255, 0.08) !important; }
+
+.dark-scope :deep(.bg-white) { background-color: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.bg-slate-50) { background-color: rgba(255, 255, 255, 0.05) !important; }
+.dark-scope :deep(.bg-green-50) { background-color: rgba(16, 185, 129, 0.12) !important; }
+.dark-scope :deep(.border-green-200) { border-color: rgba(16, 185, 129, 0.35) !important; }
+.dark-scope :deep(.text-green-600) { color: #34D399 !important; }
+.dark-scope :deep(.bg-amber-50) { background-color: rgba(217, 119, 6, 0.14) !important; }
+.dark-scope :deep(.border-amber-200) { border-color: rgba(217, 119, 6, 0.35) !important; }
+.dark-scope :deep(.text-amber-600) { color: #FBBF24 !important; }
+
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+
+.dark-scope :deep(.p-inputtext),
+.dark-scope :deep(.p-select),
+.dark-scope :deep(.p-multiselect),
+.dark-scope :deep(.p-datepicker-input) {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-inputtext::placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.p-select-label),
+.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+.dark-scope :deep(.p-select-label.p-placeholder),
+.dark-scope :deep(.p-multiselect-label.p-placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.p-multiselect-chip .p-chip) { background: rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.03) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-emptymessage) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator) { background: transparent !important; color: #F1F5F9 !important; }
+
+.dark-scope :deep(.p-button-text.p-button-secondary) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-button-text.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-button-text.p-button-danger) { color: #FCA5A5 !important; }
+.dark-scope :deep(.p-button-text.p-button-danger:hover) { background: rgba(248, 113, 113, 0.12) !important; color: #FECACA !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; background: transparent !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+
+.dark-scope :deep(.p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-tab) { color: #94A3B8 !important; }
+.dark-scope :deep(.p-tab-active) { color: #F8FAFC !important; }
+.dark-scope :deep(.p-progressbar) { background: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(table.w-full) { color: #F1F5F9 !important; }
+.dark-scope :deep(table.w-full thead) { background: rgba(255, 255, 255, 0.06) !important; color: #94A3B8 !important; }
+.dark-scope :deep(.border.border-slate-200.rounded-lg) { border-color: rgba(255, 255, 255, 0.12) !important; }
+
+/* Dialogs, Drawer, Popovers, and Select/MultiSelect/DatePicker overlay
+   panels are teleported to <body>, so they need :global() rather than
+   :deep() to be reached from this scoped style block. */
+:global(.dark-scope.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-title) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog label) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog p.text-slate-500),
+:global(.dark-scope.p-dialog p.text-slate-400),
+:global(.dark-scope.p-dialog small.text-slate-400) { color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .font-medium.text-slate-700) { color: #E2E8F0 !important; }
+:global(.dark-scope.p-dialog .p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-tab) { color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .p-tab-active) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-tabpanels) { background: transparent !important; }
+:global(.dark-scope.p-dialog .p-tabpanel) { background: transparent !important; color: #F1F5F9 !important; }
+:global(.dark-scope.p-dialog .p-tabpanel p),
+:global(.dark-scope.p-dialog .p-tabpanel span),
+:global(.dark-scope.p-dialog .p-tabpanel div) { color: inherit; }
+:global(.dark-scope.p-dialog .p-tabpanel .text-slate-700) { color: #E2E8F0 !important; }
+:global(.dark-scope.p-dialog .p-tabpanel .text-slate-600) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-tabpanel .text-slate-500),
+:global(.dark-scope.p-dialog .p-tabpanel .text-slate-400) { color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .p-tabpanel label) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-inputtext),
+:global(.dark-scope.p-dialog .p-select),
+:global(.dark-scope.p-dialog .p-multiselect) {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+:global(.dark-scope.p-dialog .p-select-label),
+:global(.dark-scope.p-dialog .p-multiselect-label) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog table.w-full) { color: #F1F5F9 !important; }
+:global(.dark-scope.p-dialog table.w-full thead) { background: rgba(255, 255, 255, 0.06) !important; color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .border.border-slate-200.rounded-lg) { border-color: rgba(255, 255, 255, 0.12) !important; }
+:global(.dark-scope.p-dialog .divide-slate-100 > *) { border-color: rgba(255, 255, 255, 0.08) !important; }
+
+:global(.dark-scope.p-drawer) { background: #0F1730 !important; color: #F8FAFC !important; border-left: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-drawer .p-drawer-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-drawer .p-drawer-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-drawer .text-slate-800) { color: #F1F5F9 !important; }
+:global(.dark-scope.p-drawer .text-slate-700) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-drawer .text-slate-500),
+:global(.dark-scope.p-drawer .text-slate-400) { color: #94A3B8 !important; }
+:global(.dark-scope.p-drawer .bg-slate-50) { background-color: rgba(255, 255, 255, 0.06) !important; }
+
+:global(.dark-scope.p-popover) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; }
+:global(.dark-scope.p-popover:before),
+:global(.dark-scope.p-popover:after) { border-bottom-color: #0F1730 !important; }
+:global(.dark-scope.p-popover .text-slate-600) { color: #CBD5E1 !important; }
+
+:global(.p-select-overlay.dark-scope),
+:global(.p-multiselect-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-select-overlay.dark-scope .p-select-option),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option) { color: #F1F5F9 !important; }
+:global(.p-select-overlay.dark-scope .p-select-option:hover),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+:global(.p-select-overlay.dark-scope .p-select-option-group),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option-group) { background: rgba(255, 255, 255, 0.04) !important; }
+:global(.p-select-overlay.dark-scope .p-select-filter),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-filter) { background: rgba(255, 255, 255, 0.06) !important; color: #F8FAFC !important; border-color: rgba(255, 255, 255, 0.15) !important; }
+:global(.p-select-overlay.dark-scope .p-select-empty-message),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-empty-message) { color: #94A3B8 !important; }
+
+:global(.p-datepicker-panel.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-datepicker-panel.dark-scope .p-datepicker-calendar td span) { color: #F1F5F9 !important; }
 </style>

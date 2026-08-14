@@ -24,6 +24,10 @@ import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Toast from 'primevue/toast';
 import ProgressBar from 'primevue/progressbar';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     faculty: { type: Object, required: true },
@@ -394,7 +398,7 @@ const placementStatusSeverity = (status) => {
             <span class="text-lg font-semibold text-[#1E293B]">Faculty Details</span>
         </template>
 
-        <div class="max-w-6xl mx-auto w-full">
+        <div class="max-w-6xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Back link -->
             <div class="mb-4">
                 <Link :href="route('scheduling.faculty')" class="text-sm text-slate-500 hover:text-slate-700">
@@ -494,6 +498,7 @@ const placementStatusSeverity = (status) => {
                                     display="chip"
                                     placeholder="Select subjects this faculty member can teach"
                                     class="w-full mt-1"
+                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                 >
                                     <template #option="{ option }">
                                         <span class="font-medium">{{ option.subject_code }}</span>
@@ -773,6 +778,7 @@ const placementStatusSeverity = (status) => {
             :style="{ width: '760px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeEdit"
         >
             <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveFaculty">
@@ -790,6 +796,7 @@ const placementStatusSeverity = (status) => {
                         placeholder="Select employment type"
                         :invalid="!!facultyForm.errors.employment_type"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="facultyForm.errors.employment_type" class="text-red-500">{{ facultyForm.errors.employment_type }}</small>
                 </div>
@@ -827,6 +834,7 @@ const placementStatusSeverity = (status) => {
                         showClear
                         :invalid="!!facultyForm.errors.college_id"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="facultyForm.errors.college_id" class="text-red-500">{{ facultyForm.errors.college_id }}</small>
                     <p v-else class="text-xs text-slate-400">
@@ -857,6 +865,7 @@ const placementStatusSeverity = (status) => {
                         optionValue="value"
                         :invalid="!!facultyForm.errors.workload_type"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <p class="text-xs text-slate-400">Whichever the institution uses to cap this faculty member's load.</p>
                 </div>
@@ -885,6 +894,7 @@ const placementStatusSeverity = (status) => {
                         placeholder="Select status"
                         :invalid="!!facultyForm.errors.status"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="facultyForm.errors.status" class="text-red-500">{{ facultyForm.errors.status }}</small>
                 </div>
@@ -920,6 +930,7 @@ const placementStatusSeverity = (status) => {
             :style="{ width: '480px' }"
             :breakpoints="{ '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeAvailabilityDialog"
         >
             <form class="grid grid-cols-1 gap-4" @submit.prevent="onSaveAvailability">
@@ -932,6 +943,7 @@ const placementStatusSeverity = (status) => {
                         :disabled="!!editingAvailability"
                         :invalid="!!availabilityForm.errors.day_of_week"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="availabilityForm.errors.day_of_week" class="text-red-500">{{ availabilityForm.errors.day_of_week }}</small>
                 </div>
@@ -953,6 +965,7 @@ const placementStatusSeverity = (status) => {
                         :disabled="!availabilityForm.is_available"
                         :invalid="!!availabilityForm.errors.start_time"
                         class="w-full"
+                        :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="availabilityForm.errors.start_time" class="text-red-500">{{ availabilityForm.errors.start_time }}</small>
                 </div>
@@ -969,6 +982,7 @@ const placementStatusSeverity = (status) => {
                         :disabled="!availabilityForm.is_available"
                         :invalid="!!availabilityForm.errors.end_time"
                         class="w-full"
+                        :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="availabilityForm.errors.end_time" class="text-red-500">{{ availabilityForm.errors.end_time }}</small>
                 </div>
@@ -987,3 +1001,112 @@ const placementStatusSeverity = (status) => {
         </Dialog>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides. Wrapping an element in the "dark-scope" class
+   (added conditionally via isDark) recolors the shared light-mode
+   Tailwind utility classes and PrimeVue component chrome used
+   throughout this page. Dialogs and overlay panels (Select/MultiSelect/
+   DatePicker) are teleported to <body> by PrimeVue, so their rules use
+   :global() with a compound selector instead of :deep() — Vue's
+   scoped-CSS attribute doesn't reliably travel through the teleport
+   boundary. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
+
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+
+.dark-scope :deep(.p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-tabpanels) { background: transparent !important; color: #F1F5F9 !important; padding: 0 !important; }
+.dark-scope :deep(.p-tabpanel) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-tab) { color: #94A3B8 !important; }
+.dark-scope :deep(.p-tab-active) { color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-inputtext),
+.dark-scope :deep(.p-textarea),
+.dark-scope :deep(.p-select),
+.dark-scope :deep(.p-multiselect),
+.dark-scope :deep(.p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-inputtext::placeholder),
+.dark-scope :deep(.p-textarea::placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.p-select-label),
+.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+.dark-scope :deep(.p-multiselect-label.p-placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.p-inputnumber-button) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.15) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-checkbox .p-checkbox-box) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.25) !important; }
+.dark-scope :deep(.p-progressbar) { background: rgba(255, 255, 255, 0.08) !important; }
+
+.dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; font-weight: 600; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.07) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-emptymessage) { color: #CBD5E1 !important; }
+
+.dark-scope :deep(.p-button-text.p-button-secondary) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-button-text.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-button-text.p-button-danger) { color: #FCA5A5 !important; }
+.dark-scope :deep(.p-button-text.p-button-danger:hover) { background: rgba(248, 113, 113, 0.12) !important; color: #FECACA !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+
+/* Amber "General Education" info banner (Information tab) */
+.dark-scope :deep(.bg-amber-50) { background: rgba(245, 158, 11, 0.12) !important; }
+.dark-scope :deep(.border-amber-200) { border-color: rgba(245, 158, 11, 0.3) !important; }
+.dark-scope :deep(.text-amber-700),
+.dark-scope :deep(.text-amber-800) { color: #FCD34D !important; }
+
+/* Dialogs (teleported to <body>) */
+:global(.dark-scope.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-title) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+
+:global(.dark-scope.p-dialog label) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog p.text-xs.text-slate-400) { color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .p-inputtext),
+:global(.dark-scope.p-dialog .p-textarea),
+:global(.dark-scope.p-dialog .p-select),
+:global(.dark-scope.p-dialog .p-multiselect),
+:global(.dark-scope.p-dialog .p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    color: #F8FAFC !important;
+}
+:global(.dark-scope.p-dialog .p-inputtext::placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-select-label),
+:global(.dark-scope.p-dialog .p-multiselect-label) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-select-label.p-placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-inputnumber-button) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.18) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-checkbox .p-checkbox-box) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.3) !important; }
+
+/* Select / MultiSelect dropdown overlays + DatePicker time panel
+   (also teleported) */
+:global(.p-select-overlay.dark-scope),
+:global(.p-multiselect-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-select-overlay.dark-scope .p-select-option),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option) { color: #F1F5F9 !important; }
+:global(.p-select-overlay.dark-scope .p-select-option:hover),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+:global(.p-select-overlay.dark-scope .p-select-filter),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-filter) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.15) !important; color: #F8FAFC !important; }
+
+:global(.p-datepicker-panel.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-datepicker-panel.dark-scope .p-datepicker-time-picker) { border-color: rgba(255, 255, 255, 0.1) !important; }
+:global(.p-datepicker-panel.dark-scope .p-datepicker-time-picker span) { color: #F8FAFC !important; }
+:global(.p-datepicker-panel.dark-scope .p-button-text) { color: #CBD5E1 !important; }
+</style>

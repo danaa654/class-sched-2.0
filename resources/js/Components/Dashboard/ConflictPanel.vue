@@ -36,11 +36,12 @@ const cardPt = computed(() => ({
 </script>
 
 <template>
-    <Card
-        class="!rounded-2xl border shadow-sm transition-colors duration-300"
-        :class="isDark ? '!border-white/10 !bg-white/[0.06] !backdrop-blur-xl' : '!border-slate-100 !bg-white'"
-        :pt="cardPt"
-    >
+    <div class="neon-frame-static rounded-2xl p-[1.5px]">
+        <Card
+            class="!rounded-[15px] transition-colors duration-300"
+            :class="isDark ? '!bg-[#0B1220]/90' : '!bg-white/90'"
+            :pt="cardPt"
+        >
         <template #title>
             <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Attention Needed</span>
         </template>
@@ -55,34 +56,40 @@ const cardPt = computed(() => ({
             </div>
 
             <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <Link
+                <div
                     v-for="item in items"
                     :key="item.key"
-                    :href="route('scheduling.section-subjects')"
-                    class="flex items-center gap-3 rounded-xl border p-4 transition-colors"
-                    :class="conflicts[item.key] > 0
-                        ? (isDark ? 'border-red-400/20 bg-red-500/10 hover:bg-red-500/20' : 'border-red-100 bg-red-50 hover:bg-red-100')
-                        : (isDark ? 'border-white/10 hover:bg-white/[0.06]' : 'border-slate-100 hover:bg-slate-50')"
+                    class="rounded-xl p-[1.5px]"
+                    :class="conflicts[item.key] > 0 ? 'neon-frame-static' : ''"
                 >
-                    <span
-                        class="flex h-10 w-10 flex-none items-center justify-center rounded-full"
+                    <Link
+                        :href="route('scheduling.section-subjects')"
+                        class="flex items-center gap-3 rounded-[10px] p-4 transition-colors"
                         :class="conflicts[item.key] > 0
-                            ? (isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-600')
-                            : (isDark ? 'bg-white/10 text-slate-400' : 'bg-slate-100 text-slate-400')"
+                            ? (isDark ? 'bg-[#0B1220]/90 hover:bg-[#0B1220]/75' : 'bg-white/90 hover:bg-white/70')
+                            : (isDark ? 'border border-white/10 hover:bg-white/[0.06]' : 'border border-slate-100 hover:bg-slate-50')"
                     >
-                        <i :class="['pi', item.icon]"></i>
-                    </span>
-                    <div>
-                        <p class="text-xs font-semibold tracking-wide uppercase" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ item.label }}</p>
-                        <p
-                            class="text-xl font-bold"
-                            :class="conflicts[item.key] > 0 ? (isDark ? 'text-red-400' : 'text-red-700') : (isDark ? 'text-white' : 'text-[#1E293B]')"
+                        <span
+                            class="flex h-10 w-10 flex-none items-center justify-center rounded-full"
+                            :class="conflicts[item.key] > 0
+                                ? (isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-600')
+                                : (isDark ? 'bg-white/10 text-slate-400' : 'bg-slate-100 text-slate-400')"
                         >
-                            {{ conflicts[item.key] }}
-                        </p>
-                    </div>
-                </Link>
+                            <i :class="['pi', item.icon]"></i>
+                        </span>
+                        <div>
+                            <p class="text-xs font-semibold tracking-wide uppercase" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ item.label }}</p>
+                            <p
+                                class="text-xl font-bold"
+                                :class="conflicts[item.key] > 0 ? (isDark ? 'text-red-400' : 'text-red-700') : (isDark ? 'text-white' : 'text-[#1E293B]')"
+                            >
+                                {{ conflicts[item.key] }}
+                            </p>
+                        </div>
+                    </Link>
+                </div>
             </div>
         </template>
-    </Card>
+        </Card>
+    </div>
 </template>

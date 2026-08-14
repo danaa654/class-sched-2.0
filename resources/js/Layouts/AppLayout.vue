@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
 import Button from 'primevue/button';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
+import AmbientBackground from '@/Components/AmbientBackground.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -34,29 +35,29 @@ const activeAcademicTermLabel = computed(() => {
 const sidebarOpen = ref(true);
 
 const menuItems = [
-    { label: 'Dashboard', route: 'dashboard' },
+    { label: 'Dashboard', route: 'dashboard', icon: 'pi pi-home' },
 ];
 
 const userManagementItems = [
-    { label: 'Users', route: 'users' },
+    { label: 'Users', route: 'users', icon: 'pi pi-users' },
 ];
 
 // Academic Setup — everything that defines the academic environment
 // (school year/semester/rules, colleges/departments/programs, the
 // curriculum map, and subject records) before scheduling can begin.
 const academicSetupItems = [
-    { label: 'Academic Calendar', route: 'academic-calendar' },
-    { label: 'Academic Structure', route: 'academic-structure' },
-    { label: 'Curriculum', route: 'curriculums' },
-    { label: 'Subjects', route: 'subjects' },
+    { label: 'Academic Calendar', route: 'academic-calendar', icon: 'pi pi-calendar' },
+    { label: 'Academic Structure', route: 'academic-structure', icon: 'pi pi-sitemap' },
+    { label: 'Curriculum', route: 'curriculums', icon: 'pi pi-book' },
+    { label: 'Subjects', route: 'subjects', icon: 'pi pi-bookmark' },
 ];
 
 // Resource Management — the people/rooms/sections the scheduling
 // engine draws on.
 const resourceManagementItems = [
-    { label: 'Faculty', route: 'scheduling.faculty' },
-    { label: 'Rooms', route: 'scheduling.rooms' },
-    { label: 'Sections', route: 'scheduling.sections' },
+    { label: 'Faculty', route: 'scheduling.faculty', icon: 'pi pi-user' },
+    { label: 'Rooms', route: 'scheduling.rooms', icon: 'pi pi-building' },
+    { label: 'Sections', route: 'scheduling.sections', icon: 'pi pi-th-large' },
 ];
 
 // Scheduling — the control center for generating and monitoring
@@ -64,15 +65,15 @@ const resourceManagementItems = [
 // above; actual schedule editing still lives under Sections >
 // Section Subjects, reached from the Sections page.)
 const schedulingItems = [
-    { label: 'Scheduling Dashboard', route: 'scheduling' },
+    { label: 'Scheduling Dashboard', route: 'scheduling', icon: 'pi pi-calendar-plus' },
 ];
 
 const reportsItems = [
-    { label: 'Reports', route: 'reports' },
+    { label: 'Reports', route: 'reports', icon: 'pi pi-chart-bar' },
 ];
 
 const systemItems = [
-    { label: 'Settings', route: 'settings' },
+    { label: 'Settings', route: 'settings', icon: 'pi pi-cog' },
 ];
 
 const isActive = (routeName) => {
@@ -85,9 +86,10 @@ const isActive = (routeName) => {
 </script>
 
 <template>
-    <div class="min-h-screen transition-colors duration-300" :class="isDark ? 'bg-[#0B1120]' : 'bg-[#F8FAFC]'">
+    <div class="relative min-h-screen overflow-hidden transition-colors duration-300" :class="isDark ? 'bg-[#0B1120]' : 'bg-[#F8FAFC]'">
+        <AmbientBackground :is-dark="isDark" />
         <!-- Top Navigation Bar -->
-        <header class="h-16 w-full bg-[#13005A] shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
+        <header class="h-16 w-full bg-[#0B1849] shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
             <div class="flex items-center gap-4">
                 <button
                     type="button"
@@ -121,20 +123,21 @@ const isActive = (routeName) => {
 
         <!-- Left Sidebar -->
         <aside
-            class="fixed top-16 left-0 bottom-0 bg-[#13005A] text-slate-200 overflow-hidden transition-all duration-200 z-20"
-            :class="sidebarOpen ? 'w-[260px]' : 'w-0 overflow-hidden'"
+            class="fixed top-16 left-0 bottom-0 bg-[#0B1849] text-slate-200 overflow-hidden transition-all duration-200 z-20"
+            :class="sidebarOpen ? 'w-[200px]' : 'w-0 overflow-hidden'"
         >
-            <nav class="h-full overflow-hidden py-3 px-2 space-y-0.5 w-[260px] text-[13px]">
+            <nav class="h-full overflow-y-auto py-3 px-2 space-y-0.5 w-[200px] text-[13px] sidebar-scroll">
                 <Link
                     v-for="item in menuItems"
                     :key="item.label"
                     :href="route(item.route)"
-                    class="block px-3 py-2 rounded-lg font-medium transition-colors"
+                    class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
                     :class="isActive(item.route)
                         ? 'bg-[#2563EB] text-white'
                         : 'text-slate-300 hover:bg-white/5 hover:text-white'"
                 >
-                    {{ item.label }}
+                    <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
+                    <span>{{ item.label }}</span>
                 </Link>
 
                 <!-- User Management (Administrator only) -->
@@ -146,12 +149,13 @@ const isActive = (routeName) => {
                         v-for="item in userManagementItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
                     >
-                        {{ item.label }}
+                        <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
+                        <span>{{ item.label }}</span>
                     </Link>
                 </div>
 
@@ -164,12 +168,13 @@ const isActive = (routeName) => {
                         v-for="item in academicSetupItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
                     >
-                        {{ item.label }}
+                        <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
+                        <span>{{ item.label }}</span>
                     </Link>
                 </div>
 
@@ -182,12 +187,13 @@ const isActive = (routeName) => {
                         v-for="item in resourceManagementItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
                     >
-                        {{ item.label }}
+                        <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
+                        <span>{{ item.label }}</span>
                     </Link>
                 </div>
 
@@ -200,12 +206,13 @@ const isActive = (routeName) => {
                         v-for="item in schedulingItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
                     >
-                        {{ item.label }}
+                        <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
+                        <span>{{ item.label }}</span>
                     </Link>
                 </div>
 
@@ -218,12 +225,13 @@ const isActive = (routeName) => {
                         v-for="item in reportsItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
                     >
-                        {{ item.label }}
+                        <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
+                        <span>{{ item.label }}</span>
                     </Link>
                 </div>
 
@@ -236,12 +244,13 @@ const isActive = (routeName) => {
                         v-for="item in systemItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="block px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
                         :class="isActive(item.route)
                             ? 'bg-[#2563EB] text-white'
                             : 'text-slate-300 hover:bg-white/5 hover:text-white'"
                     >
-                        {{ item.label }}
+                        <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
+                        <span>{{ item.label }}</span>
                     </Link>
                 </div>
             </nav>
@@ -249,8 +258,8 @@ const isActive = (routeName) => {
 
         <!-- Main Content -->
         <main
-            class="pt-16 transition-all duration-200"
-            :class="sidebarOpen ? 'pl-[260px]' : 'pl-0'"
+            class="relative z-10 pt-16 transition-all duration-200"
+            :class="sidebarOpen ? 'pl-[200px]' : 'pl-0'"
         >
             <div class="p-8" :class="isDark ? 'text-slate-100' : ''">
                 <slot :is-dark="isDark" />
@@ -258,3 +267,15 @@ const isActive = (routeName) => {
         </main>
     </div>
 </template>
+
+<style scoped>
+/* Keep the sidebar scrollable (so nav items aren't cut off on shorter
+   screens) but hide the visible scrollbar track/thumb for a cleaner look. */
+.sidebar-scroll {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge legacy */
+}
+.sidebar-scroll::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Edge Chromium */
+}
+</style>

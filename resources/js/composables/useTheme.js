@@ -22,6 +22,7 @@ watch(
     (value) => {
         if (typeof window !== 'undefined') {
             localStorage.setItem('classly-theme', value);
+            document.documentElement.classList.toggle('dark', value === 'dark');
         }
     },
     { immediate: true }

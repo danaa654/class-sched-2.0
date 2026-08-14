@@ -13,6 +13,10 @@ import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     curriculum: { type: Object, required: true },
@@ -189,7 +193,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             <span class="text-lg font-semibold text-[#1E293B]">Curriculum</span>
         </template>
 
-        <div class="max-w-7xl mx-auto w-full">
+        <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Breadcrumb -->
             <div class="mb-4 flex items-center gap-2 text-sm text-slate-500">
                 <Link :href="route('curriculums')" class="hover:text-[#1E293B] hover:underline">Curriculum</Link>
@@ -234,6 +238,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     optionLabel="label"
                                     optionValue="value"
                                     class="w-44"
+                                    :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                 />
                             </div>
                         </template>
@@ -332,6 +337,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :header="editingItem ? 'Edit Curriculum Subject' : 'Add Subject'"
             modal
             class="w-full max-w-lg"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeDialog"
         >
             <div class="flex flex-col gap-4">
@@ -362,6 +368,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         placeholder="Select a subject"
                         :invalid="!!form.errors.subject_id"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="form.errors.subject_id" class="text-red-500">
                         {{ form.errors.subject_id }}
@@ -383,6 +390,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             placeholder="Select year level"
                             :invalid="!!form.errors.year_level"
                             class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                         />
                         <small v-if="form.errors.year_level" class="text-red-500">
                             {{ form.errors.year_level }}
@@ -402,6 +410,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             placeholder="Select semester"
                             :invalid="!!form.errors.semester"
                             class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                         />
                         <small v-if="form.errors.semester" class="text-red-500">
                             {{ form.errors.semester }}
@@ -426,6 +435,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         showClear
                         :invalid="!!form.errors.prerequisite_subject_id"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="form.errors.prerequisite_subject_id" class="text-red-500">
                         {{ form.errors.prerequisite_subject_id }}
@@ -458,3 +468,76 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
         <Toast />
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides. Wrapping an element in the "dark-scope" class
+   (added conditionally via isDark) recolors the shared light-mode
+   Tailwind utility classes and PrimeVue component chrome used
+   throughout this page. The Dialog is teleported to <body> by
+   PrimeVue, so its rules use :global() with a compound selector
+   instead of :deep() — Vue's scoped-CSS attribute doesn't reliably
+   travel through the teleport boundary. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.bg-slate-50) { background-color: rgba(255, 255, 255, 0.05) !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
+.dark-scope :deep(.divide-slate-100 > :not([hidden]) ~ :not([hidden])) { border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(tr.hover\:bg-slate-50:hover) { background-color: rgba(255, 255, 255, 0.06) !important; }
+
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+
+.dark-scope :deep(.p-inputtext),
+.dark-scope :deep(.p-select),
+.dark-scope :deep(.p-multiselect) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-select-label),
+.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-button-text.p-button-secondary) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-button-text.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-button-text.p-button-danger) { color: #FCA5A5 !important; }
+.dark-scope :deep(.p-button-text.p-button-danger:hover) { background: rgba(248, 113, 113, 0.12) !important; color: #FECACA !important; }
+
+/* Add / Edit Subject modal (teleported to <body>) */
+:global(.dark-scope.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-title) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+
+:global(.dark-scope.p-dialog label) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-inputtext),
+:global(.dark-scope.p-dialog .p-textarea),
+:global(.dark-scope.p-dialog .p-select),
+:global(.dark-scope.p-dialog .p-multiselect) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    color: #F8FAFC !important;
+}
+:global(.dark-scope.p-dialog .p-inputtext::placeholder),
+:global(.dark-scope.p-dialog .p-textarea::placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-inputtext:disabled) { background: rgba(255, 255, 255, 0.03) !important; color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .p-select-label),
+:global(.dark-scope.p-dialog .p-multiselect-label) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-select-label.p-placeholder),
+:global(.dark-scope.p-dialog .p-multiselect-label.p-placeholder) { color: #7C8CA8 !important; }
+
+:global(.p-select-overlay.dark-scope),
+:global(.p-multiselect-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-select-overlay.dark-scope .p-select-option),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option) { color: #F1F5F9 !important; }
+:global(.p-select-overlay.dark-scope .p-select-option:hover),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+:global(.p-select-overlay.dark-scope .p-select-filter),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-filter) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.15) !important; color: #F8FAFC !important; }
+</style>

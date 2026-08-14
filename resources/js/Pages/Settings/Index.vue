@@ -22,6 +22,10 @@ import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import Tag from 'primevue/tag';
 import Message from 'primevue/message';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     visibleGroups: { type: Array, default: () => [] },
@@ -245,10 +249,10 @@ const onUpdateAccount = () => {
     <AppLayout>
         <Toast />
 
-        <div class="max-w-4xl mx-auto w-full">
-            <div class="mb-8">
+        <div class="max-w-6xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
+            <div class="mb-6">
                 <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Settings</h1>
-                <p class="mt-1 text-slate-500">
+                <p class="mt-1 text-slate-500 max-w-3xl">
                     System-wide configuration. Faculty, Rooms, Subjects, Sections, Programs, Colleges and the
                     Curriculum keep their own dedicated pages — Settings only controls how the system behaves.
                 </p>
@@ -274,39 +278,46 @@ const onUpdateAccount = () => {
                         <Card class="!rounded-2xl border border-slate-100 shadow-sm">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">General</h2>
-                                <p class="text-sm text-slate-500 mb-5">School identity shown across the system.</p>
+                                <p class="text-sm text-slate-500 mb-6">School identity shown across the system.</p>
 
-                                <fieldset :disabled="!canEdit('general')" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                <fieldset :disabled="!canEdit('general')" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-7">
                                     <FloatLabel variant="on">
-                                        <InputText id="schoolName" v-model="generalForm.school_name" class="w-full" :invalid="!!generalForm.errors.school_name" />
+                                        <InputText id="schoolName" size="large" v-model="generalForm.school_name" class="w-full" :invalid="!!generalForm.errors.school_name" />
                                         <label for="schoolName">School Name *</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
-                                        <InputText id="schoolShortName" v-model="generalForm.school_short_name" class="w-full" />
+                                        <InputText id="schoolShortName" size="large" v-model="generalForm.school_short_name" class="w-full" />
                                         <label for="schoolShortName">Short Name</label>
                                     </FloatLabel>
-
-                                    <FloatLabel variant="on" class="sm:col-span-2">
-                                        <Textarea id="schoolAddress" v-model="generalForm.school_address" class="w-full" rows="2" autoResize />
-                                        <label for="schoolAddress">Address</label>
-                                    </FloatLabel>
-
                                     <FloatLabel variant="on">
-                                        <InputText id="schoolContact" v-model="generalForm.school_contact" class="w-full" />
+                                        <InputText id="schoolContact" size="large" v-model="generalForm.school_contact" class="w-full" />
                                         <label for="schoolContact">Contact Number</label>
                                     </FloatLabel>
+
                                     <FloatLabel variant="on">
-                                        <InputText id="schoolEmail" v-model="generalForm.school_email" type="email" class="w-full" :invalid="!!generalForm.errors.school_email" />
+                                        <InputText id="schoolEmail" size="large" v-model="generalForm.school_email" type="email" class="w-full" :invalid="!!generalForm.errors.school_email" />
                                         <label for="schoolEmail">School Email</label>
                                     </FloatLabel>
 
-                                    <div class="sm:col-span-2">
+                                    <FloatLabel variant="on" class="sm:col-span-2 lg:col-span-3">
+                                        <Textarea id="schoolAddress" v-model="generalForm.school_address" class="w-full" rows="1" autoResize />
+                                        <label for="schoolAddress">Address</label>
+                                    </FloatLabel>
+                                </fieldset>
+
+                                <Divider class="!my-6" />
+
+                                <div class="flex flex-col sm:flex-row sm:items-center gap-5">
+                                    <img v-if="settings['general.school_logo_path']" :src="settings['general.school_logo_path']" class="h-16 w-16 object-cover rounded-xl border border-slate-100 shrink-0" alt="Current logo" />
+                                    <div class="h-16 w-16 rounded-xl border border-dashed border-slate-200 flex items-center justify-center text-slate-300 shrink-0" v-else>
+                                        <i class="pi pi-image text-xl"></i>
+                                    </div>
+                                    <div class="flex-1">
                                         <label class="text-sm text-slate-600 font-medium mb-1 block">School Logo</label>
-                                        <img v-if="settings['general.school_logo_path']" :src="settings['general.school_logo_path']" class="h-14 mb-2 rounded" alt="Current logo" />
                                         <input type="file" accept="image/*" :disabled="!canEdit('general')" @change="onLogoChange" class="text-sm" />
                                         <small v-if="generalForm.errors.logo" class="text-red-500 block mt-1">{{ generalForm.errors.logo }}</small>
                                     </div>
-                                </fieldset>
+                                </div>
 
                                 <div v-if="canEdit('general')" class="flex justify-end mt-6">
                                     <Button label="Save Changes" icon="pi pi-check" :loading="generalForm.processing" @click="saveGeneral" />
@@ -328,11 +339,11 @@ const onUpdateAccount = () => {
 
                                 <fieldset :disabled="!canEdit('academic')" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                     <FloatLabel variant="on">
-                                        <InputText id="defaultAY" v-model="academicForm.default_academic_year" class="w-full" placeholder="e.g. 2026-2027" />
+                                        <InputText id="defaultAY" size="large" v-model="academicForm.default_academic_year" class="w-full" placeholder="e.g. 2026-2027" />
                                         <label for="defaultAY">Default Academic Year</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
-                                        <Select id="defaultSem" v-model="academicForm.default_semester" :options="semesterOptions" class="w-full" />
+                                        <Select id="defaultSem" size="large" v-model="academicForm.default_semester" :options="semesterOptions" class="w-full" />
                                         <label for="defaultSem">Default Semester</label>
                                     </FloatLabel>
                                 </fieldset>
@@ -413,15 +424,15 @@ const onUpdateAccount = () => {
 
                                 <fieldset :disabled="!canEdit('workload')" class="grid grid-cols-1 sm:grid-cols-3 gap-5">
                                     <FloatLabel variant="on">
-                                        <InputNumber id="maxLoad" v-model="workloadForm.max_teaching_load" class="w-full" :min="1" :max="60" />
+                                        <InputNumber id="maxLoad" size="large" v-model="workloadForm.max_teaching_load" class="w-full" :min="1" :max="60" />
                                         <label for="maxLoad">Max Teaching Load (units/hrs)</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
-                                        <InputNumber id="warnThreshold" v-model="workloadForm.warning_threshold" class="w-full" :min="0" :max="100" suffix="%" />
+                                        <InputNumber id="warnThreshold" size="large" v-model="workloadForm.warning_threshold" class="w-full" :min="0" :max="100" suffix="%" />
                                         <label for="warnThreshold">Warning Threshold</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
-                                        <InputNumber id="overloadThreshold" v-model="workloadForm.overloaded_threshold" class="w-full" :min="0" :max="200" suffix="%" />
+                                        <InputNumber id="overloadThreshold" size="large" v-model="workloadForm.overloaded_threshold" class="w-full" :min="0" :max="200" suffix="%" />
                                         <label for="overloadThreshold">Overloaded Threshold</label>
                                     </FloatLabel>
                                 </fieldset>
@@ -489,11 +500,11 @@ const onUpdateAccount = () => {
                                 <fieldset :disabled="!canEdit('autoschedule')">
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-4">
                                         <FloatLabel variant="on">
-                                            <Select id="autoMode" v-model="autoScheduleForm.mode" :options="autoModeOptions" optionLabel="label" optionValue="value" class="w-full" />
+                                            <Select id="autoMode" size="large" v-model="autoScheduleForm.mode" :options="autoModeOptions" optionLabel="label" optionValue="value" class="w-full" />
                                             <label for="autoMode">Auto Schedule Mode</label>
                                         </FloatLabel>
                                         <FloatLabel variant="on">
-                                            <InputNumber id="maxContinuous" v-model="autoScheduleForm.max_continuous_duration_hours" class="w-full" :min="1" :max="12" suffix=" hrs" />
+                                            <InputNumber id="maxContinuous" size="large" v-model="autoScheduleForm.max_continuous_duration_hours" class="w-full" :min="1" :max="12" suffix=" hrs" />
                                             <label for="maxContinuous">Max Continuous Class Duration</label>
                                         </FloatLabel>
                                     </div>
@@ -533,11 +544,11 @@ const onUpdateAccount = () => {
 
                                 <fieldset :disabled="!canEdit('irregular')" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                     <FloatLabel variant="on">
-                                        <InputNumber id="defEstStudents" v-model="irregularForm.default_estimated_students" class="w-full" :min="1" :max="200" />
+                                        <InputNumber id="defEstStudents" size="large" v-model="irregularForm.default_estimated_students" class="w-full" :min="1" :max="200" />
                                         <label for="defEstStudents">Default Estimated Students</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
-                                        <Select id="irregularMode" v-model="irregularForm.default_mode" :options="irregularModeOptions" optionLabel="label" optionValue="value" class="w-full" />
+                                        <Select id="irregularMode" size="large" v-model="irregularForm.default_mode" :options="irregularModeOptions" optionLabel="label" optionValue="value" class="w-full" />
                                         <label for="irregularMode">Default Irregular Scheduling Mode</label>
                                     </FloatLabel>
                                 </fieldset>
@@ -609,22 +620,22 @@ const onUpdateAccount = () => {
                                 <form class="pt-1" autocomplete="off" @submit.prevent="onUpdateAccount">
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                         <FloatLabel variant="on">
-                                            <InputText id="accFirstName" v-model="accountForm.first_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.first_name" />
+                                            <InputText id="accFirstName" size="large" v-model="accountForm.first_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.first_name" />
                                             <label for="accFirstName">First Name *</label>
                                         </FloatLabel>
                                         <FloatLabel variant="on">
-                                            <InputText id="accMiddleName" v-model="accountForm.middle_name" class="w-full" autocomplete="off" />
+                                            <InputText id="accMiddleName" size="large" v-model="accountForm.middle_name" class="w-full" autocomplete="off" />
                                             <label for="accMiddleName">Middle Name</label>
                                         </FloatLabel>
                                     </div>
 
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
                                         <FloatLabel variant="on">
-                                            <InputText id="accLastName" v-model="accountForm.last_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.last_name" />
+                                            <InputText id="accLastName" size="large" v-model="accountForm.last_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.last_name" />
                                             <label for="accLastName">Last Name *</label>
                                         </FloatLabel>
                                         <FloatLabel variant="on">
-                                            <InputText id="accSuffix" v-model="accountForm.suffix" class="w-full" autocomplete="off" />
+                                            <InputText id="accSuffix" size="large" v-model="accountForm.suffix" class="w-full" autocomplete="off" />
                                             <label for="accSuffix">Suffix</label>
                                         </FloatLabel>
                                     </div>
@@ -633,7 +644,7 @@ const onUpdateAccount = () => {
 
                                     <div class="grid grid-cols-1 gap-5">
                                         <FloatLabel variant="on">
-                                            <InputText id="accEmail" v-model="accountForm.email" type="email" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.email" />
+                                            <InputText id="accEmail" size="large" v-model="accountForm.email" type="email" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.email" />
                                             <label for="accEmail">Email *</label>
                                         </FloatLabel>
                                         <small v-if="accountForm.errors.email" class="text-red-500 -mt-4">{{ accountForm.errors.email }}</small>
@@ -641,11 +652,11 @@ const onUpdateAccount = () => {
 
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
                                         <FloatLabel variant="on">
-                                            <Password id="accPassword" v-model="accountForm.password" toggleMask :feedback="true" inputClass="w-full" class="w-full" autocomplete="new-password" :invalid="!!accountForm.errors.password" />
+                                            <Password id="accPassword" size="large" v-model="accountForm.password" toggleMask :feedback="true" inputClass="w-full" class="w-full" autocomplete="new-password" :invalid="!!accountForm.errors.password" />
                                             <label for="accPassword">New Password</label>
                                         </FloatLabel>
                                         <FloatLabel variant="on">
-                                            <Password id="accPasswordConfirm" v-model="accountForm.password_confirmation" toggleMask :feedback="false" inputClass="w-full" class="w-full" autocomplete="new-password" :invalid="!!accountForm.errors.password" />
+                                            <Password id="accPasswordConfirm" size="large" v-model="accountForm.password_confirmation" toggleMask :feedback="false" inputClass="w-full" class="w-full" autocomplete="new-password" :invalid="!!accountForm.errors.password" />
                                             <label for="accPasswordConfirm">Confirm New Password</label>
                                         </FloatLabel>
                                     </div>
@@ -664,3 +675,112 @@ const onUpdateAccount = () => {
         </div>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides. Wrapping an element in the "dark-scope" class
+   (applied on the root container when isDark is true) lets these rules
+   restyle the light-themed Tailwind/PrimeVue defaults used throughout
+   this page without touching the light-mode markup. */
+/* Token overrides: PrimeVue Aura reads these CSS variables for every
+   component's colors. Setting them here means anything nested under
+   .dark-scope repaints correctly even if a class-level rule below
+   doesn't happen to match that component's internal markup. */
+.dark-scope {
+    --p-card-background: #141B33;
+    --p-card-color: #F8FAFC;
+    --p-content-background: #141B33;
+    --p-content-color: #F8FAFC;
+    --p-inputtext-background: rgba(255, 255, 255, 0.06);
+    --p-inputtext-color: #F8FAFC;
+    --p-inputtext-border-color: rgba(255, 255, 255, 0.18);
+    --p-inputtext-placeholder-color: #64748B;
+    --p-select-background: rgba(255, 255, 255, 0.06);
+    --p-select-color: #F8FAFC;
+    --p-select-border-color: rgba(255, 255, 255, 0.18);
+    --p-select-overlay-background: #141B33;
+}
+
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-\[\#2563EB\]) { color: #60A5FA !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.bg-white) { background-color: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.bg-slate-50) { background-color: rgba(255, 255, 255, 0.04) !important; }
+.dark-scope :deep(.bg-slate-100) { background-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
+.dark-scope :deep(.border-dashed) { border-color: rgba(255, 255, 255, 0.2) !important; }
+.dark-scope :deep(.text-slate-300) { color: #475569 !important; }
+
+.dark-scope :deep(.p-card) { background: #141B33 !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+.dark-scope :deep(.p-card .p-card-content) { background: transparent !important; }
+
+.dark-scope :deep(.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-inputtext),
+.dark-scope :deep(.p-password-input),
+.dark-scope :deep(.p-select),
+.dark-scope :deep(.p-multiselect),
+.dark-scope :deep(.p-inputnumber-input),
+.dark-scope :deep(.p-textarea) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-select-label),
+.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+.dark-scope :deep(.p-select-overlay),
+.dark-scope :deep(.p-multiselect-overlay) { background: #141B33 !important; border-color: rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-select-option),
+.dark-scope :deep(.p-multiselect-option) { color: #E2E8F0 !important; }
+.dark-scope :deep(.p-select-option:hover),
+.dark-scope :deep(.p-multiselect-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+
+/* FloatLabel variant="on" keeps the label permanently floated, cutting
+   through the input's top border — its background must always match
+   the surface behind it (the card), not just on focus, or it renders
+   as a mismatched opaque chip like the one in the earlier screenshot. */
+.dark-scope :deep(.p-floatlabel-on label) { background: #141B33 !important; color: #94A3B8 !important; }
+.dark-scope :deep(.p-floatlabel-on:has(input:focus) label),
+.dark-scope :deep(.p-floatlabel-on:has(.p-inputwrapper-focus) label) { color: #60A5FA !important; }
+
+.dark-scope :deep(.p-divider.p-divider-horizontal:before) { border-color: rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-tab) { color: #94A3B8 !important; }
+.dark-scope :deep(.p-tab-active) { color: #F8FAFC !important; }
+.dark-scope :deep(.p-tablist-nav-button) {
+    background: rgba(15, 23, 48, 0.9) !important;
+    color: #60A5FA !important;
+    border: 1px solid rgba(96, 165, 250, 0.5) !important;
+    border-radius: 999px !important;
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.55), 0 0 18px rgba(96, 165, 250, 0.25) !important;
+    transition: box-shadow 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.dark-scope :deep(.p-tablist-nav-button:hover) {
+    color: #93C5FD !important;
+    border-color: rgba(147, 197, 253, 0.8) !important;
+    box-shadow: 0 0 12px rgba(147, 197, 253, 0.8), 0 0 26px rgba(147, 197, 253, 0.4) !important;
+}
+.dark-scope :deep(.p-tabs) { background: transparent !important; }
+.dark-scope :deep(.p-tabpanels) { background: transparent !important; color: #F8FAFC !important; padding: 0 !important; }
+.dark-scope :deep(.p-tablist-tab-list) { background: transparent !important; }
+.dark-scope :deep(.p-tablist-active-bar) { background: #60A5FA !important; }
+
+.dark-scope :deep(.p-togglebutton),
+.dark-scope :deep(.p-checkbox-box) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+.dark-scope :deep(.p-toggleswitch:not(.p-toggleswitch-checked) .p-toggleswitch-slider) { background: rgba(255, 255, 255, 0.15) !important; }
+
+.dark-scope :deep(.p-message) { background: rgba(255, 255, 255, 0.06) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-message-text) { color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-menu) { background: #0F1730 !important; border-color: rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-menu .p-menu-item-link) { color: #E2E8F0 !important; }
+.dark-scope :deep(.p-menu .p-menu-item-link:hover) { background: rgba(255, 255, 255, 0.06) !important; }
+</style>

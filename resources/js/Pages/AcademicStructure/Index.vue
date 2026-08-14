@@ -1279,16 +1279,51 @@ const onRestoreMajor = (major) => {
 .dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
 .dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
 
-.dark-scope :deep(.p-card) { background: rgba(255, 255, 255, 0.06) !important; color: #F8FAFC; }
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
 .dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
 
-.dark-scope :deep(.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
-.dark-scope :deep(.p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
-.dark-scope :deep(.p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
-.dark-scope :deep(.p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-inputtext::placeholder),
+.dark-scope :deep(.p-select-label.p-placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.pi) { color: inherit; }
+
+:global(.dark-scope.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-title) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+
+:global(.dark-scope.p-dialog .p-inputtext),
+:global(.dark-scope.p-dialog .p-textarea),
+:global(.dark-scope.p-dialog .p-select),
+:global(.dark-scope.p-dialog .p-multiselect),
+:global(.dark-scope.p-dialog .p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    color: #F8FAFC !important;
+}
+:global(.dark-scope.p-dialog .p-inputtext::placeholder),
+:global(.dark-scope.p-dialog .p-textarea::placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-select-label),
+:global(.dark-scope.p-dialog .p-multiselect-label) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-floatlabel label) { color: #94A3B8 !important; background: #0F1730 !important; }
+:global(.dark-scope.p-dialog .p-select-overlay),
+:global(.dark-scope.p-dialog .p-multiselect-overlay) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-select-option),
+:global(.dark-scope.p-dialog .p-multiselect-option) { color: #F1F5F9 !important; }
+:global(.dark-scope.p-dialog .p-select-option:hover),
+:global(.dark-scope.p-dialog .p-multiselect-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+:global(.p-select-overlay.dark-scope),
+:global(.p-multiselect-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-divider.p-divider-horizontal:before) { border-color: rgba(255, 255, 255, 0.1) !important; }
+
+.dark-scope :deep(.p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.p-tabpanels) { background: transparent !important; color: #F1F5F9 !important; padding: 0 !important; }
+.dark-scope :deep(.p-tabpanel) { background: transparent !important; color: #F1F5F9 !important; }
 
 .dark-scope :deep(.p-inputtext),
-.dark-scope :deep(.p-password-input),
 .dark-scope :deep(.p-select),
 .dark-scope :deep(.p-multiselect),
 .dark-scope :deep(.p-inputnumber-input) {
@@ -1296,21 +1331,38 @@ const onRestoreMajor = (major) => {
     border-color: rgba(255, 255, 255, 0.15) !important;
     color: #F8FAFC !important;
 }
+.dark-scope :deep(.p-inputtext::placeholder) { color: #7C8CA8 !important; }
 .dark-scope :deep(.p-select-label),
 .dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
-
-.dark-scope :deep(.p-divider.p-divider-horizontal:before) { border-color: rgba(255, 255, 255, 0.1) !important; }
-
-.dark-scope :deep(.p-tablist) { background: transparent !important; border-color: rgba(255, 255, 255, 0.1) !important; }
 .dark-scope :deep(.p-tab) { color: #94A3B8 !important; }
 .dark-scope :deep(.p-tab-active) { color: #F8FAFC !important; }
 
-.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.04) !important; color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.1) !important; }
-.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #E2E8F0 !important; }
-.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.03) !important; }
-.dark-scope :deep(.p-datatable-tbody > tr > td) { border-color: rgba(255, 255, 255, 0.08) !important; }
-.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.06) !important; }
-.dark-scope :deep(.p-paginator) { background: transparent !important; color: #CBD5E1 !important; }
+.dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; font-weight: 600; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.035) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.07) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-emptymessage) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page),
+.dark-scope :deep(.p-paginator .p-paginator-prev),
+.dark-scope :deep(.p-paginator .p-paginator-next),
+.dark-scope :deep(.p-paginator .p-paginator-first),
+.dark-scope :deep(.p-paginator .p-paginator-last) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page.p-paginator-page-selected) { background: rgba(37, 99, 235, 0.9) !important; color: #fff !important; }
+
+/* Buttons: text/secondary icon buttons (edit/delete/refresh) default to
+   low-contrast grays in the light theme — brighten them for dark mode. */
+.dark-scope :deep(.p-button-text.p-button-secondary) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-button-text.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-button-text.p-button-danger) { color: #FCA5A5 !important; }
+.dark-scope :deep(.p-button-text.p-button-danger:hover) { background: rgba(248, 113, 113, 0.12) !important; color: #FECACA !important; }
+.dark-scope :deep(.p-button-text.p-button-success) { color: #6EE7B7 !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
 
 .dark-scope :deep(.p-menu) { background: #0F1730 !important; border-color: rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
 .dark-scope :deep(.p-menu .p-menu-item-link) { color: #E2E8F0 !important; }

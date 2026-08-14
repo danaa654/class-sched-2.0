@@ -18,6 +18,10 @@ import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
 import ProgressBar from 'primevue/progressbar';
 import RoomRecommendedSubjects from '@/Components/Scheduling/RoomRecommendedSubjects.vue';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     rooms: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
@@ -378,7 +382,7 @@ const closeSchedule = () => {
             <span class="text-lg font-semibold text-[#1E293B]">Rooms</span>
         </template>
 
-        <div class="max-w-7xl mx-auto w-full">
+        <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
                 <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Rooms</h1>
@@ -462,9 +466,30 @@ const closeSchedule = () => {
 
                     <!-- Advanced Filters -->
                     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
-                        <Select v-model="building" :options="buildings" placeholder="Building" showClear class="w-full" />
-                        <Select v-model="floor" :options="floors" placeholder="Floor" showClear class="w-full" />
-                        <Select v-model="roomTypeFilter" :options="roomTypes" placeholder="Room Type" showClear class="w-full" />
+                        <Select
+                            v-model="building"
+                            :options="buildings"
+                            placeholder="Building"
+                            showClear
+                            class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                        />
+                        <Select
+                            v-model="floor"
+                            :options="floors"
+                            placeholder="Floor"
+                            showClear
+                            class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                        />
+                        <Select
+                            v-model="roomTypeFilter"
+                            :options="roomTypes"
+                            placeholder="Room Type"
+                            showClear
+                            class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                        />
                         <Select
                             v-model="collegeFilter"
                             :options="colleges"
@@ -473,6 +498,7 @@ const closeSchedule = () => {
                             placeholder="College"
                             showClear
                             class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                         />
                         <Select
                             v-model="departmentFilter"
@@ -482,8 +508,16 @@ const closeSchedule = () => {
                             placeholder="Program"
                             showClear
                             class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                         />
-                        <Select v-model="statusFilter" :options="['Active', 'Inactive']" placeholder="Status" showClear class="w-full" />
+                        <Select
+                            v-model="statusFilter"
+                            :options="['Active', 'Inactive']"
+                            placeholder="Status"
+                            showClear
+                            class="w-full"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                        />
                     </div>
 
                     <!-- Rooms Table -->
@@ -499,7 +533,7 @@ const closeSchedule = () => {
                         :rows="rooms.per_page"
                         :totalRecords="rooms.total"
                         :first="(rooms.current_page - 1) * rooms.per_page"
-                        :rowClass="() => 'cursor-pointer hover:bg-slate-50'"
+                        :rowClass="() => (isDark ? 'cursor-pointer' : 'cursor-pointer hover:bg-slate-50')"
                         @page="onPage"
                         @row-click="onRowClick"
                     >
@@ -650,6 +684,7 @@ const closeSchedule = () => {
             :style="{ width: '700px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeAddRoom"
         >
             <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveRoom">
@@ -731,6 +766,7 @@ const closeSchedule = () => {
                         placeholder="Select a room type"
                         :invalid="!!roomForm.errors.room_type"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="roomForm.errors.room_type" class="text-red-500">
                         {{ roomForm.errors.room_type }}
@@ -750,6 +786,7 @@ const closeSchedule = () => {
                         showClear
                         :invalid="!!roomForm.errors.college_id"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                         @update:modelValue="onCollegeChange"
                     />
                     <small class="text-slate-400">Leave as "All Colleges" for a room shared by everyone.</small>
@@ -772,6 +809,7 @@ const closeSchedule = () => {
                         :disabled="!roomForm.college_id"
                         :invalid="!!roomForm.errors.department_id"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small class="text-slate-400">
                         {{ roomForm.college_id ? 'Leave as "All Programs" to open this room to every program in the selected College.' : 'Select a College first to assign a specific Program.' }}
@@ -815,6 +853,7 @@ const closeSchedule = () => {
                         placeholder="Select status"
                         :invalid="!!roomForm.errors.status"
                         class="w-full"
+                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                     />
                     <small v-if="roomForm.errors.status" class="text-red-500">
                         {{ roomForm.errors.status }}
@@ -860,6 +899,7 @@ const closeSchedule = () => {
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
             :contentStyle="{ maxHeight: '70vh', overflowY: 'auto' }"
+            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
             @hide="closeSchedule"
         >
             <div v-if="scheduleLoading" class="py-16 text-center text-slate-400">
@@ -976,3 +1016,127 @@ const closeSchedule = () => {
         </Dialog>
     </AppLayout>
 </template>
+
+<style scoped>
+/* Dark-mode overrides. Wrapping an element in the "dark-scope" class
+   (applied only when the app theme is dark) lets these rules repaint
+   PrimeVue internals and Tailwind utility classes without touching the
+   light-mode styling used everywhere else. Mirrors the pattern already
+   used on the Faculty Master and Curriculum pages. */
+.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
+.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
+.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
+.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
+.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.12) !important; }
+
+/* Summary cards + timetable panels are plain Tailwind divs, not p-card,
+   so they need explicit background overrides. */
+.dark-scope :deep(.bg-white) { background-color: rgba(255, 255, 255, 0.06) !important; }
+.dark-scope :deep(.bg-slate-50) { background-color: rgba(255, 255, 255, 0.05) !important; }
+.dark-scope :deep(.bg-emerald-50) { background-color: rgba(16, 185, 129, 0.12) !important; }
+.dark-scope :deep(.text-emerald-700) { color: #6EE7B7 !important; }
+.dark-scope :deep(.text-emerald-600) { color: #34D399 !important; }
+.dark-scope :deep(.text-amber-600) { color: #FBBF24 !important; }
+.dark-scope :deep(.text-red-600) { color: #F87171 !important; }
+.dark-scope :deep(.hover\:bg-slate-50:hover) { background-color: rgba(255, 255, 255, 0.06) !important; }
+
+.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
+
+.dark-scope :deep(.p-inputtext),
+.dark-scope :deep(.p-textarea),
+.dark-scope :deep(.p-select),
+.dark-scope :deep(.p-multiselect),
+.dark-scope :deep(.p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+.dark-scope :deep(.p-inputtext::placeholder),
+.dark-scope :deep(.p-textarea::placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.p-select-label),
+.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+.dark-scope :deep(.p-select-label.p-placeholder),
+.dark-scope :deep(.p-multiselect-label.p-placeholder) { color: #7C8CA8 !important; }
+.dark-scope :deep(.p-inputnumber-button) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.18) !important; color: #F8FAFC !important; }
+
+.dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; font-weight: 600; }
+.dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-datatable-tbody > tr > td) { color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.035) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover) { background: rgba(255, 255, 255, 0.07) !important; }
+.dark-scope :deep(.p-datatable-tbody > tr:hover > td) { background: transparent !important; }
+.dark-scope :deep(.p-datatable-emptymessage) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator) { background: transparent !important; color: #F1F5F9 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page),
+.dark-scope :deep(.p-paginator .p-paginator-prev),
+.dark-scope :deep(.p-paginator .p-paginator-next),
+.dark-scope :deep(.p-paginator .p-paginator-first),
+.dark-scope :deep(.p-paginator .p-paginator-last) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-paginator .p-paginator-page.p-paginator-page-selected) { background: rgba(37, 99, 235, 0.9) !important; color: #fff !important; }
+
+.dark-scope :deep(.p-button-text.p-button-secondary) { color: #CBD5E1 !important; }
+.dark-scope :deep(.p-button-text.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+.dark-scope :deep(.p-button-text.p-button-danger) { color: #FCA5A5 !important; }
+.dark-scope :deep(.p-button-text.p-button-danger:hover) { background: rgba(248, 113, 113, 0.12) !important; color: #FECACA !important; }
+.dark-scope :deep(.p-button-text.p-button-info) { color: #7DD3FC !important; }
+.dark-scope :deep(.p-button-text.p-button-info:hover) { background: rgba(56, 189, 248, 0.12) !important; color: #BAE6FD !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+
+.dark-scope :deep(.p-progressbar) { background: rgba(255, 255, 255, 0.1) !important; }
+
+/* Dialog + overlay panels render outside the scoped tree (teleported to
+   body), so they need :global() rather than :deep(). */
+:global(.dark-scope.p-dialog) { background: #0F1730 !important; color: #F8FAFC !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-header) { background: #0F1730 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-title) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog .p-dialog-close-button:hover) { background: rgba(255, 255, 255, 0.08) !important; color: #F8FAFC !important; }
+
+:global(.dark-scope.p-dialog label) { color: #CBD5E1 !important; }
+:global(.dark-scope.p-dialog p.text-slate-400),
+:global(.dark-scope.p-dialog small.text-slate-400) { color: #94A3B8 !important; }
+:global(.dark-scope.p-dialog .p-inputtext),
+:global(.dark-scope.p-dialog .p-textarea),
+:global(.dark-scope.p-dialog .p-select),
+:global(.dark-scope.p-dialog .p-multiselect),
+:global(.dark-scope.p-dialog .p-inputnumber-input) {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    color: #F8FAFC !important;
+}
+:global(.dark-scope.p-dialog .p-inputtext::placeholder),
+:global(.dark-scope.p-dialog .p-textarea::placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-select-label),
+:global(.dark-scope.p-dialog .p-multiselect-label) { color: #F8FAFC !important; }
+:global(.dark-scope.p-dialog .p-select-label.p-placeholder),
+:global(.dark-scope.p-dialog .p-multiselect-label.p-placeholder) { color: #7C8CA8 !important; }
+:global(.dark-scope.p-dialog .p-inputnumber-button) { background: rgba(255, 255, 255, 0.06) !important; border-color: rgba(255, 255, 255, 0.18) !important; color: #F8FAFC !important; }
+
+/* Room Schedule dialog content: plain Tailwind cards + timetable rows. */
+:global(.dark-scope.p-dialog .rounded-xl.border-slate-100),
+:global(.dark-scope.p-dialog .rounded-lg.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
+:global(.dark-scope.p-dialog .bg-slate-50) { background-color: rgba(255, 255, 255, 0.06) !important; }
+:global(.dark-scope.p-dialog .bg-emerald-50) { background-color: rgba(16, 185, 129, 0.12) !important; }
+:global(.dark-scope.p-dialog .text-emerald-700) { color: #6EE7B7 !important; }
+:global(.dark-scope.p-dialog .text-slate-700),
+:global(.dark-scope.p-dialog .text-slate-600) { color: #E2E8F0 !important; }
+:global(.dark-scope.p-dialog .text-slate-500),
+:global(.dark-scope.p-dialog .text-slate-400) { color: #94A3B8 !important; }
+
+:global(.p-select-overlay.dark-scope),
+:global(.p-multiselect-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
+:global(.p-select-overlay.dark-scope .p-select-option),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option) { color: #F1F5F9 !important; }
+:global(.p-select-overlay.dark-scope .p-select-option:hover),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
+:global(.p-select-overlay.dark-scope .p-select-option.p-select-option-selected),
+:global(.p-multiselect-overlay.dark-scope .p-multiselect-option.p-multiselect-option-selected) { background: rgba(37, 99, 235, 0.25) !important; }
+</style>

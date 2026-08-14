@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import Button from 'primevue/button';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
+import AmbientBackground from '@/Components/AmbientBackground.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -39,21 +40,7 @@ const highlightedDot = 16;
         class="relative min-h-screen overflow-hidden transition-colors duration-300"
         :class="isDark ? 'bg-[#080D1A] text-white' : 'bg-gradient-to-br from-[#EEF2FF] via-[#F8FAFC] to-[#E0E7FF] text-[#1E293B]'"
     >
-        <!-- Ambient glow field -->
-        <div class="pointer-events-none absolute inset-0 overflow-hidden">
-            <div
-                class="absolute -top-40 -left-32 h-[28rem] w-[28rem] rounded-full blur-[110px] motion-safe:animate-[pulse_9s_ease-in-out_infinite]"
-                :class="isDark ? 'bg-[#2563EB]/30' : 'bg-[#2563EB]/20'"
-            />
-            <div
-                class="absolute top-1/4 -right-40 h-[32rem] w-[32rem] rounded-full blur-[120px] motion-safe:animate-[pulse_11s_ease-in-out_infinite]"
-                :class="isDark ? 'bg-[#E11D2E]/20' : 'bg-[#E11D2E]/10'"
-            />
-            <div
-                class="absolute bottom-[-10rem] left-1/3 h-[26rem] w-[26rem] rounded-full blur-[110px]"
-                :class="isDark ? 'bg-[#38BDF8]/20' : 'bg-[#38BDF8]/10'"
-            />
-        </div>
+        <AmbientBackground :is-dark="isDark" />
 
         <div class="relative z-10 flex min-h-screen flex-col">
             <!-- Glass navigation -->
@@ -98,7 +85,7 @@ const highlightedDot = 16;
                             CLASSLY
                         </h1>
                         <p class="mt-3 text-xl font-semibold sm:text-2xl" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'">
-                            Class Scheduling and Management System
+                            Your Friendly Class Scheduler
                         </p>
                         <p class="mt-6 max-w-xl text-lg" :class="isDark ? 'text-slate-300' : 'text-slate-600'">
                             A centralized platform for managing class schedules, teachers, rooms, and academic
@@ -113,49 +100,33 @@ const highlightedDot = 16;
                                     class="!border-[#2563EB]/60 !bg-[#2563EB] !px-6 shadow-[0_8px_24px_rgba(37,99,235,0.45)]"
                                 />
                             </Link>
-                            <Button
-                                label="Learn More"
-                                size="large"
-                                outlined
-                                class="!px-6 backdrop-blur"
-                                :class="isDark
-                                    ? '!border-white/25 !bg-white/[0.06] !text-white hover:!bg-white/15'
-                                    : '!border-slate-900/15 !bg-white/60 !text-[#1E293B] hover:!bg-white/90'"
-                            />
                         </div>
                     </div>
 
-                    <!-- Signature glass panel: calendar motif -->
+                    <!-- Signature calendar mark: free-floating, no container -->
                     <div class="flex justify-center lg:justify-end">
-                        <div
-                            class="relative w-full max-w-md overflow-hidden rounded-3xl border p-8 backdrop-blur-2xl transition-colors duration-300"
-                            :class="isDark
-                                ? 'border-white/15 bg-white/[0.07] shadow-[0_8px_40px_rgba(0,0,0,0.5)]'
-                                : 'border-white/60 bg-white/60 shadow-[0_8px_32px_rgba(30,41,59,0.12)]'"
-                        >
-                            <div class="flex flex-col items-center text-center">
-                                <img
-                                    src="/logo.png"
-                                    alt="CLASSLY calendar mark"
-                                    class="mb-6 h-24 w-24 drop-shadow-[0_0_24px_rgba(37,99,235,0.5)]"
+                        <div class="flex flex-col items-center text-center">
+                            <img
+                                src="/logo.png"
+                                alt="CLASSLY calendar mark"
+                                class="mb-6 h-40 w-40 drop-shadow-[0_0_36px_rgba(37,99,235,0.55)] lg:h-48 lg:w-48"
+                            />
+
+                            <!-- Mini calendar grid, one date lit up like the logo -->
+                            <div class="mb-6 grid w-40 grid-cols-7 gap-1.5">
+                                <span
+                                    v-for="dot in calendarDots"
+                                    :key="dot"
+                                    class="h-2 w-2 rounded-[3px]"
+                                    :class="dot === highlightedDot
+                                        ? 'bg-[#E11D2E] shadow-[0_0_8px_rgba(225,29,46,0.8)]'
+                                        : isDark ? 'bg-white/15' : 'bg-slate-900/10'"
                                 />
-
-                                <!-- Mini calendar grid, one date lit up like the logo -->
-                                <div class="mb-6 grid w-40 grid-cols-7 gap-1.5">
-                                    <span
-                                        v-for="dot in calendarDots"
-                                        :key="dot"
-                                        class="h-2 w-2 rounded-[3px]"
-                                        :class="dot === highlightedDot
-                                            ? 'bg-[#E11D2E] shadow-[0_0_8px_rgba(225,29,46,0.8)]'
-                                            : isDark ? 'bg-white/15' : 'bg-slate-900/10'"
-                                    />
-                                </div>
-
-                                <p class="text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-500'">
-                                    Academic scheduling made simple, organized, and conflict-free.
-                                </p>
                             </div>
+
+                            <p class="max-w-xs text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-500'">
+                                Academic scheduling made simple, organized, and conflict-free.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -167,21 +138,25 @@ const highlightedDot = 16;
                     <div
                         v-for="feature in features"
                         :key="feature.title"
-                        class="group rounded-2xl border p-6 backdrop-blur-xl transition-all duration-300"
-                        :class="isDark
-                            ? 'border-white/10 bg-white/[0.05] hover:border-white/20 hover:bg-white/[0.08]'
-                            : 'border-slate-900/5 bg-white/50 hover:border-slate-900/10 hover:bg-white/80'"
+                        class="neon-frame group rounded-2xl p-[1.5px]"
                     >
                         <div
-                            class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border transition-colors"
+                            class="h-full rounded-[15px] border p-6 backdrop-blur-xl transition-all duration-300"
                             :class="isDark
-                                ? 'border-white/10 bg-[#2563EB]/20 group-hover:bg-[#2563EB]/30'
-                                : 'border-slate-900/5 bg-[#2563EB]/10 group-hover:bg-[#2563EB]/20'"
+                                ? 'border-white/10 bg-[#0B1220]/90 group-hover:bg-[#0B1220]/75'
+                                : 'border-slate-900/5 bg-white/85 group-hover:bg-white/70'"
                         >
-                            <i :class="feature.icon" class="text-2xl" :style="{ color: isDark ? '#5B9CFF' : '#2563EB' }"></i>
+                            <div
+                                class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border transition-colors"
+                                :class="isDark
+                                    ? 'border-white/10 bg-[#2563EB]/20 group-hover:bg-[#2563EB]/30'
+                                    : 'border-slate-900/5 bg-[#2563EB]/10 group-hover:bg-[#2563EB]/20'"
+                            >
+                                <i :class="feature.icon" class="text-2xl" :style="{ color: isDark ? '#5B9CFF' : '#2563EB' }"></i>
+                            </div>
+                            <h3 class="mb-1 text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">{{ feature.title }}</h3>
+                            <p class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ feature.description }}</p>
                         </div>
-                        <h3 class="mb-1 text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">{{ feature.title }}</h3>
-                        <p class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ feature.description }}</p>
                     </div>
                 </div>
             </section>

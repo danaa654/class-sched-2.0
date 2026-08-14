@@ -55,38 +55,40 @@ const isClickable = computed(() => !!props.href);
 </script>
 
 <template>
-    <component
-        :is="isClickable ? Link : 'div'"
-        :href="isClickable ? route(href) : undefined"
-        class="flex items-center gap-4 rounded-2xl border p-5 shadow-sm transition-colors duration-300"
-        :class="[
-            isDark
-                ? 'border-white/10 bg-white/[0.06] backdrop-blur-xl'
-                : 'border-slate-100 bg-white',
-            isClickable
-                ? (isDark ? 'hover:bg-white/[0.09] hover:border-white/20 cursor-pointer' : 'hover:shadow-md hover:border-slate-200 cursor-pointer')
-                : '',
-        ]"
-    >
-        <span
-            class="flex h-12 w-12 flex-none items-center justify-center rounded-xl"
-            :class="isDark ? classes.bgDark : classes.bg"
+    <div class="neon-frame-static rounded-2xl p-[1.5px]">
+        <component
+            :is="isClickable ? Link : 'div'"
+            :href="isClickable ? route(href) : undefined"
+            class="flex items-center gap-4 rounded-[15px] p-5 transition-colors duration-300"
+            :class="[
+                isDark
+                    ? 'bg-[#0B1220]/90'
+                    : 'bg-white/90',
+                isClickable
+                    ? (isDark ? 'hover:bg-[#0B1220]/75 cursor-pointer' : 'hover:bg-white/70 cursor-pointer')
+                    : '',
+            ]"
         >
-            <i :class="['pi', icon, 'text-xl', isDark ? classes.iconDark : classes.icon]"></i>
-        </span>
-        <div class="min-w-0">
-            <p
-                class="text-xs font-semibold tracking-wide uppercase"
-                :class="isDark ? 'text-slate-400' : 'text-slate-400'"
+            <span
+                class="flex h-12 w-12 flex-none items-center justify-center rounded-xl"
+                :class="isDark ? classes.bgDark : classes.bg"
             >
-                {{ label }}
-            </p>
-            <p
-                class="mt-0.5 text-2xl font-bold"
-                :class="isDark ? 'text-white' : 'text-[#1E293B]'"
-            >
-                {{ value }}<span v-if="valueSuffix" class="text-base font-semibold" :class="isDark ? 'text-slate-500' : 'text-slate-400'"> {{ valueSuffix }}</span>
-            </p>
-        </div>
-    </component>
+                <i :class="['pi', icon, 'text-xl', isDark ? classes.iconDark : classes.icon]"></i>
+            </span>
+            <div class="min-w-0">
+                <p
+                    class="text-xs font-semibold tracking-wide uppercase"
+                    :class="isDark ? 'text-slate-400' : 'text-slate-400'"
+                >
+                    {{ label }}
+                </p>
+                <p
+                    class="mt-0.5 text-2xl font-bold"
+                    :class="isDark ? 'text-white' : 'text-[#1E293B]'"
+                >
+                    {{ value }}<span v-if="valueSuffix" class="text-base font-semibold" :class="isDark ? 'text-slate-500' : 'text-slate-400'"> {{ valueSuffix }}</span>
+                </p>
+            </div>
+        </component>
+    </div>
 </template>

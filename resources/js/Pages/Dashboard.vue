@@ -90,24 +90,26 @@ const upcomingWidgets = [
         </Link>
 
         <!-- 1. Header -->
-        <div
-            class="mb-6 flex flex-col gap-4 rounded-2xl border p-6 shadow-sm transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between"
-            :class="isDark ? 'border-white/10 bg-white/[0.06] backdrop-blur-xl' : 'border-slate-100 bg-white'"
-        >
-            <div>
-                <h1 class="text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Welcome, {{ user.name }}</h1>
-                <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
-                    <span class="font-semibold" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'">{{ roleLabel }}</span>
-                    <span v-if="scope.label"> — {{ scope.label }}</span>
-                </p>
-            </div>
+        <div class="neon-frame-static mb-6 rounded-2xl p-[1.5px]">
             <div
-                v-if="activeAcademicTermLabel"
-                class="flex items-center gap-2 self-start rounded-full border px-4 py-2 sm:self-auto"
-                :class="isDark ? 'border-white/10 bg-white/[0.05]' : 'border-slate-200 bg-slate-50'"
+                class="flex flex-col gap-4 rounded-[15px] p-6 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between"
+                :class="isDark ? 'bg-[#0B1220]/90' : 'bg-white/90'"
             >
-                <i class="pi pi-calendar" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
-                <span class="text-sm font-semibold" :class="isDark ? 'text-slate-300' : 'text-slate-600'">{{ activeAcademicTermLabel }}</span>
+                <div>
+                    <h1 class="text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Welcome, {{ user.name }}</h1>
+                    <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                        <span class="font-semibold" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'">{{ roleLabel }}</span>
+                        <span v-if="scope.label"> — {{ scope.label }}</span>
+                    </p>
+                </div>
+                <div
+                    v-if="activeAcademicTermLabel"
+                    class="flex items-center gap-2 self-start rounded-full border px-4 py-2 sm:self-auto"
+                    :class="isDark ? 'border-white/10 bg-white/[0.05]' : 'border-slate-200 bg-slate-50'"
+                >
+                    <i class="pi pi-calendar" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
+                    <span class="text-sm font-semibold" :class="isDark ? 'text-slate-300' : 'text-slate-600'">{{ activeAcademicTermLabel }}</span>
+                </div>
             </div>
         </div>
 
