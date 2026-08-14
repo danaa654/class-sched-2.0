@@ -25,6 +25,8 @@ class AcademicCalendarController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('manage-academic-calendar');
+
         $academicTermSearch = trim((string) $request->query('academic_term_search', ''));
 
         $academicTerms = AcademicTerm::query()

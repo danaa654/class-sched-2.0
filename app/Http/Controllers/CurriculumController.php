@@ -24,6 +24,8 @@ class CurriculumController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('manage-curriculum');
+
         $search = trim((string) $request->query('curriculum_search', ''));
 
         $curriculums = Curriculum::query()
@@ -64,6 +66,8 @@ class CurriculumController extends Controller
      */
     public function store(StoreCurriculumRequest $request): RedirectResponse
     {
+        $this->authorize('manage-curriculum');
+
         Curriculum::create($request->validated());
 
         return redirect()->route('curriculums')->with('success', 'Curriculum created successfully.');
@@ -74,6 +78,8 @@ class CurriculumController extends Controller
      */
     public function update(UpdateCurriculumRequest $request, Curriculum $curriculum): RedirectResponse
     {
+        $this->authorize('manage-curriculum');
+
         $curriculum->update($request->validated());
 
         return redirect()->route('curriculums')->with('success', 'Curriculum updated successfully.');
@@ -84,6 +90,8 @@ class CurriculumController extends Controller
      */
     public function destroy(Curriculum $curriculum): RedirectResponse
     {
+        $this->authorize('manage-curriculum');
+
         $curriculum->delete();
 
         return redirect()->route('curriculums')->with('success', 'Curriculum deleted successfully.');
@@ -94,6 +102,8 @@ class CurriculumController extends Controller
      */
     public function restore(int $curriculum): RedirectResponse
     {
+        $this->authorize('manage-curriculum');
+
         $record = Curriculum::onlyTrashed()->findOrFail($curriculum);
         $record->restore();
 

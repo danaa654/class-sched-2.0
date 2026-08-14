@@ -10,6 +10,7 @@ import InputText from 'primevue/inputtext';
 import InputNumber from 'primevue/inputnumber';
 import Textarea from 'primevue/textarea';
 import Select from 'primevue/select';
+import MultiSelect from 'primevue/multiselect';
 import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
@@ -27,8 +28,18 @@ const props = defineProps({
         type: Object,
         default: () => ({ subject_search: '' }),
     },
+    colleges: { type: Array, default: () => [] },
     majors: { type: Array, default: () => [] },
     roomCategories: { type: Array, default: () => [] },
+    subjectAccess: {
+        type: Object,
+        default: () => ({
+            categoryOptions: ['Major', 'General Education', 'Minor'],
+            lockedCollegeId: null,
+            isCollegeScoped: false,
+            isAssistantDean: false,
+        }),
+    },
 });
 
 const toast = useToast();
@@ -97,7 +108,11 @@ const onRefresh = () => {
 /* Add Subject                                                         */
 /* ------------------------------------------------------------------ */
 
-const categoryOptions = ['Major', 'General Education'];
+// Only what this user's role is allowed to pick (server also enforces
+// this — see StoreSubjectRequest/UpdateSubjectRequest — this is UI
+// convenience only, never the authorization boundary).
+const categoryOptions = computed(() => props.subjectAccess.categoryOptions);
+const isCollegeLocked = computed(() => props.subjectAccess.isCollegeScoped);
 const statusOptions = [
     { label: 'Active', value: true },
     { label: 'Inactive', value: false },
@@ -109,23 +124,75 @@ const editingSubject = ref(null); // null => Add mode, otherwise the Subject bei
 const subjectForm = useForm({
     subject_code: '',
     subject_title: '',
-    major_id: null,
+    college_id: null,
+    major_ids: [],
     category: null,
+    // Delivery type: 'regular' (classroom/laboratory) or 'practicum'
+    // (Practicum/OJT/Internship/Fieldwork/Clinical Practice, off-campus).
+    subject_type: 'regular',
     units: 0,
     lecture_hours: 0,
     laboratory_hours: 0,
+    // Practicum/OJT-only fields.
+    required_hours: null,
+    deployment_type: null,
+    deployment_remarks: '',
     preferred_room_category: null,
     is_active: true,
     description: '',
 });
 
-// Major is only meaningful when Subject Type is "Major".
+const subjectTypeOptions = [
+    { label: 'Regular', value: 'regular' },
+    { label: 'Practicum / OJT', value: 'practicum' },
+];
+
+const deploymentTypeOptions = [
+    { label: 'On-Campus', value: 'on_campus' },
+    { label: 'Off-Campus', value: 'off_campus' },
+];
+
+const isPracticum = computed(() => subjectForm.subject_type === 'practicum');
+
+// Practicum/OJT never occupies a classroom/laboratory — clear the
+// preferred room category the moment the type switches, so it can
+// never linger on the payload and mislead the scheduling engine.
+watch(
+    () => subjectForm.subject_type,
+    (type) => {
+        if (type === 'practicum') {
+            subjectForm.preferred_room_category = null;
+        } else {
+            subjectForm.required_hours = null;
+            subjectForm.deployment_type = null;
+        }
+    },
+);
+
+// Only majors belonging to the selected College may be picked.
+const majorsForSelectedCollege = computed(() => {
+    if (!subjectForm.college_id) return [];
+    return props.majors.filter((m) => m.college_id === subjectForm.college_id);
+});
+
+// Applicable Major(s) is only meaningful for the "Major" category.
 watch(
     () => subjectForm.category,
     (category) => {
-        if (category === 'General Education') {
-            subjectForm.major_id = null;
+        if (category !== 'Major') {
+            subjectForm.major_ids = [];
+            subjectForm.college_id = isCollegeLocked.value ? props.subjectAccess.lockedCollegeId : null;
         }
+    },
+);
+
+// Changing the College drops any selected majors that no longer belong to it.
+watch(
+    () => subjectForm.college_id,
+    (collegeId) => {
+        subjectForm.major_ids = subjectForm.major_ids.filter((id) =>
+            props.majors.some((m) => m.id === id && m.college_id === collegeId),
+        );
     },
 );
 
@@ -133,6 +200,8 @@ const openAdd = () => {
     editingSubject.value = null;
     subjectForm.reset();
     subjectForm.clearErrors();
+    subjectForm.college_id = isCollegeLocked.value ? props.subjectAccess.lockedCollegeId : null;
+    subjectForm.category = props.subjectAccess.isCollegeScoped ? 'Major' : null;
     addSubjectVisible.value = true;
 };
 
@@ -141,11 +210,16 @@ const openEdit = (subject) => {
     subjectForm.clearErrors();
     subjectForm.subject_code = subject.subject_code;
     subjectForm.subject_title = subject.subject_title;
-    subjectForm.major_id = subject.major_id;
+    subjectForm.college_id = isCollegeLocked.value ? props.subjectAccess.lockedCollegeId : (subject.college_id ?? subject.college?.id ?? null);
+    subjectForm.major_ids = (subject.majors ?? []).map((m) => m.id);
     subjectForm.category = subject.category;
+    subjectForm.subject_type = subject.subject_type ?? 'regular';
     subjectForm.units = subject.units;
     subjectForm.lecture_hours = subject.lecture_hours;
     subjectForm.laboratory_hours = subject.laboratory_hours;
+    subjectForm.required_hours = subject.required_hours ?? null;
+    subjectForm.deployment_type = subject.deployment_type ?? null;
+    subjectForm.deployment_remarks = subject.deployment_remarks ?? '';
     subjectForm.preferred_room_category = subject.preferred_room_category ?? null;
     subjectForm.is_active = subject.is_active;
     subjectForm.description = subject.description ?? '';
@@ -298,9 +372,26 @@ const onDeleteSubject = (subject) => {
                                 {{ data.category }}
                             </template>
                         </Column>
-                        <Column header="Major" style="width: 14rem">
+                        <Column header="Subject Type" style="width: 11rem">
                             <template #body="{ data }">
-                                {{ data.major?.name || '—' }}
+                                <span
+                                    v-if="data.subject_type === 'practicum'"
+                                    class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
+                                >
+                                    <i class="pi pi-map-marker text-[10px]"></i>
+                                    Practicum / OJT
+                                </span>
+                                <span v-else class="text-slate-500 text-sm">Regular</span>
+                            </template>
+                        </Column>
+                        <Column header="College" style="width: 8rem">
+                            <template #body="{ data }">
+                                {{ data.college?.code || '—' }}
+                            </template>
+                        </Column>
+                        <Column header="Major(s)" style="width: 16rem">
+                            <template #body="{ data }">
+                                {{ data.majors?.length ? data.majors.map((m) => m.code).join(', ') : '—' }}
                             </template>
                         </Column>
                         <Column header="Units" style="width: 8rem">
@@ -310,17 +401,17 @@ const onDeleteSubject = (subject) => {
                         </Column>
                         <Column header="Lecture Hours" style="width: 8rem">
                             <template #body="{ data }">
-                                {{ data.lecture_hours }}
+                                {{ data.subject_type === 'practicum' ? '—' : data.lecture_hours }}
                             </template>
                         </Column>
                         <Column header="Lab Hours" style="width: 8rem">
                             <template #body="{ data }">
-                                {{ data.laboratory_hours }}
+                                {{ data.subject_type === 'practicum' ? '—' : data.laboratory_hours }}
                             </template>
                         </Column>
-                        <Column header="Preferred Room" style="width: 12rem">
+                        <Column header="Required Hours" style="width: 9rem">
                             <template #body="{ data }">
-                                {{ data.preferred_room_category || '—' }}
+                                {{ data.subject_type === 'practicum' ? (data.required_hours ?? '—') : '—' }}
                             </template>
                         </Column>
                         <Column header="Status" style="width: 9rem">
@@ -333,7 +424,7 @@ const onDeleteSubject = (subject) => {
                         </Column>
                         <Column header="Actions" style="width: 9rem">
                             <template #body="{ data }">
-                                <div class="flex gap-1">
+                                <div v-if="data.can_manage" class="flex gap-1">
                                     <Button
                                         icon="pi pi-pencil"
                                         text
@@ -353,6 +444,7 @@ const onDeleteSubject = (subject) => {
                                         @click="onDeleteSubject(data)"
                                     />
                                 </div>
+                                <span v-else class="text-slate-400 text-sm">—</span>
                             </template>
                         </Column>
                     </DataTable>
@@ -416,6 +508,7 @@ const onDeleteSubject = (subject) => {
                         v-model="subjectForm.category"
                         :options="categoryOptions"
                         placeholder="Select a category"
+                        :disabled="categoryOptions.length === 1"
                         :invalid="!!subjectForm.errors.category"
                         class="w-full"
                     />
@@ -424,29 +517,88 @@ const onDeleteSubject = (subject) => {
                     </small>
                 </div>
 
-                <!-- Major -->
+                <!-- Subject Type (delivery type) -->
                 <div class="flex flex-col gap-1">
-                    <label for="major_id" class="text-sm font-medium text-slate-700">
-                        Major
+                    <label for="subject_type" class="text-sm font-medium text-slate-700">
+                        Subject Type <span class="text-red-500">*</span>
+                    </label>
+                    <Select
+                        id="subject_type"
+                        v-model="subjectForm.subject_type"
+                        :options="subjectTypeOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select subject type"
+                        :invalid="!!subjectForm.errors.subject_type"
+                        class="w-full"
+                    />
+                    <small v-if="isPracticum" class="text-slate-400">
+                        Off-campus subject — no classroom/laboratory room will be assigned.
+                    </small>
+                    <small v-else-if="subjectForm.errors.subject_type" class="text-red-500">
+                        {{ subjectForm.errors.subject_type }}
+                    </small>
+                </div>
+
+                <!-- College -->
+                <div class="flex flex-col gap-1">
+                    <label for="college_id" class="text-sm font-medium text-slate-700">
+                        College
                         <span v-if="subjectForm.category === 'Major'" class="text-red-500">*</span>
                     </label>
                     <Select
-                        id="major_id"
-                        v-model="subjectForm.major_id"
-                        :options="majors"
+                        id="college_id"
+                        v-model="subjectForm.college_id"
+                        :options="colleges"
                         optionLabel="name"
                         optionValue="id"
-                        placeholder="Select a major"
-                        showClear
-                        :disabled="subjectForm.category !== 'Major'"
-                        :invalid="!!subjectForm.errors.major_id"
+                        placeholder="Select College"
+                        :showClear="!isCollegeLocked"
+                        :disabled="isCollegeLocked"
+                        :invalid="!!subjectForm.errors.college_id"
                         class="w-full"
                     />
-                    <small v-if="subjectForm.category === 'General Education'" class="text-slate-400">
-                        Not applicable for General Education subjects.
+                    <small v-if="isCollegeLocked" class="text-slate-400">
+                        Locked to your assigned College.
                     </small>
-                    <small v-else-if="subjectForm.errors.major_id" class="text-red-500">
-                        {{ subjectForm.errors.major_id }}
+                    <small v-else-if="subjectForm.errors.college_id" class="text-red-500">
+                        {{ subjectForm.errors.college_id }}
+                    </small>
+                </div>
+
+                <!-- Applicable Major(s) -->
+                <div class="flex flex-col gap-1 sm:col-span-2">
+                    <label for="major_ids" class="text-sm font-medium text-slate-700">
+                        Applicable Major(s)
+                        <span v-if="subjectForm.category === 'Major'" class="text-red-500">*</span>
+                    </label>
+                    <MultiSelect
+                        id="major_ids"
+                        v-model="subjectForm.major_ids"
+                        :options="majorsForSelectedCollege"
+                        optionLabel="code"
+                        optionValue="id"
+                        filterBy="code,name"
+                        display="chip"
+                        filter
+                        :disabled="subjectForm.category !== 'Major' || !subjectForm.college_id"
+                        placeholder="Select all majors that this subject applies to"
+                        :invalid="!!subjectForm.errors.major_ids"
+                        class="w-full"
+                    >
+                        <template #option="{ option }">
+                            <span>{{ option.code }}</span>
+                            <span class="text-slate-400"> — {{ option.name }}</span>
+                        </template>
+                    </MultiSelect>
+                    <small v-if="subjectForm.category === 'Major' && !subjectForm.college_id" class="text-slate-400">
+                        Select a College first.
+                    </small>
+                    <small v-else-if="subjectForm.category !== 'Major'" class="text-slate-400">
+                        Not applicable for GenEd/Minor subjects — shared institution-wide.
+                    </small>
+                    <small v-else-if="subjectForm.errors.major_ids" class="text-red-500">
+                        {{ subjectForm.errors.major_ids }}
                     </small>
                 </div>
 
@@ -490,8 +642,8 @@ const onDeleteSubject = (subject) => {
                     </small>
                 </div>
 
-                <!-- Lecture Hours -->
-                <div class="flex flex-col gap-1">
+                <!-- Lecture Hours (Regular subjects only) -->
+                <div v-if="!isPracticum" class="flex flex-col gap-1">
                     <label for="lecture_hours" class="text-sm font-medium text-slate-700">
                         Lecture Hours <span class="text-red-500">*</span>
                     </label>
@@ -510,8 +662,8 @@ const onDeleteSubject = (subject) => {
                     </small>
                 </div>
 
-                <!-- Laboratory Hours -->
-                <div class="flex flex-col gap-1">
+                <!-- Laboratory Hours (Regular subjects only) -->
+                <div v-if="!isPracticum" class="flex flex-col gap-1">
                     <label for="laboratory_hours" class="text-sm font-medium text-slate-700">
                         Laboratory Hours <span class="text-red-500">*</span>
                     </label>
@@ -530,25 +682,62 @@ const onDeleteSubject = (subject) => {
                     </small>
                 </div>
 
-                <!-- Preferred Room Category -->
-                <div class="flex flex-col gap-1 sm:col-span-2">
-                    <label for="preferred_room_category" class="text-sm font-medium text-slate-700">
-                        Preferred Room Category
+                <!-- Required Hours (Practicum/OJT only) -->
+                <div v-if="isPracticum" class="flex flex-col gap-1">
+                    <label for="required_hours" class="text-sm font-medium text-slate-700">
+                        Required Hours <span class="text-red-500">*</span>
+                    </label>
+                    <InputNumber
+                        id="required_hours"
+                        v-model="subjectForm.required_hours"
+                        :min="1"
+                        placeholder="e.g. 240"
+                        showButtons
+                        buttonLayout="horizontal"
+                        :invalid="!!subjectForm.errors.required_hours"
+                        class="w-full"
+                        inputClass="w-full"
+                    />
+                    <small v-if="subjectForm.errors.required_hours" class="text-red-500">
+                        {{ subjectForm.errors.required_hours }}
+                    </small>
+                </div>
+
+                <!-- Deployment Type (Practicum/OJT only) -->
+                <div v-if="isPracticum" class="flex flex-col gap-1">
+                    <label for="deployment_type" class="text-sm font-medium text-slate-700">
+                        Deployment Type <span class="text-red-500">*</span>
                     </label>
                     <Select
-                        id="preferred_room_category"
-                        v-model="subjectForm.preferred_room_category"
-                        :options="roomCategories"
-                        placeholder="e.g. Computer Laboratory, Gymnasium, Classroom"
-                        showClear
-                        :invalid="!!subjectForm.errors.preferred_room_category"
+                        id="deployment_type"
+                        v-model="subjectForm.deployment_type"
+                        :options="deploymentTypeOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="Select deployment type"
+                        :invalid="!!subjectForm.errors.deployment_type"
                         class="w-full"
                     />
-                    <small class="text-slate-400">
-                        Drives Room Recommendations for this subject (e.g. Computer Programming → Computer Laboratory).
+                    <small v-if="subjectForm.errors.deployment_type" class="text-red-500">
+                        {{ subjectForm.errors.deployment_type }}
                     </small>
-                    <small v-if="subjectForm.errors.preferred_room_category" class="text-red-500">
-                        {{ subjectForm.errors.preferred_room_category }}
+                </div>
+
+                <!-- Deployment / Remarks (Practicum/OJT only) -->
+                <div v-if="isPracticum" class="flex flex-col gap-1 sm:col-span-2">
+                    <label for="deployment_remarks" class="text-sm font-medium text-slate-700">
+                        Remarks / Deployment Notes
+                    </label>
+                    <Textarea
+                        id="deployment_remarks"
+                        v-model="subjectForm.deployment_remarks"
+                        rows="2"
+                        placeholder="Optional notes — partner company, supervisor, deployment schedule, etc."
+                        :invalid="!!subjectForm.errors.deployment_remarks"
+                        class="w-full"
+                    />
+                    <small v-if="subjectForm.errors.deployment_remarks" class="text-red-500">
+                        {{ subjectForm.errors.deployment_remarks }}
                     </small>
                 </div>
 

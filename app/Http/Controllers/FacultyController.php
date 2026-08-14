@@ -30,11 +30,14 @@ class FacultyController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('viewAny', Faculty::class);
+
         $search = trim((string) $request->query('faculty_search', ''));
         $category = $request->query('faculty_category', '');
         $category = in_array($category, ['Department Faculty', 'General Education Faculty'], true) ? $category : '';
 
         $faculties = Faculty::query()
+            ->visibleTo($request->user())
             ->with(['college' => fn ($query) => $query->withTrashed()])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
@@ -85,6 +88,8 @@ class FacultyController extends Controller
      */
     public function show(Faculty $faculty): Response
     {
+        $this->authorize('view', $faculty);
+
         $faculty->load([
             'college' => fn ($query) => $query->withTrashed(),
             'subjects' => fn ($query) => $query->orderBy('subject_code'),
@@ -116,7 +121,14 @@ class FacultyController extends Controller
      */
     public function store(StoreFacultyRequest $request): RedirectResponse
     {
-        Faculty::create($request->validated());
+        $data = $request->validated();
+
+        // NEVER trust college_id from the payload (spec Section 23) —
+        // it is already re-derived/validated in StoreFacultyRequest,
+        // but the policy check here is the authoritative gate.
+        $this->authorize('createForCollege', [Faculty::class, $data['college_id'] ?? null]);
+
+        Faculty::create($data);
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member added successfully.');
     }
@@ -126,7 +138,19 @@ class FacultyController extends Controller
      */
     public function update(UpdateFacultyRequest $request, Faculty $faculty): RedirectResponse
     {
-        $faculty->update($request->validated());
+        $this->authorize('update', $faculty);
+
+        $data = $request->validated();
+
+        // Per spec Section 6/11: Dean/OIC/Assistant Dean may never
+        // reassign a faculty member's College. Only Admin/Registrar
+        // (already bypassed via Gate::before / isUnrestricted) may
+        // change college_id; anyone else has it silently pinned back.
+        if (array_key_exists('college_id', $data) && $data['college_id'] !== $faculty->college_id) {
+            $this->authorize('reassignCollege', Faculty::class);
+        }
+
+        $faculty->update($data);
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member updated successfully.');
     }
@@ -136,6 +160,8 @@ class FacultyController extends Controller
      */
     public function destroy(Faculty $faculty): RedirectResponse
     {
+        $this->authorize('delete', $faculty);
+
         $faculty->delete();
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member deleted successfully.');

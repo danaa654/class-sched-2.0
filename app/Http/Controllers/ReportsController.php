@@ -18,10 +18,22 @@ class ReportsController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('view-reports');
+
+        $user = $request->user();
+
         $filters = [
             'academic_year' => $request->query('academic_year', ''),
             'semester' => $request->query('semester', ''),
-            'college_id' => $request->query('college_id', ''),
+            // NEVER trust an arbitrary college_id filter from a
+            // College-scoped Dean/OIC — pin it to their own College
+            // regardless of what the request asked for (spec Section
+            // 19, 20, 23). Admin/Registrar/Assistant Dean may filter
+            // freely (Assistant Dean's report queries are further
+            // restricted to GenEd/Minor data inside ReportsService).
+            'college_id' => \App\Support\AccessScope::isCollegeScoped($user)
+                ? (string) \App\Support\AccessScope::collegeId($user)
+                : $request->query('college_id', ''),
             'major_id' => $request->query('major_id', ''),
             'year_level' => $request->query('year_level', ''),
             'section_id' => $request->query('section_id', ''),

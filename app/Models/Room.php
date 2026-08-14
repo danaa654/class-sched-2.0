@@ -98,4 +98,46 @@ class Room extends Model
             ->withPivot(['id', 'active', 'created_by', 'created_at'])
             ->withTimestamps();
     }
+
+    /**
+     * RBAC query scope (spec Section 16-17): rooms are visible to
+     * everyone (Dean/OIC need to see shared/eligible rooms outside
+     * their College to schedule), but this scope is available for
+     * views that must show only rooms a College may *administer* —
+     * i.e. their own College's rooms plus unrestricted/shared ones.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Room>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<Room>
+     */
+    public function scopeManageableBy($query, ?\App\Models\User $user)
+    {
+        if (\App\Support\AccessScope::isUnrestricted($user)) {
+            return $query;
+        }
+
+        // Room administration is Admin/Registrar-only (see RoomPolicy),
+        // so any other role gets zero manageable rows.
+        return $query->whereRaw('1 = 0');
+    }
+
+    /**
+     * Rooms a user may USE for scheduling: shared/general rooms plus
+     * their own College's (Dean/OIC), or everything (Admin/Registrar/
+     * Assistant Dean).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Room>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<Room>
+     */
+    public function scopeUsableBy($query, ?\App\Models\User $user)
+    {
+        if (\App\Support\AccessScope::isUnrestricted($user) || \App\Support\AccessScope::isAssistantDean($user)) {
+            return $query;
+        }
+
+        $collegeId = \App\Support\AccessScope::collegeId($user);
+
+        return $query->where(function ($inner) use ($collegeId) {
+            $inner->whereNull('college_id')->orWhere('college_id', $collegeId ?? -1);
+        });
+    }
 }

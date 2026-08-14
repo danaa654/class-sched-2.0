@@ -546,6 +546,21 @@ const displayStatus = (row) => {
     return row.status;
 };
 
+// True when a row has none of its core scheduling fields filled in
+// yet (no Faculty, Room, Days, Start Time, or End Time). Distinct from
+// a Conflict/capacity warning — an unscheduled row isn't wrong, it's
+// just incomplete — so it gets its own subtler "needs scheduling"
+// treatment instead of reading like a rendering bug or an error.
+const rowIsUnscheduled = (row) => {
+    return (
+        !row.faculty_id &&
+        !row.room_id &&
+        (!row.days || row.days.length === 0) &&
+        !row.start_time &&
+        !row.end_time
+    );
+};
+
 /* ------------------------------------------------------------------ */
 /* Smart Assignment Recommendation Engine (Prompt 8.6)                 */
 /*                                                                       */
@@ -1764,7 +1779,10 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
                         <Column style="width: 100%">
                             <template #body="{ data }">
-                                <div class="flex flex-col gap-2.5 py-1.5">
+                                <div
+                                    class="flex flex-col gap-2.5 py-1.5 px-3 -mx-3 rounded-lg transition-colors"
+                                    :class="{ 'unscheduled-row': rowIsUnscheduled(data) }"
+                                >
                                     <!-- Line 1: EDP Code / Subject Code / Subject Title / Category / Units / Status / Source / Actions -->
                                     <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5">
                                         <div class="min-w-[7rem]">
@@ -1813,6 +1831,12 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     @click.stop="openRecommendDrawer(data)"
                                                 >
                                                     Click to find best schedule
+                                                </span>
+                                                <span
+                                                    v-else-if="rowIsUnscheduled(data)"
+                                                    class="text-[0.65rem] text-blue-500 italic"
+                                                >
+                                                    Not yet scheduled
                                                 </span>
                                             </div>
                                         </div>
@@ -1876,7 +1900,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     showClear
                                                     placeholder="Select faculty"
                                                     class="w-full"
-                                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id) }"
+                                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id), 'unscheduled-field': rowIsUnscheduled(data) }"
                                                     emptyMessage="No active faculty"
                                                     emptyFilterMessage="No matching faculty"
                                                     :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
@@ -1926,7 +1950,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     showClear
                                                     placeholder="Select room"
                                                     class="w-full"
-                                                    :class="{ 'p-invalid': stateFor(data.id).errors.room_id || roomConflictRowIds.has(data.id) }"
+                                                    :class="{ 'p-invalid': stateFor(data.id).errors.room_id || roomConflictRowIds.has(data.id), 'unscheduled-field': rowIsUnscheduled(data) }"
                                                     emptyMessage="No active rooms"
                                                     emptyFilterMessage="No matching rooms"
                                                     :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
@@ -1975,7 +1999,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     optionValue="value"
                                                     placeholder="Select days"
                                                     class="w-full"
-                                                    :class="{ 'p-invalid': stateFor(data.id).errors.days || sectionConflictRowIds.has(data.id) }"
+                                                    :class="{ 'p-invalid': stateFor(data.id).errors.days || sectionConflictRowIds.has(data.id), 'unscheduled-field': rowIsUnscheduled(data) }"
                                                     :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                                     @update:modelValue="(v) => onDaysChange(data, v)"
                                                 >
@@ -2028,7 +2052,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 iconDisplay="input"
                                                 placeholder="Start"
                                                 class="w-full"
-                                                :class="{ 'p-invalid': stateFor(data.id).errors.start_time }"
+                                                :class="{ 'p-invalid': stateFor(data.id).errors.start_time, 'unscheduled-field': rowIsUnscheduled(data) }"
                                                 :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
                                                 @update:modelValue="(v) => onStartTimeChange(data, v)"
                                             />
@@ -2048,7 +2072,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 iconDisplay="input"
                                                 placeholder="End"
                                                 class="w-full"
-                                                :class="{ 'p-invalid': stateFor(data.id).errors.end_time }"
+                                                :class="{ 'p-invalid': stateFor(data.id).errors.end_time, 'unscheduled-field': rowIsUnscheduled(data) }"
                                                 :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
                                                 @update:modelValue="(v) => onEndTimeChange(data, v)"
                                             />
@@ -3030,6 +3054,26 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
     background-color: rgb(254 226 226) !important; /* red-100 */
 }
 
+/* "Not yet scheduled" rows — a Draft row with no Faculty/Room/Days/
+   Time assigned at all. Applied to the row's inner content wrapper
+   (not the <tr> itself — table rows don't reliably paint left
+   borders across browsers due to border-collapse behavior) so the
+   dashed accent + tint actually render. Baby-blue so it's clearly
+   visible against the neutral table background, distinct from
+   conflict/warning rows (red/amber) — an empty row reads as "still
+   needs setup", not an error. */
+.schedule-table :deep(.unscheduled-row) {
+    background-color: #EFF6FF !important; /* blue-50 */
+    border-left: 3px dashed #93C5FD !important; /* blue-300 */
+}
+.schedule-table :deep(.unscheduled-field.p-select),
+.schedule-table :deep(.unscheduled-field.p-multiselect),
+.schedule-table :deep(.unscheduled-field .p-datepicker-input) {
+    border-style: dashed !important;
+    border-color: #93C5FD !important; /* blue-300 */
+    background-color: #F0F7FF !important;
+}
+
 .schedule-table :deep(.p-select),
 .schedule-table :deep(.p-multiselect),
 .schedule-table :deep(.p-datepicker-input) {
@@ -3078,6 +3122,16 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 .dark-scope :deep(.text-green-600) { color: #34D399 !important; }
 .dark-scope :deep(.bg-amber-50) { background-color: rgba(217, 119, 6, 0.14) !important; }
 .dark-scope :deep(.border-amber-200) { border-color: rgba(217, 119, 6, 0.35) !important; }
+.dark-scope :deep(.unscheduled-row) {
+    background-color: rgba(59, 130, 246, 0.10) !important; /* blue-500 @10% */
+    border-left-color: rgba(96, 165, 250, 0.55) !important; /* blue-400 */
+}
+.dark-scope :deep(.unscheduled-field.p-select),
+.dark-scope :deep(.unscheduled-field.p-multiselect),
+.dark-scope :deep(.unscheduled-field .p-datepicker-input) {
+    border-color: rgba(96, 165, 250, 0.45) !important;
+    background-color: rgba(59, 130, 246, 0.08) !important;
+}
 .dark-scope :deep(.text-amber-600) { color: #FBBF24 !important; }
 
 .dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }

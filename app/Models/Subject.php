@@ -20,11 +20,16 @@ class Subject extends Model
     protected $fillable = [
         'subject_code',
         'subject_title',
+        'college_id',
         'major_id',
         'category',
+        'subject_type',
         'units',
         'lecture_hours',
         'laboratory_hours',
+        'required_hours',
+        'deployment_type',
+        'deployment_remarks',
         'preferred_room_category',
         'is_active',
         'description',
@@ -39,19 +44,65 @@ class Subject extends Model
             'units' => 'integer',
             'lecture_hours' => 'integer',
             'laboratory_hours' => 'integer',
+            'required_hours' => 'integer',
             'is_active' => 'boolean',
         ];
     }
 
     /**
-     * The Major this subject belongs to. Null for General Education
-     * subjects, which are shared across all Majors.
+     * True for Practicum / OJT / Internship / Fieldwork / Clinical
+     * Practice subjects — conducted off-campus.
+     *
+     * This is the single flag every downstream module (Curriculum,
+     * Section Subjects, ScheduleConflictService, AutoScheduleService,
+     * Reports) should check instead of re-deriving "no room" logic
+     * of its own. Never treat a Practicum/OJT subject as a Regular
+     * subject with an empty room — it's explicitly a different
+     * delivery model: Subject -> Faculty Supervisor -> Off-Campus ->
+     * Required Hours, not Subject -> Faculty -> Room -> Time.
+     */
+    public function isPracticum(): bool
+    {
+        return $this->subject_type === 'practicum';
+    }
+
+    /**
+     * The College that owns this Subject's definition. Required for
+     * Major subjects; nullable for institution-wide GenEd/Minor
+     * subjects that aren't scoped to any single College.
+     *
+     * @return BelongsTo<College, Subject>
+     */
+    public function college(): BelongsTo
+    {
+        return $this->belongsTo(College::class);
+    }
+
+    /**
+     * Legacy single-Major relation, kept for backward compatibility
+     * with read paths that haven't been migrated to the majors()
+     * many-to-many yet (RecommendationService, RoomRecommendationController).
+     * Always mirrors the first row in the subject_major pivot — see
+     * SubjectController::syncMajors().
      *
      * @return BelongsTo<Major, Subject>
      */
     public function major(): BelongsTo
     {
         return $this->belongsTo(Major::class);
+    }
+
+    /**
+     * Every Major this Subject is applicable to. A Subject belongs to
+     * one College but may be shared across several Majors within it —
+     * this is the source of truth going forward; `major`/`major_id`
+     * above are a derived convenience for legacy callers.
+     *
+     * @return BelongsToMany<Major>
+     */
+    public function majors(): BelongsToMany
+    {
+        return $this->belongsToMany(Major::class, 'subject_major')->withTimestamps();
     }
 
     /**
@@ -90,5 +141,37 @@ class Subject extends Model
             ->wherePivot('active', true)
             ->withPivot(['id', 'active', 'created_by', 'created_at'])
             ->withTimestamps();
+    }
+
+    /** True for General Education / Minor subjects — institution-wide, shared across every College (spec Section 13). */
+    public function isSharedResource(): bool
+    {
+        return \App\Support\AccessScope::isSharedCategory($this->category);
+    }
+
+    /**
+     * RBAC query scope (spec Section 24): subjects a user may MANAGE
+     * (not merely view — every authorized role may view every subject
+     * for scheduling purposes, see SubjectPolicy::view()).
+     * Admin/Registrar: everything. Assistant Dean: GenEd/Minor only.
+     * Dean/OIC: Major subjects owned by their own College only.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Subject>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<Subject>
+     */
+    public function scopeManageableBy($query, ?\App\Models\User $user)
+    {
+        if (\App\Support\AccessScope::isUnrestricted($user)) {
+            return $query;
+        }
+
+        if (\App\Support\AccessScope::isAssistantDean($user)) {
+            return $query->whereIn('category', ['General Education', 'Minor']);
+        }
+
+        $collegeId = \App\Support\AccessScope::collegeId($user);
+
+        return $query->where('category', 'Major')
+            ->where('college_id', $collegeId ?? -1);
     }
 }

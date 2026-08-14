@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests;
 
+use App\Models\SectionSubject;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * Validates the "Save Schedule" batch submit from the Section Subjects
@@ -68,5 +70,35 @@ class BatchUpdateSectionSubjectScheduleRequest extends FormRequest
             'rows.*.end_time.after' => 'End Time must be later than Start Time.',
             'rows.*.capacity.min' => 'Capacity must be at least 1.',
         ];
+    }
+
+    /**
+     * Same Practicum/OJT room guard as UpdateSectionSubjectScheduleRequest,
+     * applied per-row for the batch "Save Schedule" submit.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $rows = collect($this->input('rows', []))->filter(fn ($row) => ! empty($row['room_id'] ?? null));
+
+            if ($rows->isEmpty()) {
+                return;
+            }
+
+            $practicumIds = SectionSubject::query()
+                ->whereIn('id', $rows->pluck('id'))
+                ->whereHas('subject', fn ($q) => $q->where('subject_type', 'practicum'))
+                ->pluck('id')
+                ->all();
+
+            foreach ($rows as $index => $row) {
+                if (in_array($row['id'] ?? null, $practicumIds, true)) {
+                    $validator->errors()->add(
+                        "rows.{$index}.room_id",
+                        'This subject is Practicum / OJT and is conducted off-campus — it cannot be assigned a classroom or laboratory room.'
+                    );
+                }
+            }
+        });
     }
 }

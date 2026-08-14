@@ -177,6 +177,16 @@ class AutoScheduleService
      */
     private function generateOne(Section $section, SectionSubject $sectionSubject): array
     {
+        // PRACTICUM / OJT — an explicitly non-room-based delivery
+        // type (Subject -> Faculty Supervisor -> Off-Campus ->
+        // Required Hours). Never enters the Faculty+Room+Time search
+        // or the Irregular-section merge evaluation below — both of
+        // those exist to fit a class into a physical Room, which a
+        // Practicum/OJT placement never occupies.
+        if ($sectionSubject->subject?->isPracticum()) {
+            return $this->resolvePracticum($section, $sectionSubject);
+        }
+
         // INTELLIGENT IRREGULAR SECTION SCHEDULING — for an Irregular
         // section, evaluate a merge into a compatible Regular
         // section's existing class BEFORE ever searching for an
@@ -503,6 +513,74 @@ class AutoScheduleService
                 'subject_title' => $sectionSubject->subject->subject_title,
                 'is_merged' => false,
                 'merge_recommendation' => $sectionSubject->merge_recommendation,
+            ]),
+        ];
+    }
+
+    /**
+     * Resolve a Practicum/OJT SectionSubject row. Faculty Supervisor
+     * is optional (spec Section 4: "Faculty/adviser assignment should
+     * still be supported"), so this simply picks the first Active,
+     * qualified faculty member who wouldn't exceed their teaching
+     * load if one exists — it never blocks on failing to find one.
+     * No Room, Days, Start Time, or End Time are ever set: the row is
+     * immediately marked Draft/scheduled with Days/Time left empty
+     * and displayed by the frontend as "Off-Campus / OJT" instead of
+     * a classroom (spec Section 4/6).
+     */
+    private function resolvePracticum(Section $section, SectionSubject $sectionSubject): array
+    {
+        $subject = $sectionSubject->subject;
+
+        $facultyId = null;
+        $facultyName = null;
+
+        foreach ($subject->faculty()->where('status', 'Active')->get() as $candidate) {
+            if (! $this->workloadService->wouldExceed($candidate, $subject, $sectionSubject->id)) {
+                $facultyId = $candidate->id;
+                $facultyName = $candidate->full_name ?? $candidate->name ?? null;
+                break;
+            }
+        }
+
+        $meta = [
+            'delivery_type' => 'practicum',
+            'faculty' => [
+                'id' => $facultyId,
+                'name' => $facultyName,
+                'score' => $facultyId ? 100 : 0,
+                'confidence' => $facultyId ? 'High' : 'None',
+                'reasons' => $facultyId
+                    ? ["Qualified, Active faculty supervisor assigned for {$subject->subject_code}."]
+                    : ['No Active qualified faculty supervisor available yet — assign one manually.'],
+            ],
+            'room' => null,
+            'time' => null,
+            'deployment_type' => $subject->deployment_type,
+            'required_hours' => $subject->required_hours,
+            'overall_score' => $facultyId ? 100 : 60,
+        ];
+
+        $sectionSubject->update([
+            'faculty_id' => $facultyId,
+            'room_id' => null,
+            'days' => null,
+            'start_time' => null,
+            'end_time' => null,
+            'status' => 'Draft',
+            'is_auto_generated' => true,
+            'auto_generated_meta' => $meta,
+        ]);
+
+        return [
+            'success' => true,
+            'result' => array_merge($meta, [
+                'section_subject_id' => $sectionSubject->id,
+                'subject_code' => $subject->subject_code,
+                'subject_title' => $subject->subject_title,
+                'is_merged' => false,
+                'is_practicum' => true,
+                'merge_recommendation' => null,
             ]),
         ];
     }

@@ -121,4 +121,28 @@ class Section extends Model
             ->withPivot(['id', 'source', 'remarks'])
             ->withTimestamps();
     }
+
+    /**
+     * RBAC query scope (spec Section 10, 15, 24): Sections belong to a
+     * College through Major -> Department -> College. Admin/Registrar/
+     * Assistant Dean see every Section (Assistant Dean needs this to
+     * schedule GenEd/Minor subjects into any College's sections; write
+     * access to the Section record itself remains gated by
+     * SectionPolicy). Dean/OIC see only their own College's Sections.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Section>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<Section>
+     */
+    public function scopeVisibleTo($query, ?\App\Models\User $user)
+    {
+        if (\App\Support\AccessScope::isUnrestricted($user) || \App\Support\AccessScope::isAssistantDean($user)) {
+            return $query;
+        }
+
+        $collegeId = \App\Support\AccessScope::collegeId($user);
+
+        return $query->whereHas('major.department', function ($inner) use ($collegeId) {
+            $inner->where('college_id', $collegeId ?? -1);
+        });
+    }
 }

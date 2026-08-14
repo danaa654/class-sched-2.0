@@ -22,6 +22,8 @@ class AcademicStructureController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('manage-academic-structure');
+
         $collegeSearch = trim((string) $request->query('college_search', ''));
         $departmentSearch = trim((string) $request->query('department_search', ''));
         $majorSearch = trim((string) $request->query('major_search', ''));

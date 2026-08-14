@@ -21,15 +21,18 @@ use App\Services\FacultyWorkloadService;
 use App\Services\IrregularSectionMergeService;
 use App\Services\RecommendationService;
 use App\Services\ScheduleConflictService;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
-class SectionSubjectController extends Controller
+class SectionSubjectController extends Controller implements HasMiddleware
 {
     public function __construct(
         private readonly EDPCodeService $edpCodeService,
@@ -39,6 +42,42 @@ class SectionSubjectController extends Controller
         private readonly FacultyWorkloadService $workloadService,
         private readonly IrregularSectionMergeService $mergeService
     ) {
+    }
+
+    /**
+     * SECURITY (spec Section 23): every action below except index()
+     * is bound to a {section} route parameter — viewing subjects,
+     * assigning Faculty/Room/Time, Auto Generate, and every other
+     * per-Section action. None of these previously re-checked that
+     * the resolved Section actually belongs to a College the
+     * authenticated user is authorized for, which meant a CCS OIC
+     * could reach another College's Section entirely by editing the
+     * {section} id in the URL/request — the listing being scoped
+     * only hid it from the UI, it did not block direct access.
+     *
+     * This single middleware re-validates the *route-bound* Section
+     * (never a raw id from the request body) against
+     * SectionPolicy::manageScheduling on every request to this
+     * controller, so the check can't be missed on any individual
+     * method and can't be bypassed by manipulating request payload
+     * fields — only the resolved Eloquent model, from the URL
+     * segment Laravel itself bound and loaded, is trusted.
+     *
+     * @return array<int, Closure>
+     */
+    public static function middleware(): array
+    {
+        return [
+            function (Request $request, Closure $next) {
+                $section = $request->route('section');
+
+                if ($section instanceof Section) {
+                    Gate::authorize('manageScheduling', $section);
+                }
+
+                return $next($request);
+            },
+        ];
     }
 
     /**
@@ -122,7 +161,13 @@ class SectionSubjectController extends Controller
     {
         $search = trim((string) $request->query('section_search', ''));
 
+        // SECURITY: this listing must use the same RBAC scope as the
+        // Sections module itself (spec Section 23/24) — otherwise a
+        // Dean/OIC could see (and click into) every other College's
+        // Sections from this entry point even though the main
+        // Sections list correctly hides them.
         $sections = Section::query()
+            ->visibleTo($request->user())
             ->with(['major:id,name,code', 'curriculum:id,code,name,major_id'])
             ->withCount('subjects')
             ->when($search !== '', function ($query) use ($search) {

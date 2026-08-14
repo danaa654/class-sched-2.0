@@ -145,4 +145,29 @@ class Faculty extends Model
             ? 'General Education Faculty'
             : 'Department Faculty';
     }
+
+    /**
+     * RBAC query scope (spec Section 24 — QUERY SCOPING): restrict the
+     * Faculty roster to what $user is authorized to see.
+     * Admin/Registrar: unrestricted. Assistant Dean: GenEd/Minor
+     * faculty only (college_id null). Dean/OIC: their own College's
+     * faculty only. Anyone else: no rows.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Faculty>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<Faculty>
+     */
+    public function scopeVisibleTo($query, ?\App\Models\User $user)
+    {
+        if (\App\Support\AccessScope::isUnrestricted($user)) {
+            return $query;
+        }
+
+        if (\App\Support\AccessScope::isAssistantDean($user)) {
+            return $query->whereNull('college_id');
+        }
+
+        $ids = \App\Support\AccessScope::visibleCollegeIds($user);
+
+        return $query->whereIn('college_id', $ids ?? [-1]);
+    }
 }

@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreSubjectRequest;
 use App\Http\Requests\UpdateSubjectRequest;
+use App\Models\College;
 use App\Models\Major;
 use App\Models\Subject;
+use App\Support\AccessScope;
 use App\Support\RoomCategories;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,17 +25,24 @@ class SubjectController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('viewAny', Subject::class);
+
+        $user = $request->user();
         $search = trim((string) $request->query('subject_search', ''));
 
+        // Every authorized role can VIEW the full Subject Library (Dean/
+        // OIC need to see GenEd/Minor subjects to schedule their own
+        // sections) — the Add/Edit/Delete actions are what's scoped,
+        // enforced per-record below and in the frontend via `canManage`.
         $subjects = Subject::query()
-            ->with(['major' => fn ($query) => $query->withTrashed()])
+            ->with(['college:id,code,name', 'majors:id,name,code,department_id'])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('subject_code', 'like', "%{$search}%")
                         ->orWhere('subject_title', 'like', "%{$search}%")
                         ->orWhere('category', 'like', "%{$search}%")
-                        ->orWhereHas('major', function ($majorQuery) use ($search) {
-                            $majorQuery->withTrashed()->where('name', 'like', "%{$search}%");
+                        ->orWhereHas('majors', function ($majorQuery) use ($search) {
+                            $majorQuery->where('name', 'like', "%{$search}%");
                         });
                 });
             })
@@ -41,14 +50,44 @@ class SubjectController extends Controller
             ->paginate(10, ['*'], 'subject_page')
             ->withQueryString();
 
+        // Tell the frontend, per row, whether the current user may
+        // modify this subject's definition — UI-level enforcement on
+        // top of (never instead of) the server-side policy checks in
+        // update()/destroy() below.
+        $subjects->getCollection()->transform(function (Subject $subject) use ($request) {
+            $subject->setAttribute('can_manage', $request->user()->can('update', $subject));
+
+            return $subject;
+        });
+
         return Inertia::render('Subjects/Index', [
             'subjects' => $subjects,
             'filters' => ['subject_search' => $search],
-            'majors' => Major::query()
+            'colleges' => College::query()
                 ->where('status', 'Active')
                 ->orderBy('name')
-                ->get(['id', 'name']),
+                ->get(['id', 'code', 'name']),
+            'majors' => Major::query()
+                ->where('status', 'Active')
+                ->with('department:id,college_id')
+                ->orderBy('name')
+                ->get(['id', 'name', 'code', 'department_id'])
+                ->map(fn (Major $major) => [
+                    'id' => $major->id,
+                    'name' => $major->name,
+                    'code' => $major->code,
+                    'college_id' => $major->department?->college_id,
+                ]),
             'roomCategories' => RoomCategories::LIST,
+            // What this user is allowed to pick, so the form never even
+            // offers an option the backend would reject — mirrored by
+            // the FormRequest/Policy checks server-side either way.
+            'subjectAccess' => [
+                'categoryOptions' => $this->categoryOptionsFor($user),
+                'lockedCollegeId' => AccessScope::collegeId($user),
+                'isCollegeScoped' => AccessScope::isCollegeScoped($user),
+                'isAssistantDean' => AccessScope::isAssistantDean($user),
+            ],
         ]);
     }
 
@@ -58,9 +97,16 @@ class SubjectController extends Controller
     public function store(StoreSubjectRequest $request): RedirectResponse
     {
         $data = $request->validated();
-        $data['is_active'] = $data['is_active'] ?? true;
+        $majorIds = array_values(array_unique(array_filter($data['major_ids'] ?? [])));
+        unset($data['major_ids']);
 
-        Subject::create($data);
+        $data['is_active'] = $data['is_active'] ?? true;
+        $data['major_id'] = $majorIds[0] ?? null;
+
+        $this->authorize('createOfCategory', [Subject::class, $data['category'], $data['college_id'] ?? null]);
+
+        $subject = Subject::create($data);
+        $subject->majors()->sync($majorIds);
 
         return redirect()->route('subjects')->with('success', 'Subject created successfully.');
     }
@@ -70,10 +116,17 @@ class SubjectController extends Controller
      */
     public function update(UpdateSubjectRequest $request, Subject $subject): RedirectResponse
     {
+        $this->authorize('update', $subject);
+
         $data = $request->validated();
+        $majorIds = array_values(array_unique(array_filter($data['major_ids'] ?? [])));
+        unset($data['major_ids']);
+
         $data['is_active'] = $data['is_active'] ?? true;
+        $data['major_id'] = $majorIds[0] ?? null;
 
         $subject->update($data);
+        $subject->majors()->sync($majorIds);
 
         return redirect()->route('subjects')->with('success', 'Subject updated successfully.');
     }
@@ -87,6 +140,8 @@ class SubjectController extends Controller
      */
     public function destroy(Subject $subject): RedirectResponse
     {
+        $this->authorize('delete', $subject);
+
         if ($subject->curriculumItems()->exists()) {
             return redirect()->route('subjects')->with(
                 'error',
@@ -97,5 +152,26 @@ class SubjectController extends Controller
         $subject->delete();
 
         return redirect()->route('subjects')->with('success', 'Subject deleted successfully.');
+    }
+
+    /**
+     * The subject Category values this user's role is allowed to
+     * pick from, for populating the Add/Edit Subject form's Category
+     * select — Admin/Registrar get all three, Assistant Dean is
+     * restricted to the shared types, Dean/OIC to Major only.
+     *
+     * @return array<int, string>
+     */
+    private function categoryOptionsFor(?\App\Models\User $user): array
+    {
+        if (AccessScope::isUnrestricted($user)) {
+            return ['Major', 'General Education', 'Minor'];
+        }
+
+        if (AccessScope::isAssistantDean($user)) {
+            return ['General Education', 'Minor'];
+        }
+
+        return ['Major'];
     }
 }

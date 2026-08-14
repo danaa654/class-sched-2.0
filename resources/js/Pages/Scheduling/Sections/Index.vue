@@ -21,6 +21,26 @@ import { useTheme } from '@/composables/useTheme';
 const { theme } = useTheme();
 const isDark = computed(() => theme.value === 'dark');
 
+// PrimeVue's Dialog is teleported straight to <body>, so it sits
+// outside this page's normal DOM tree — the "dark-scope" class still
+// reaches it via :deep() (see the <style> block below) for text/input
+// colors, but the Dialog's own chrome (panel/header/content/footer
+// background) is safest set as literal inline styles here rather than
+// relying purely on CSS specificity to beat PrimeVue's theme, since
+// an inline style is guaranteed to win regardless of stylesheet order.
+const darkDialogPt = computed(() => {
+    if (!isDark.value) return { root: { class: '' } };
+
+    const panel = { background: '#0F1730', color: '#F8FAFC', border: '1px solid rgba(255,255,255,0.1)' };
+
+    return {
+        root: { class: 'dark-scope', style: panel },
+        header: { style: { background: '#0F1730', color: '#F8FAFC', borderBottom: '1px solid rgba(255,255,255,0.1)' } },
+        content: { style: { background: '#0F1730', color: '#F8FAFC' } },
+        footer: { style: { background: '#0F1730', borderTop: '1px solid rgba(255,255,255,0.1)' } },
+    };
+});
+
 const props = defineProps({
     sections: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
     filters: {
@@ -37,6 +57,15 @@ const props = defineProps({
 
 const toast = useToast();
 const page = usePage();
+
+// Restricted-role (Dean/OIC) College lock indicator for the Add
+// Section / Batch Add forms. The `activeMajors` list sent from the
+// server is ALREADY filtered to this user's authorized College(s) —
+// this is purely a UI hint, never the authorization boundary itself;
+// SectionController re-derives and re-checks the College server-side
+// on every create request regardless of what's shown here.
+const scopedCollegeId = computed(() => page.props.auth?.collegeId ?? null);
+const hasNoAssignedCollege = computed(() => !!page.props.auth?.hasNoAssignedCollege);
 
 // Show a toast whenever the backend flashes a success/error message.
 watch(
@@ -809,7 +838,7 @@ const onDeleteSection = (section) => {
             :style="{ width: '760px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="darkDialogPt"
             @hide="closeAddSection"
         >
             <form class="flex flex-col gap-5" @submit.prevent="onSaveBatch">
@@ -906,6 +935,13 @@ const onDeleteSection = (section) => {
                             />
                             <small v-if="batchForm.errors.major_id" class="text-red-500">
                                 {{ batchForm.errors.major_id }}
+                            </small>
+                            <small v-else-if="scopedCollegeId && !hasNoAssignedCollege" class="text-slate-400">
+                                Showing programs for your assigned College only.
+                            </small>
+                            <small v-else-if="hasNoAssignedCollege" class="text-red-500">
+                                Your account has no assigned College yet, so no programs are available. Contact an
+                                Administrator.
                             </small>
                         </div>
 
@@ -1148,7 +1184,7 @@ const onDeleteSection = (section) => {
             :style="{ width: '700px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="darkDialogPt"
             @hide="closeEditSection"
         >
             <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveSection">
@@ -1212,6 +1248,13 @@ const onDeleteSection = (section) => {
                     <small v-if="sectionForm.errors.major_id" class="text-red-500">
                         {{ sectionForm.errors.major_id }}
                     </small>
+                    <p v-else-if="scopedCollegeId && !hasNoAssignedCollege" class="text-xs text-slate-400">
+                        Showing programs for your assigned College only.
+                    </p>
+                    <p v-else-if="hasNoAssignedCollege" class="text-xs text-red-500">
+                        Your account has no assigned College yet, so no programs are available. Contact an
+                        Administrator.
+                    </p>
                 </div>
 
                 <!-- Curriculum -->

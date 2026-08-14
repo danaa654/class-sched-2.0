@@ -15,34 +15,50 @@ use Illuminate\Database\Seeder;
  *
  * SCHEMA NOTES / ASSUMPTIONS (read before editing)
  * ---------------------------------------------------------------------
- * This seeder targets the CURRENT, simpler `subjects` table:
- *     subject_code, subject_title, major_id, category, units,
- *     lecture_hours, laboratory_hours, description, is_active
+ * This seeder targets the `subjects` table plus the `subject_major`
+ * pivot:
+ *     subject_code, subject_title, college_id, major_id, category,
+ *     subject_type, units, lecture_hours, laboratory_hours,
+ *     required_hours, deployment_type, description, is_active
  * It does NOT use required_room_type/required_room_group,
- * is_practicum, allow_split_schedule, prerequisite_id, or a
- * SubjectRoomGroup pivot — none of those exist in this app yet.
+ * allow_split_schedule, prerequisite_id, or a SubjectRoomGroup pivot —
+ * none of those exist in this app yet.
+ *
+ * PRACTICUM/OJT: any row with 'practicum' => true is seeded with
+ * subject_type = 'practicum' and deployment_type = 'off_campus'
+ * instead of 'regular' (see run()). Set 'required_hours' on that same
+ * row wherever the source PAP curriculum PDF states an explicit hour
+ * count (e.g. "300 hours", "600 hours"); left null otherwise so it
+ * can be confirmed and filled in via the Subjects page instead of
+ * guessing a number the PDF never printed.
  *
  * 1. `category` is only 'Major' or 'General Education'. Every row's
- *    'major' boolean below maps directly to that.
+ *    'major' boolean below maps directly to that. ('Minor' is a valid
+ *    category value in the schema but this catalog has no Minor rows.)
  *
- * 2. `major_id` is resolved best-effort from each row's 'group' value
- *    by looking up `Major::where('code', $group)->value('id')`.
+ * 2. Applicable Major(s) are resolved best-effort from each row's
+ *    'group' value by looking up `Major::where('code', $group)`.
  *    - Single-program catalogs (bsitOnly, bsedOnly, bstmOnly,
  *      bshmOnly, and each BSCRIM specialization) are tagged with that
- *      program's Major code (e.g. 'BSIT', 'BSCRIMQD').
- *    - General Education/PATHFIT/NSTP subjects and the shared BSCRIM
- *      core are tagged with a null group — they're Major-category
- *      subjects with no single Major they belong to, so major_id is
- *      left null for those (see run() for the exact list).
+ *      program's Major code (e.g. 'BSIT', 'BSCRIMQD') and linked via
+ *      the subject_major pivot.
+ *    - General Education/PATHFIT/NSTP subjects are tagged with a null
+ *      group — genuinely institution-wide, no single Major (or even
+ *      College) owns them, so they're seeded with no linked Major and
+ *      college_id left null.
  *    - tourismHospitalityShared() sets an explicit 'group' => ['BSTM',
- *      'BSHM'] array per row (shared by both programs); since a
- *      Subject here can only hold ONE major_id, run() uses the first
- *      entry (BSTM) as the primary Major and the cross-listing with
- *      BSHM is only preserved in this comment.
+ *      'BSHM'] array per row; bscrimShared() is tagged with all four
+ *      BSCRIM specialization codes (two of its rows — FORENSIC4 and
+ *      FORENSIC6 — override that with their own smaller 'group'
+ *      array, since those two aren't actually used by all four
+ *      specializations per the PDFs). run() links the Subject to
+ *      EVERY Major in its resolved group via subject_major, and uses
+ *      the first one's College as the Subject's owning college_id.
  *    - If a Major with a given code doesn't exist yet in your database,
- *      that subject is still seeded — just with major_id = null — and
- *      a warning listing the missing code(s) is printed at the end.
- *      Create the matching Major record(s) and re-run to link them.
+ *      that subject is still seeded — just with no Major linked for
+ *      that code — and a warning listing the missing code(s) is
+ *      printed at the end. Create the matching Major record(s) and
+ *      re-run to link them.
  *
  * 3. Prerequisites ('prereq' key on each row) are intentionally NOT
  *    written anywhere. In this app, a prerequisite is a property of a
@@ -81,9 +97,12 @@ class SubjectSeeder extends Seeder
             $this->tag($this->bshmOnly(), 'BSHM'),
             $this->tag($this->bsitOnly(), 'BSIT'),
             $this->tag($this->bsedOnly(), 'BSED'),
-            // Shared across all four BSCRIM specializations — no single Major
-            // code fits, so these are seeded with major_id = null.
-            $this->tag($this->bscrimShared(), null),
+            // Shared across all four BSCRIM specializations — Questioned
+            // Documents, Fingerprint, Firearms/Ballistics, and Lie
+            // Detection all require these, so every row is linked to all
+            // four Majors (two rows below override this with a smaller
+            // subset — see their inline comments).
+            $this->tag($this->bscrimShared(), ['BSCRIMQD', 'BSCRIMFI', 'BSCRIMFB', 'BSCRIMLD']),
             $this->tag($this->bscrimQuestionedDocuments(), 'BSCRIMQD'),
             $this->tag($this->bscrimFingerprint(), 'BSCRIMFI'),
             $this->tag($this->bscrimFirearms(), 'BSCRIMFB'),
@@ -94,42 +113,69 @@ class SubjectSeeder extends Seeder
 
         foreach ($subjects as $s) {
             $isMajor = (bool) $s['major'];
-            $majorId = null;
+            // Practicum/OJT flag — see the 'practicum' key on the individual
+            // PRACTICUM*/PRAC101 rows below (bstmOnly, bshmOnly, bsitOnly,
+            // bsedOnly, bscrimShared). Every other row defaults to Regular.
+            $isPracticum = (bool) ($s['practicum'] ?? false);
+            $majorIds = [];
+            $collegeId = null;
 
             if ($isMajor) {
                 // tourismHospitalityShared() rows set 'group' to an array of
-                // program codes — this schema only supports one major_id per
-                // subject, so the first entry (BSTM) is used as the primary.
-                $majorCode = is_array($s['group']) ? ($s['group'][0] ?? null) : $s['group'];
+                // program codes (e.g. ['BSTM', 'BSHM']) — under the new
+                // College + Applicable Major(s) model every matching Major
+                // is linked via the subject_major pivot, not just the first.
+                $majorCodes = is_array($s['group']) ? $s['group'] : (($s['group'] !== null) ? [$s['group']] : []);
 
-                if ($majorCode !== null) {
-                    $majorId = Major::where('code', $majorCode)->value('id');
+                foreach ($majorCodes as $majorCode) {
+                    $major = Major::with('department')->where('code', $majorCode)->first();
 
-                    if ($majorId === null) {
+                    if ($major === null) {
                         $unmatchedMajorCodes[$majorCode] = true;
+
+                        continue;
                     }
+
+                    $majorIds[] = $major->id;
+                    // All majors tagged on one row are expected to share the
+                    // same College (e.g. BSTM/BSHM both under CTHM) — the
+                    // first resolved major's College is used as the
+                    // Subject's owning College.
+                    $collegeId ??= $major->department?->college_id;
                 }
             }
 
-            Subject::updateOrCreate(
+            $subject = Subject::updateOrCreate(
                 ['subject_code' => $s['code']],
                 [
                     'subject_title' => $s['title'],
                     'category' => $isMajor ? 'Major' : 'General Education',
-                    'major_id' => $majorId,
+                    'college_id' => $collegeId,
+                    'major_id' => $majorIds[0] ?? null,
+                    'subject_type' => $isPracticum ? 'practicum' : 'regular',
                     'units' => $s['units'],
                     'lecture_hours' => $s['lec'],
                     'laboratory_hours' => $s['lab'],
+                    // Total off-campus hours the student must complete —
+                    // only set where the PAP curriculum PDF states it
+                    // explicitly (BSTM/BSHM Practicum phases: 300/600
+                    // hours). Left null for PRAC101/BSED/BSCRIM Internship
+                    // rows, whose PDFs don't print an hour count — fill
+                    // in via the Subjects page once confirmed.
+                    'required_hours' => $isPracticum ? ($s['required_hours'] ?? null) : null,
+                    'deployment_type' => $isPracticum ? 'off_campus' : null,
                     'is_active' => true,
                 ]
             );
+
+            $subject->majors()->sync($majorIds);
         }
 
         if (! empty($unmatchedMajorCodes)) {
             $codes = implode(', ', array_keys($unmatchedMajorCodes));
             $this->command?->warn(
                 "SubjectSeeder: no Major found with code(s) [{$codes}]. Those subjects were ".
-                "seeded with major_id = null — create matching Major records (matching the ".
+                "seeded with no linked Major/College — create matching Major records (matching the ".
                 "'code' column) and re-run this seeder to link them."
             );
         }
@@ -140,10 +186,13 @@ class SubjectSeeder extends Seeder
      * belongs to (unless a row already sets one explicitly — used by
      * tourismHospitalityShared() below to opt into an array of program
      * codes instead of the catalog's default single code). A null
-     * $group is a valid, deliberate fallback meaning "no single Major
-     * applies" (see run()'s comments for which catalogs use this).
+     * A null $group is a valid, deliberate fallback meaning "no single
+     * Major applies" (see run()'s comments for which catalogs use
+     * this). $group may also be a single code (string) or several
+     * codes at once (array) — e.g. bscrimShared() tags every row with
+     * all four BSCRIM specialization codes.
      */
-    private function tag(array $rows, ?string $group): array
+    private function tag(array $rows, array|string|null $group): array
     {
         foreach ($rows as &$row) {
             if (!array_key_exists('group', $row)) {
@@ -266,9 +315,9 @@ class SubjectSeeder extends Seeder
             ['code' => 'PROF-ELECT5-BSTM', 'title' => 'Eco-Tourism Management',                'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => null],
 
             // PRACTICUM/OJT: Tourism practicum phases. Prereqs are textual ("All 2nd Year TPC & FLT
-            // Subjects" / "All TPC Subjects") — left null. is_practicum intentionally omitted (see header note).
-            ['code' => 'PRACTICUM1-BSTM', 'title' => 'Phase I - Tourism Practicum in Travel Agency / Passenger Handling and Assisting 1 (300 hours)', 'lec' => 4, 'lab' => 0, 'units' => 4, 'major' => true, 'room' => 'Any', 'prereq' => null],
-            ['code' => 'PRACTICUM2-BSTM', 'title' => 'Phase II - Airline/Shipping Line Phase (600 hours)',                                            'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null],
+            // Subjects" / "All TPC Subjects") — left null. Flagged practicum => true below; hours are printed in the PDF.
+            ['code' => 'PRACTICUM1-BSTM', 'title' => 'Phase I - Tourism Practicum in Travel Agency / Passenger Handling and Assisting 1 (300 hours)', 'lec' => 4, 'lab' => 0, 'units' => 4, 'major' => true, 'room' => 'Any', 'prereq' => null, 'practicum' => true, 'required_hours' => 300],
+            ['code' => 'PRACTICUM2-BSTM', 'title' => 'Phase II - Airline/Shipping Line Phase (600 hours)',                                            'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null, 'practicum' => true, 'required_hours' => 600],
         ];
     }
 
@@ -297,9 +346,9 @@ class SubjectSeeder extends Seeder
             ['code' => 'PROF-ELECT5-BSHM', 'title' => 'Catering Management',                           'lec' => 2, 'lab' => 3, 'units' => 3, 'major' => true, 'room' => 'Any', 'prereq' => null],
 
             // PRACTICUM/OJT: Hospitality practicum phases. Prereqs are textual ("All 2nd Year HPC
-            // Subjects" / "All HPC Subjects") — left null. is_practicum intentionally omitted (see header note).
-            ['code' => 'PRACTICUM1-BSHM', 'title' => 'Phase I - Housekeeping/Food and Beverage Operations/Passenger Handling and Assisting 1 (300 hours)', 'lec' => 4, 'lab' => 0, 'units' => 4, 'major' => true, 'room' => 'Any', 'prereq' => null],
-            ['code' => 'PRACTICUM2-BSHM', 'title' => 'Phase II - Hotel Phase (600 hours)',                                                                  'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null],
+            // Subjects" / "All HPC Subjects") — left null. Flagged practicum => true below; hours are printed in the PDF.
+            ['code' => 'PRACTICUM1-BSHM', 'title' => 'Phase I - Housekeeping/Food and Beverage Operations/Passenger Handling and Assisting 1 (300 hours)', 'lec' => 4, 'lab' => 0, 'units' => 4, 'major' => true, 'room' => 'Any', 'prereq' => null, 'practicum' => true, 'required_hours' => 300],
+            ['code' => 'PRACTICUM2-BSHM', 'title' => 'Phase II - Hotel Phase (600 hours)',                                                                  'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null, 'practicum' => true, 'required_hours' => 600],
         ];
     }
 
@@ -343,9 +392,10 @@ class SubjectSeeder extends Seeder
             // Prereq "4th Year Standing" (textual) — left null.
             ['code' => 'SP101', 'title' => 'Social and Professional Issues',        'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Computer Laboratory', 'prereq' => null],
 
-            // PRACTICUM/OJT. Prereq "IAS 101; CC 106" (multiple) — left null. is_practicum
-            // intentionally omitted (see header note).
-            ['code' => 'PRAC101', 'title' => 'Practicum', 'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null],
+            // PRACTICUM/OJT. Prereq "IAS 101; CC 106" (multiple) — left null. Flagged
+            // practicum => true below; the PDF doesn't print an hour count, so required_hours
+            // is left null pending confirmation.
+            ['code' => 'PRAC101', 'title' => 'Practicum', 'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null, 'practicum' => true],
 
             // Recommended electives: Computer-Aided Design, Graphic Design, Film/Video Production,
             // Digital Animation — the PDF lists these as generic "Elective 1-4" slots.
@@ -410,8 +460,9 @@ class SubjectSeeder extends Seeder
             // left null. FS1/FS2 are classroom-adjacent observation subjects, not OJT proper.
             ['code' => 'FS1', 'title' => 'Observations of Teaching-Learning in Actual School Environment', 'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => null],
             ['code' => 'FS2', 'title' => 'Participation and Teaching Assistantship',        'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => null],
-            // PRACTICUM/OJT: Teaching Internship. is_practicum intentionally omitted (see header note).
-            ['code' => 'PRACTICUM', 'title' => 'Teaching Internship', 'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null], // prereq FS1 & FS2 (multiple)
+            // PRACTICUM/OJT: Teaching Internship. Flagged practicum => true below; the PDF doesn't print an
+            // hour count, so required_hours is left null pending confirmation.
+            ['code' => 'PRACTICUM', 'title' => 'Teaching Internship', 'lec' => 6, 'lab' => 0, 'units' => 6, 'major' => true, 'room' => 'Any', 'prereq' => null, 'practicum' => true], // prereq FS1 & FS2 (multiple)
         ];
     }
 
@@ -467,9 +518,9 @@ class SubjectSeeder extends Seeder
             ['code' => 'CDI6',  'title' => 'Fire Protection and Arson Investigation',                  'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => null], // prereq CDI 1 & 2 (multiple)
             ['code' => 'FORENSIC5', 'title' => 'Forensic Ballistics',                                  'lec' => 2, 'lab' => 1, 'units' => 3, 'major' => true, 'room' => 'Science Laboratory', 'prereq' => null],
             // Used by QD and FI majors; skipped by FAI (own ballistics track) and LD.
-            ['code' => 'FORENSIC6', 'title' => 'Lie Detection Techniques',                             'lec' => 2, 'lab' => 1, 'units' => 3, 'major' => true, 'room' => 'Science Laboratory', 'prereq' => null],
+            ['code' => 'FORENSIC6', 'title' => 'Lie Detection Techniques',                             'lec' => 2, 'lab' => 1, 'units' => 3, 'major' => true, 'room' => 'Science Laboratory', 'group' => ['BSCRIMQD', 'BSCRIMFI'], 'prereq' => null],
             // Used by FI, FAI, and LD majors; skipped by QD (own questioned-documents track).
-            ['code' => 'FORENSIC4', 'title' => 'Questioned Documents Examination',                     'lec' => 2, 'lab' => 1, 'units' => 3, 'major' => true, 'room' => 'Science Laboratory', 'prereq' => null],
+            ['code' => 'FORENSIC4', 'title' => 'Questioned Documents Examination',                     'lec' => 2, 'lab' => 1, 'units' => 3, 'major' => true, 'room' => 'Science Laboratory', 'group' => ['BSCRIMFI', 'BSCRIMFB', 'BSCRIMLD'], 'prereq' => null],
 
             ['code' => 'CORR3', 'title' => 'Therapeutic Modalities',                                    'lec' => 2, 'lab' => 0, 'units' => 2, 'major' => true, 'room' => 'Lecture', 'prereq' => null], // prereq CORR 1 & 2 (multiple)
             ['code' => 'LEA4',  'title' => 'Law Enforcement Operation and Planning with Crime Mapping', 'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => null], // prereq LEA 1 & 2 (multiple)
@@ -480,11 +531,11 @@ class SubjectSeeder extends Seeder
             ['code' => 'ENHANCE1', 'title' => 'Enhancement on CRIM, CORR and CDI', 'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => null],
 
             // PRACTICUM/OJT: Criminology internship phases. Prereq for phase 1 is "4th Year Standing"
-            // (textual, left null); phase 2 correctly chains to phase 1. is_practicum intentionally
-            // omitted (see header note). Original PDF marks lab column as "FIELD" (off-campus hours),
-            // preserved here as the literal lecture/unit figures from the table.
-            ['code' => 'PRACTICUM1-BSCRIM', 'title' => 'Internship (On-the-Job Training 1)', 'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Any', 'prereq' => null],
-            ['code' => 'PRACTICUM2-BSCRIM', 'title' => 'Internship (On-the-Job Training 2)', 'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Any', 'prereq' => 'PRACTICUM1-BSCRIM'],
+            // (textual, left null); phase 2 correctly chains to phase 1. Both flagged practicum =>
+            // true below. Original PDF marks lab column as "FIELD" (off-campus hours) with no
+            // explicit hour count printed, so required_hours is left null pending confirmation.
+            ['code' => 'PRACTICUM1-BSCRIM', 'title' => 'Internship (On-the-Job Training 1)', 'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Any', 'prereq' => null, 'practicum' => true],
+            ['code' => 'PRACTICUM2-BSCRIM', 'title' => 'Internship (On-the-Job Training 2)', 'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Any', 'prereq' => 'PRACTICUM1-BSCRIM', 'practicum' => true],
 
             ['code' => 'LAW6',  'title' => 'Criminal Procedure and Court Testimony',                    'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => 'LAW1'],
             ['code' => 'CDI8',  'title' => 'Technical English 2 (Legal Forms)',                          'lec' => 3, 'lab' => 0, 'units' => 3, 'major' => true, 'room' => 'Lecture', 'prereq' => null], // prereq CDI 1 & 2 (multiple)

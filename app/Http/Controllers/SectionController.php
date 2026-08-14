@@ -10,6 +10,8 @@ use App\Models\Curriculum;
 use App\Models\Major;
 use App\Models\Section;
 use App\Services\SectionBatchGeneratorService;
+use App\Support\AccessScope;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -31,9 +33,12 @@ class SectionController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('viewAny', Section::class);
+
         $search = trim((string) $request->query('section_search', ''));
 
         $sections = Section::query()
+            ->visibleTo($request->user())
             ->with(['major:id,name,code', 'curriculum:id,code,name,major_id'])
             // Scheduling-progress indicator for the list — counts every
             // placement that has Faculty, Room, Days, Start, and End
@@ -74,10 +79,25 @@ class SectionController extends Controller
             ->withQueryString();
 
         // Major dropdown for the Add/Edit dialog — Active majors only.
+        //
+        // SECURITY: scoped to the authenticated user's authorized
+        // College(s). Never send every College's Majors to a
+        // restricted (Dean/OIC) user just to hide them client-side —
+        // that still lets the option be selected via devtools/a
+        // scripted request. A Dean/OIC only ever sees their own
+        // College's Majors here; Admin/Registrar/Assistant Dean see
+        // all of them.
         $activeMajors = Major::query()
             ->where('status', 'Active')
+            ->whereHas('department', function ($departmentQuery) use ($request) {
+                $visibleCollegeIds = AccessScope::visibleCollegeIds($request->user());
+
+                if ($visibleCollegeIds !== null) {
+                    $departmentQuery->whereIn('college_id', $visibleCollegeIds);
+                }
+            })
             ->orderBy('name')
-            ->get(['id', 'name', 'code']);
+            ->get(['id', 'name', 'code', 'department_id']);
 
         // Curriculum dropdown data — the frontend filters this list down
         // to the curriculums belonging to the selected Major.
@@ -103,6 +123,10 @@ class SectionController extends Controller
      */
     public function store(StoreSectionRequest $request): RedirectResponse
     {
+        // NEVER trust an implicit College from the frontend — derive it
+        // from the Major record server-side (spec Section 23).
+        $this->authorizeSectionCollege($request, (int) $request->validated('major_id'));
+
         // The StoreSectionRequest's "unique" rule already checks
         // section_code, but that check and this insert aren't atomic —
         // a double-submit (double-click, or a slow request the user
@@ -131,6 +155,13 @@ class SectionController extends Controller
     public function previewBatch(PreviewSectionBatchRequest $request, SectionBatchGeneratorService $generator): JsonResponse
     {
         $data = $request->validated();
+
+        // SECURITY: this endpoint is read-only (no rows are created),
+        // but it still must not let a restricted user probe/preview
+        // block names for a program outside their College — same
+        // scope check as storeBatch() below, server-side only (spec
+        // Section 23).
+        $this->authorizeSectionCollege($request, (int) $data['major_id']);
 
         // Irregular sections are a single scheduling group, not a set
         // of A/B/C blocks — see nextIrregularName()'s docblock. This
@@ -179,6 +210,16 @@ class SectionController extends Controller
     {
         $data = $request->validated();
 
+        // SECURITY: StoreSectionBatchRequest::authorize() intentionally
+        // just returns true (validation-only, per Laravel FormRequest
+        // convention used across this codebase) — the real check
+        // belongs here, mirroring store()'s createForCollege check.
+        // Without this, a restricted user could bypass the single
+        // Add Section form entirely by hitting the batch endpoint
+        // directly with a program outside their College (spec
+        // Section 23).
+        $this->authorizeSectionCollege($request, (int) $data['major_id']);
+
         try {
             DB::transaction(function () use ($data) {
                 foreach ($data['sections'] as $row) {
@@ -221,6 +262,8 @@ class SectionController extends Controller
      */
     public function update(UpdateSectionRequest $request, Section $section): RedirectResponse
     {
+        $this->authorize('update', $section);
+
         try {
             $section->update($request->validated());
         } catch (UniqueConstraintViolationException $e) {
@@ -237,9 +280,35 @@ class SectionController extends Controller
      */
     public function destroy(Section $section): RedirectResponse
     {
+        $this->authorize('delete', $section);
+
         $section->delete();
 
         return redirect()->route('scheduling.sections')->with('success', 'Section deleted successfully.');
+    }
+
+    /**
+     * Central "can this user create/preview a section for this Major's
+     * College?" check, shared by store(), previewBatch(), and
+     * storeBatch() so all three entry points into Section creation
+     * enforce the exact same rule (spec Section 23).
+     *
+     * Resolves the owning College strictly from the Major record in
+     * the database — a college_id/major_id supplied by the frontend
+     * is never trusted on its own. Uses SectionPolicy::createForCollege,
+     * which already encodes: Admin/Registrar bypass; Dean/OIC must
+     * match their own college_id; Assistant Dean is never allowed
+     * full Section CRUD (spec §8).
+     *
+     * @throws AuthorizationException
+     */
+    private function authorizeSectionCollege(Request $request, ?int $majorId): void
+    {
+        $ownerCollegeId = $majorId
+            ? Major::with('department')->find($majorId)?->department?->college_id
+            : null;
+
+        $this->authorize('createForCollege', [Section::class, $ownerCollegeId]);
     }
 
     /**

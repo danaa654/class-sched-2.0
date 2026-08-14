@@ -21,6 +21,8 @@ class SchedulingController extends Controller
      */
     public function index(): Response
     {
+        $this->authorize('view-scheduling');
+
         $activeTerm = AcademicTerm::query()
             ->where('status', 'Active')
             ->with(['schoolYear:id,name', 'semester:id,name'])
@@ -33,6 +35,7 @@ class SchedulingController extends Controller
         // "First Semester"/"Second Semester"; the Semester model spells
         // it "1st Semester"/"2nd Semester" — see that method's docblock).
         $sectionsQuery = $activeTerm ? $activeTerm->matchingSectionsQuery() : Section::query();
+        $sectionsQuery->visibleTo(auth()->user());
 
         $sectionIds = (clone $sectionsQuery)->pluck('id');
 

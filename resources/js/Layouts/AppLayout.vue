@@ -18,6 +18,13 @@ const user = computed(() => page.props.auth?.user);
 const authRoles = computed(() => page.props.auth?.roles ?? []);
 const isAdministrator = computed(() => authRoles.value.includes('Administrator'));
 
+// Coarse module abilities shared by HandleInertiaRequests — UI
+// convenience only. The backend independently re-checks every one of
+// these on every request (Policies + Gate::define), so this list is
+// never the actual security boundary, only what decides whether a
+// link is worth showing.
+const can = computed(() => page.props.auth?.can ?? {});
+
 // Currently Active Academic Term (School Year + Semester), shared on
 // every page by HandleInertiaRequests — shown in the top header so
 // it's visible no matter where in the app the user is.
@@ -45,15 +52,22 @@ const userManagementItems = [
 // Academic Setup — everything that defines the academic environment
 // (school year/semester/rules, colleges/departments/programs, the
 // curriculum map, and subject records) before scheduling can begin.
-const academicSetupItems = [
-    { label: 'Academic Calendar', route: 'academic-calendar', icon: 'pi pi-calendar' },
-    { label: 'Academic Structure', route: 'academic-structure', icon: 'pi pi-sitemap' },
-    { label: 'Curriculum', route: 'curriculums', icon: 'pi pi-book' },
+// Academic Calendar/Structure/Curriculum are Admin/Registrar-only
+// (spec Section 21); Subjects stays visible to every scheduling role
+// since Assistant Dean/Dean/OIC all need to browse it (write access
+// is enforced per-row by the backend regardless).
+const academicSetupItems = computed(() => [
+    ...(can.value.manageAcademicCalendar ? [{ label: 'Academic Calendar', route: 'academic-calendar', icon: 'pi pi-calendar' }] : []),
+    ...(can.value.manageAcademicStructure ? [{ label: 'Academic Structure', route: 'academic-structure', icon: 'pi pi-sitemap' }] : []),
+    ...(can.value.manageCurriculum ? [{ label: 'Curriculum', route: 'curriculums', icon: 'pi pi-book' }] : []),
     { label: 'Subjects', route: 'subjects', icon: 'pi pi-bookmark' },
-];
+]);
 
 // Resource Management — the people/rooms/sections the scheduling
-// engine draws on.
+// engine draws on. Visible to every Scheduling-side role; write
+// access within each page is enforced per-record by the backend
+// (Faculty/Room/Section Policies) and reflected via `can_manage`
+// flags the controllers attach to each row.
 const resourceManagementItems = [
     { label: 'Faculty', route: 'scheduling.faculty', icon: 'pi pi-user' },
     { label: 'Rooms', route: 'scheduling.rooms', icon: 'pi pi-building' },
@@ -160,7 +174,7 @@ const isActive = (routeName) => {
                 </div>
 
                 <!-- Academic Setup -->
-                <div class="pt-2">
+                <div v-if="academicSetupItems.length" class="pt-2">
                     <p class="px-3 pb-0.5 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
                         Academic Setup
                     </p>

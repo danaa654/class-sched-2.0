@@ -1,12 +1,11 @@
 <script setup>
 import { Head, Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import KpiCard from '@/Components/Dashboard/KpiCard.vue';
 import SchedulingProgressCard from '@/Components/Dashboard/SchedulingProgressCard.vue';
 import ConflictPanel from '@/Components/Dashboard/ConflictPanel.vue';
 import QuickActions from '@/Components/Dashboard/QuickActions.vue';
-import PlaceholderWidget from '@/Components/Dashboard/PlaceholderWidget.vue';
 
 const props = defineProps({
     roles: {
@@ -22,6 +21,27 @@ const props = defineProps({
 
 const page = usePage();
 const user = page.props.auth.user;
+
+// Live clock — ticks every second while the Dashboard is mounted.
+const now = ref(new Date());
+let clockInterval = null;
+
+onMounted(() => {
+    clockInterval = setInterval(() => {
+        now.value = new Date();
+    }, 1000);
+});
+
+onUnmounted(() => {
+    if (clockInterval) clearInterval(clockInterval);
+});
+
+const currentDateLabel = computed(() =>
+    now.value.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+);
+const currentTimeLabel = computed(() =>
+    now.value.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+);
 
 // Shared on every page by HandleInertiaRequests — the Academic Term
 // currently marked Active, if any. Scheduling can't run without one,
@@ -40,18 +60,6 @@ const conflicts = computed(() => props.overview.conflicts);
 const scope = computed(() => props.overview.scope);
 
 const roleLabel = computed(() => props.roles.join(', ') || 'No role assigned');
-
-// Placeholders for widgets planned but not built in this phase —
-// swapping any of these for the real component later is a drop-in
-// change, not a page redesign.
-const upcomingWidgets = [
-    { title: 'Scheduling by College', description: 'Per-college scheduling completion, for Registrar/Administrator.', icon: 'pi-sitemap' },
-    { title: 'Faculty Workload Summary', description: 'Available / Near Maximum / Overloaded faculty counts.', icon: 'pi-user-edit' },
-    { title: 'Room Utilization', description: 'Lecture room and laboratory usage rates.', icon: 'pi-percentage' },
-    { title: 'Academic Calendar', description: 'Class hours, lunch break, and school days at a glance.', icon: 'pi-calendar' },
-    { title: 'Recent Activity', description: 'The latest scheduling actions across the system.', icon: 'pi-history' },
-    { title: 'AI Insights', description: 'Scheduling recommendations and anomaly detection.', icon: 'pi-sparkles' },
-];
 </script>
 
 <template>
@@ -101,14 +109,26 @@ const upcomingWidgets = [
                         <span class="font-semibold" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'">{{ roleLabel }}</span>
                         <span v-if="scope.label"> — {{ scope.label }}</span>
                     </p>
+                    <p class="mt-2 flex items-center gap-2 text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                        <i class="pi pi-clock" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
+                        <span>{{ currentDateLabel }}</span>
+                        <span class="opacity-50">•</span>
+                        <span class="font-mono font-semibold tabular-nums" :class="isDark ? 'text-slate-200' : 'text-slate-700'">{{ currentTimeLabel }}</span>
+                    </p>
                 </div>
                 <div
                     v-if="activeAcademicTermLabel"
                     class="flex items-center gap-2 self-start rounded-full border px-4 py-2 sm:self-auto"
-                    :class="isDark ? 'border-white/10 bg-white/[0.05]' : 'border-slate-200 bg-slate-50'"
+                    :class="isDark ? 'border-emerald-400/25 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'"
                 >
-                    <i class="pi pi-calendar" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
-                    <span class="text-sm font-semibold" :class="isDark ? 'text-slate-300' : 'text-slate-600'">{{ activeAcademicTermLabel }}</span>
+                    <span class="relative flex h-2.5 w-2.5">
+                        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+                    </span>
+                    <span class="text-sm font-semibold" :class="isDark ? 'text-emerald-300' : 'text-emerald-700'">Active</span>
+                    <span class="h-3 w-px" :class="isDark ? 'bg-emerald-400/25' : 'bg-emerald-200'"></span>
+                    <i class="pi pi-calendar" :class="isDark ? 'text-emerald-400/70' : 'text-emerald-500'"></i>
+                    <span class="text-sm font-semibold" :class="isDark ? 'text-emerald-300' : 'text-emerald-700'">{{ activeAcademicTermLabel }}</span>
                 </div>
             </div>
         </div>
@@ -159,21 +179,6 @@ const upcomingWidgets = [
         <!-- 9. Quick Actions -->
         <div class="mb-6">
             <QuickActions :is-dark="isDark" />
-        </div>
-
-        <!-- Placeholders for widgets planned for later phases -->
-        <div>
-            <p class="mb-3 text-sm font-semibold tracking-wide uppercase" :class="isDark ? 'text-slate-500' : 'text-slate-400'">More widgets, coming soon</p>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <PlaceholderWidget
-                    v-for="widget in upcomingWidgets"
-                    :key="widget.title"
-                    :title="widget.title"
-                    :description="widget.description"
-                    :icon="widget.icon"
-                    :is-dark="isDark"
-                />
-            </div>
         </div>
     </AppLayout>
 </template>

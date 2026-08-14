@@ -30,15 +30,43 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        $user = $request->user();
+
         return [
             ...parent::share($request),
             'auth' => [
-                'user' => $request->user(),
+                'user' => $user,
                 // Role names for the logged-in user, shared globally so
                 // any page/layout can gate UI (e.g. the admin-only
                 // "Manage Account" tab on User Management) without each
                 // controller having to remember to pass it separately.
-                'roles' => fn () => $request->user()?->getRoleNames() ?? [],
+                'roles' => fn () => $user?->getRoleNames() ?? [],
+                // Coarse module-level abilities for SIDEBAR/BUTTON
+                // visibility only. This is a UI convenience, never the
+                // authorization boundary itself — every route/action
+                // these gate is independently re-checked server-side
+                // (Policies + Gate::define in AppServiceProvider) on
+                // every request, so spoofing these client-side changes
+                // nothing (spec Section 21/23).
+                'can' => fn () => $user ? [
+                    'manageUsers' => $user->can('manage-users'),
+                    'manageAcademicStructure' => $user->can('manage-academic-structure'),
+                    'manageAcademicCalendar' => $user->can('manage-academic-calendar'),
+                    'manageCurriculum' => $user->can('manage-curriculum'),
+                    'manageSettings' => $user->can('manage-settings'),
+                    'viewReports' => $user->can('view-reports'),
+                    'viewScheduling' => $user->can('view-scheduling'),
+                    'runAutoSchedule' => $user->can('run-auto-schedule'),
+                    'manageFaculty' => $user->can('create', \App\Models\Faculty::class),
+                    'manageRooms' => $user->can('create', \App\Models\Room::class),
+                    'manageSections' => $user->can('create', \App\Models\Section::class),
+                ] : [],
+                // The College a Dean/OIC is scoped to (null for
+                // unrestricted/Assistant Dean roles). Lets the
+                // frontend show "no College assigned" messaging (spec
+                // Section 26) without re-deriving the role logic.
+                'collegeId' => fn () => \App\Support\AccessScope::collegeId($user),
+                'hasNoAssignedCollege' => fn () => \App\Support\AccessScope::hasNoAssignedCollege($user),
             ],
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),

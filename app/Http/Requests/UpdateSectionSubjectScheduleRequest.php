@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Models\SchoolYear;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * Validates a single inline field edit made on the Subject Assignment
@@ -88,5 +89,26 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             'end_time.before_or_equal' => 'End Time must be within this School Year\'s Scheduling Window (ends at ' . self::windowEnd() . ').',
             'capacity.min' => 'Capacity must be at least 1.',
         ];
+    }
+
+    /**
+     * A Practicum/OJT row is explicitly non-room-based (see
+     * Subject::isPracticum()) — never allow a Room to be attached to
+     * it via the manual spreadsheet editor, mirroring the same rule
+     * the Auto Schedule engine follows.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $sectionSubject = $this->route('subject');
+            $subject = $sectionSubject?->subject;
+
+            if ($subject?->isPracticum() && $this->filled('room_id')) {
+                $validator->errors()->add(
+                    'room_id',
+                    'This subject is Practicum / OJT and is conducted off-campus — it cannot be assigned a classroom or laboratory room.'
+                );
+            }
+        });
     }
 }

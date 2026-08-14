@@ -31,6 +31,8 @@ class RoomController extends Controller
      */
     public function index(Request $request): Response
     {
+        $this->authorize('viewAny', Room::class);
+
         $search = trim((string) $request->query('room_search', ''));
         $quickFilter = (string) $request->query('quick_filter', 'all');
         $utilizationMin = $request->query('utilization_min');
@@ -157,6 +159,8 @@ class RoomController extends Controller
      */
     public function store(StoreRoomRequest $request): RedirectResponse
     {
+        $this->authorize('create', Room::class);
+
         Room::create($request->validated());
 
         return redirect()->route('scheduling.rooms')->with('success', 'Room added successfully.');
@@ -164,9 +168,16 @@ class RoomController extends Controller
 
     /**
      * Update an existing room in the Room Master.
+     *
+     * Room administration (capacity, type, College/Department
+     * restriction) remains an Admin/Registrar responsibility (spec
+     * Section 7, 16) — Assistant Dean and Dean/OIC may view and use
+     * rooms for scheduling, but never edit the Room Master record.
      */
     public function update(UpdateRoomRequest $request, Room $room): RedirectResponse
     {
+        $this->authorize('update', $room);
+
         $room->update($request->validated());
 
         return redirect()->route('scheduling.rooms')->with('success', 'Room updated successfully.');
@@ -177,6 +188,8 @@ class RoomController extends Controller
      */
     public function destroy(Room $room): RedirectResponse
     {
+        $this->authorize('delete', $room);
+
         $room->delete();
 
         return redirect()->route('scheduling.rooms')->with('success', 'Room deleted successfully.');
