@@ -51,12 +51,21 @@ class SectionController extends Controller
             // finalized?".
             ->withCount([
                 'sectionSubjects as total_subjects_count',
+                // Practicum/OJT rows never have Faculty/Room/Days/Time
+                // to fill in (see Subject::isPracticum()) — a row for
+                // one of those subjects counts as "assigned" simply by
+                // existing, same as SectionSubjectController's status
+                // logic treats it as immediately 'Scheduled'.
                 'sectionSubjects as assigned_subjects_count' => function ($query) {
-                    $query->whereNotNull('faculty_id')
-                        ->whereNotNull('room_id')
-                        ->whereNotNull('days')
-                        ->whereNotNull('start_time')
-                        ->whereNotNull('end_time');
+                    $query->where(function ($inner) {
+                        $inner->whereNotNull('faculty_id')
+                            ->whereNotNull('room_id')
+                            ->whereNotNull('days')
+                            ->whereNotNull('start_time')
+                            ->whereNotNull('end_time');
+                    })->orWhereHas('subject', function ($subjectQuery) {
+                        $subjectQuery->where('subject_type', 'practicum');
+                    });
                 },
             ])
             ->when($search !== '', function ($query) use ($search) {

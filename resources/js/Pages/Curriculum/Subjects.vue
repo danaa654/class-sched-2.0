@@ -270,9 +270,11 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 <th class="px-4 py-2 font-medium">Code</th>
                                                 <th class="px-4 py-2 font-medium">Title</th>
                                                 <th class="px-4 py-2 font-medium">Category</th>
+                                                <th class="px-4 py-2 font-medium">Subject Type</th>
                                                 <th class="px-4 py-2 font-medium text-center">Units</th>
                                                 <th class="px-4 py-2 font-medium text-center">Lec Hrs</th>
                                                 <th class="px-4 py-2 font-medium text-center">Lab Hrs</th>
+                                                <th class="px-4 py-2 font-medium text-center">Required Hours</th>
                                                 <th class="px-4 py-2 font-medium">Prerequisite</th>
                                                 <th class="px-4 py-2 font-medium text-right">Actions</th>
                                             </tr>
@@ -289,9 +291,26 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                         :severity="categorySeverity(row.subject?.category)"
                                                     />
                                                 </td>
+                                                <td class="px-4 py-2">
+                                                    <span
+                                                        v-if="row.subject?.subject_type === 'practicum'"
+                                                        class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
+                                                    >
+                                                        <i class="pi pi-map-marker text-[10px]"></i>
+                                                        Practicum / OJT
+                                                    </span>
+                                                    <span v-else class="text-slate-500 text-sm">Regular</span>
+                                                </td>
                                                 <td class="px-4 py-2 text-center">{{ row.subject?.units }}</td>
-                                                <td class="px-4 py-2 text-center">{{ row.subject?.lecture_hours }}</td>
-                                                <td class="px-4 py-2 text-center">{{ row.subject?.laboratory_hours }}</td>
+                                                <td class="px-4 py-2 text-center">
+                                                    {{ row.subject?.subject_type === 'practicum' ? '—' : row.subject?.lecture_hours }}
+                                                </td>
+                                                <td class="px-4 py-2 text-center">
+                                                    {{ row.subject?.subject_type === 'practicum' ? '—' : row.subject?.laboratory_hours }}
+                                                </td>
+                                                <td class="px-4 py-2 text-center">
+                                                    {{ row.subject?.subject_type === 'practicum' ? (row.subject?.required_hours ?? '—') : '—' }}
+                                                </td>
                                                 <td class="px-4 py-2">
                                                     <span v-if="row.prerequisite" class="text-slate-700">
                                                         {{ row.prerequisite.subject_code }}

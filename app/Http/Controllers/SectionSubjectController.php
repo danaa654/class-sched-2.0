@@ -430,17 +430,24 @@ class SectionSubjectController extends Controller implements HasMiddleware
             }
         }
 
+        // Practicum/OJT subjects have no Room, Days, or Time — the row
+        // is complete the moment it exists (Faculty here is a
+        // Coordinator/Adviser, and is optional per resolvePracticum()'s
+        // docblock), so it's never held at Draft waiting on fields
+        // that will never be filled.
         $status = 'Draft';
-        if ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
+        if ($subject->subject->isPracticum()) {
+            $status = 'Scheduled';
+        } elseif ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
             $status = 'Scheduled';
         }
 
         $subject->update([
             'faculty_id' => $facultyId,
-            'room_id' => $roomId,
-            'days' => $days ?: null,
-            'start_time' => $startTime,
-            'end_time' => $endTime,
+            'room_id' => $subject->subject->isPracticum() ? null : $roomId,
+            'days' => $subject->subject->isPracticum() ? null : ($days ?: null),
+            'start_time' => $subject->subject->isPracticum() ? null : $startTime,
+            'end_time' => $subject->subject->isPracticum() ? null : $endTime,
             'capacity' => $capacity,
             'status' => $status,
             // Persist the Registrar's confirmation so an acknowledged
@@ -1180,17 +1187,21 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     $isWorkloadOverride = true;
                 }
 
+                // Same Practicum/OJT exemption as updateSchedule() above
+                // — no Room/Days/Time is ever required for these rows.
                 $status = 'Draft';
-                if ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
+                if ($subject->subject->isPracticum()) {
+                    $status = 'Scheduled';
+                } elseif ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
                     $status = 'Scheduled';
                 }
 
                 $subject->update([
                     'faculty_id' => $facultyId,
-                    'room_id' => $roomId,
-                    'days' => $days ?: null,
-                    'start_time' => $startTime,
-                    'end_time' => $endTime,
+                    'room_id' => $subject->subject->isPracticum() ? null : $roomId,
+                    'days' => $subject->subject->isPracticum() ? null : ($days ?: null),
+                    'start_time' => $subject->subject->isPracticum() ? null : $startTime,
+                    'end_time' => $subject->subject->isPracticum() ? null : $endTime,
                     'capacity' => $capacity,
                     'status' => $status,
                     // Same persisted-confirmation pattern as

@@ -552,6 +552,11 @@ const displayStatus = (row) => {
 // just incomplete — so it gets its own subtler "needs scheduling"
 // treatment instead of reading like a rendering bug or an error.
 const rowIsUnscheduled = (row) => {
+    // Practicum/OJT subjects have no Room/Days/Time to fill in and
+    // Faculty is an optional Coordinator/Adviser — the row is complete
+    // as soon as it exists, so it's never flagged "Not yet scheduled".
+    if (row.subject?.subject_type === 'practicum') return false;
+
     return (
         !row.faculty_id &&
         !row.room_id &&

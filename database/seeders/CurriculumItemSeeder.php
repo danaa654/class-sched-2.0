@@ -38,13 +38,12 @@ use Illuminate\Database\Seeder;
  * OJT ITEMS: `curriculum_items` has no item_type or ojt_hours column —
  * Practicum/OJT entries are placed the same way as any other subject,
  * via subject_id pointing at the Practicum entry in the Subjects master
- * list. Where the prospectus PDF explicitly prints an hour figure
- * (BSTM/BSHM's "(300 hours)" / "(600 hours)" phase labels), it's recorded
- * in `remarks` instead. Where the PDF only prints a unit count with no
- * hour figure — BSIT's PRAC101, BSED's PRACTICUM, and all four BSCRIM
- * majors' PRACTICUM1-BSCRIM / PRACTICUM2-BSCRIM — `remarks` is left null
- * rather than guessed. Update these once the department confirms the
- * official required hours.
+ * list. The required-hours figure itself lives on Subject::required_hours
+ * (seeded in SubjectSeeder — 300/600 for BSTM/BSHM phases, null pending
+ * confirmation for BSIT's PRAC101, BSED's PRACTICUM, and all four BSCRIM
+ * majors' PRACTICUM1-BSCRIM / PRACTICUM2-BSCRIM) and is surfaced directly
+ * from there in the Curriculum Subjects UI — it is not duplicated into
+ * `remarks` here.
  *
  * Run with: php artisan db:seed --class=CurriculumItemSeeder
  * Safe to re-run: uses CurriculumItem::updateOrCreate() keyed on
@@ -89,8 +88,14 @@ class CurriculumItemSeeder extends Seeder
 
     /**
      * Attaches a single Practicum/OJT curriculum item to $curriculum.
-     * $ojtHours, when known, is recorded in `remarks` since there's no
-     * dedicated ojt_hours column.
+     *
+     * $ojtHours is accepted for readability at each call site (so it's
+     * obvious from the seeder call which phase requires how many hours)
+     * but is intentionally NOT written into `remarks` anymore — the
+     * authoritative value lives on Subject::required_hours (set by
+     * SubjectSeeder) and is now surfaced directly in the Curriculum
+     * Subjects UI via a "Required Hours" column. Duplicating it into
+     * `remarks` as free text risked the two going out of sync.
      */
     private function attachOjt(
         Curriculum $curriculum,
@@ -109,7 +114,6 @@ class CurriculumItemSeeder extends Seeder
             [
                 'year_level' => $yearLevel,
                 'semester' => $semester,
-                'remarks' => $ojtHours !== null ? "{$ojtHours} hours" : null,
             ]
         );
     }
