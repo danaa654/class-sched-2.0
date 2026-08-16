@@ -46,13 +46,19 @@ return new class extends Migration
             // Soft-delete-aware uniqueness: this generated column mirrors
             // section_code while the row is active, and collapses to NULL
             // once deleted_at is set. MySQL's unique index then only ever
-            // sees one live "section_code" per code — any number of
-            // deleted rows can share it, because they all read as NULL,
-            // and NULLs aren't considered duplicates in a unique index.
+            // sees one live "section_code" per code, WITHIN THE SAME
+            // academic_year + semester — any number of deleted rows can
+            // share it (they all read as NULL, and NULLs aren't
+            // considered duplicates in a unique index), and the same
+            // code is free to be reused in a different academic_year or
+            // semester (e.g. "BSIT-4A" existing in 2026-2027 · First
+            // Semester does not block "BSIT-4A" in 2026-2027 · Second
+            // Semester — that's a separate, valid Section).
             $table->string('section_code_active')
                 ->virtualAs('IF(deleted_at IS NULL, section_code, NULL)')
-                ->nullable()
-                ->unique();
+                ->nullable();
+
+            $table->unique(['section_code_active', 'academic_year', 'semester']);
         });
     }
 

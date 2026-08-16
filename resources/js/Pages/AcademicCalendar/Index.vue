@@ -109,6 +109,7 @@ watch(
 const statusOptions = [
     { label: 'Active', value: 'Active' },
     { label: 'Inactive', value: 'Inactive' },
+    { label: 'Archived', value: 'Archived' },
 ];
 
 // Semester dropdown — a fixed list, not a lookup table. There's no
@@ -301,6 +302,30 @@ const onRestoreAcademicTerm = (academicTerm) => {
         preserveState: true,
     });
 };
+
+// Archive is only offered for Inactive terms — an Active term must be
+// switched to Inactive first (or superseded by making another term
+// Active, which auto-flips it per AcademicTerm::booted()), and an
+// already-Archived term has nothing left to do. The controller
+// re-checks this same rule server-side, so this is a UI guard only.
+const onArchiveAcademicTerm = (academicTerm) => {
+    Swal.fire({
+        title: 'Archive this academic term?',
+        text: `${academicTerm.school_year?.name ?? ''} - ${academicTerm.semester?.name ?? ''}`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#D97706',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, archive it',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.put(route('academic-terms.archive', academicTerm.id), {}, {
+                preserveScroll: true,
+                preserveState: true,
+            });
+        }
+    });
+};
 </script>
 
 <template>
@@ -401,7 +426,7 @@ const onRestoreAcademicTerm = (academicTerm) => {
                                 <Tag
                                     v-else
                                     :value="data.status"
-                                    :severity="data.status === 'Active' ? 'success' : 'secondary'"
+                                    :severity="data.status === 'Active' ? 'success' : (data.status === 'Archived' ? 'warn' : 'secondary')"
                                 />
                             </template>
                         </Column>
@@ -432,6 +457,16 @@ const onRestoreAcademicTerm = (academicTerm) => {
                                             size="small"
                                             aria-label="Edit"
                                             @click="openEditAcademicTerm(data)"
+                                        />
+                                        <Button
+                                            v-if="data.status === 'Inactive'"
+                                            icon="pi pi-inbox"
+                                            text
+                                            rounded
+                                            severity="warn"
+                                            size="small"
+                                            aria-label="Archive"
+                                            @click="onArchiveAcademicTerm(data)"
                                         />
                                         <Button
                                             icon="pi pi-trash"

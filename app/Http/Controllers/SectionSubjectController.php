@@ -289,6 +289,17 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'start_time' => $activeSchoolYear?->classStartTime() ?? SchoolYear::DEFAULT_CLASS_START_TIME,
             'end_time' => $activeSchoolYear?->classEndTime() ?? SchoolYear::DEFAULT_CLASS_END_TIME,
             'available_days' => $activeSchoolYear?->allowedDays() ?? SchoolYear::DEFAULT_CLASS_DAYS,
+            // Room Grid's hour-row granularity — same 30-minute slicing
+            // the Auto Schedule AI itself uses (SchoolYear::candidateStartTimes()),
+            // so a manual drag-and-drop placement can never land on a
+            // slot boundary the engine wouldn't also offer.
+            'interval_minutes' => $activeSchoolYear?->intervalMinutes() ?? SchoolYear::DEFAULT_TIME_INTERVAL_MINUTES,
+            // Fixed Lunch Break window (never editable — see SchoolYear's
+            // class docblock) so the Room Grid can visually block it out
+            // the same way the Auto Schedule AI already refuses to place
+            // anything across it (SchoolYear::overlapsLunchBreak()).
+            'lunch_start' => SchoolYear::LUNCH_BREAK_START,
+            'lunch_end' => SchoolYear::LUNCH_BREAK_END,
         ];
 
         return Inertia::render('Scheduling/SectionSubjects/Show', [
@@ -659,6 +670,166 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'section_subject_id' => $subject->id,
             'room' => $scored,
             'overall_score' => $meta['overall_score'] ?? $scored['score'],
+        ]);
+    }
+
+    /**
+     * Room Scheduler — Room Selector (spec Sections 2 & 11).
+     *
+     * Returns a room list for the Room Grid's room picker:
+     *   - Recommended: Active rooms belonging to the current Section's
+     *     own College/Department (via Major -> Department -> College),
+     *     same scoping the Subjects List's per-subject recommender
+     *     narrows from — but here it's Section-level, not tied to one
+     *     specific Subject's requirements, since the Registrar is
+     *     choosing a room to browse before picking what goes in it.
+     *   - Search results: when `?search=` is given, ANY Active room
+     *     institution-wide, department included as a plain label —
+     *     deliberately NOT filtered to the Section's own
+     *     College/Department. Per spec Section 2, a room belonging to
+     *     another department must remain selectable as a manual
+     *     override, so this endpoint never hides it; only the
+     *     room_is_manual_override flag set by roomSchedule()'s writer
+     *     (a later slice) records that it was an intentional override.
+     *
+     * Read-only — no RBAC narrowing beyond the controller-wide
+     * manageScheduling check on {section} itself (see middleware()):
+     * once a Dean/OIC is authorized for a Section at all, browsing
+     * (not assigning) any room's basic info is not restricted, matching
+     * spec Section 2's "do not prevent this solely because the room
+     * belongs to another department."
+     */
+    public function roomOptionsForGrid(Request $request, Section $section): JsonResponse
+    {
+        $section->loadMissing('major.department');
+
+        $departmentId = $section->major?->department_id;
+
+        $recommended = Room::query()
+            ->where('status', 'Active')
+            ->when($departmentId, fn ($query) => $query->where('department_id', $departmentId))
+            ->orderBy('room_name')
+            ->get(['id', 'room_code', 'room_name', 'room_type', 'room_category', 'capacity', 'department_id', 'college_id']);
+
+        $search = trim((string) $request->query('search', ''));
+        $searchResults = [];
+
+        if ($search !== '') {
+            $searchResults = Room::query()
+                ->where('status', 'Active')
+                ->where(function ($query) use ($search) {
+                    $query->where('room_code', 'like', "%{$search}%")
+                        ->orWhere('room_name', 'like', "%{$search}%");
+                })
+                ->with(['department:id,name', 'college:id,name'])
+                ->orderBy('room_name')
+                ->limit(25)
+                ->get(['id', 'room_code', 'room_name', 'room_type', 'room_category', 'capacity', 'department_id', 'college_id'])
+                ->map(fn (Room $room) => [
+                    'id' => $room->id,
+                    'room_code' => $room->room_code,
+                    'room_name' => $room->room_name,
+                    'room_type' => $room->room_type,
+                    'room_category' => $room->room_category,
+                    'capacity' => $room->capacity,
+                    'department_name' => $room->department?->name,
+                    'college_name' => $room->college?->name,
+                    // Whether this search result is outside the current
+                    // Section's own Department — the frontend uses this
+                    // to label it "outside recommended rooms" before
+                    // the Registrar even selects it, per spec Section 2.
+                    'is_outside_department' => $departmentId !== null && $room->department_id !== $departmentId,
+                ])
+                ->values()
+                ->all();
+        }
+
+        return response()->json([
+            'recommended' => $recommended,
+            'search_results' => $searchResults,
+        ]);
+    }
+
+    /**
+     * Room Scheduler — Weekly Room Timetable (spec Sections 3 & 13).
+     *
+     * The Room Grid's core read: every SectionSubject currently
+     * assigned to this Room, ACROSS EVERY SECTION (not just the
+     * current one — a Room's weekly timetable is institution-wide
+     * occupancy, not per-Section). OTHER Sections are scoped to the
+     * Active Academic Term (activeSemesterSectionIds(), same
+     * convention ScheduleConflictService::findRoomConflict() uses)
+     * so a stale prior-term booking from someone else's Section never
+     * shows as if it were live — but the CURRENT Section (the one
+     * this Room Grid is being viewed for) always shows its own
+     * bookings regardless of which term happens to be marked Active,
+     * so the Grid never silently disagrees with the Subjects tab for
+     * a Section whose own Academic Year isn't the current one.
+     *
+     * Deliberately reads straight from SectionSubject — no separate
+     * "room schedule" table exists or should exist (spec Section 13,
+     * Single Source of Truth). Editing a block here, once the write
+     * path is built, will update the very same row the Subjects List
+     * reads.
+     *
+     * Practicum/OJT subjects are excluded implicitly: they're never
+     * assigned a room_id in the first place (spec Section 12), so a
+     * plain `where('room_id', $room->id)` already leaves them out
+     * without any extra filtering.
+     */
+    public function roomSchedule(Section $section, Room $room): JsonResponse
+    {
+        $assignments = SectionSubject::query()
+            ->where('room_id', $room->id)
+            // The CURRENT Section's own bookings must always appear here,
+            // even if its Academic Year/Semester isn't the one currently
+            // marked Active — the Room Grid is being viewed FOR this
+            // Section, so hiding its own schedule (e.g. because an
+            // Administrator later activated a different term) would make
+            // the Grid disagree with what the Subjects tab shows for the
+            // same row. Other Sections' bookings stay scoped to the
+            // Active Academic Term, so a stale prior-term booking from a
+            // DIFFERENT Section still never appears as if it were live.
+            ->where(function ($query) use ($section) {
+                $query->whereIn('section_id', $this->conflictService->activeSemesterSectionIds())
+                    ->orWhere('section_id', $section->id);
+            })
+            ->whereNotNull('days')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->with(['subject:id,subject_code,subject_title', 'faculty:id,first_name,last_name', 'section:id,section_code,section_name'])
+            ->get()
+            ->map(fn (SectionSubject $assignment) => [
+                'section_subject_id' => $assignment->id,
+                'subject_code' => $assignment->subject?->subject_code,
+                'subject_title' => $assignment->subject?->subject_title,
+                'section_id' => $assignment->section_id,
+                'section_code' => $assignment->section?->section_code,
+                'is_current_section' => $assignment->section_id === $section->id,
+                'faculty_id' => $assignment->faculty_id,
+                'faculty_name' => $assignment->faculty
+                    ? trim("{$assignment->faculty->first_name} {$assignment->faculty->last_name}")
+                    : null,
+                'days' => $assignment->days,
+                'start_time' => $assignment->start_time,
+                'end_time' => $assignment->end_time,
+                'status' => $assignment->status,
+                'is_auto_generated' => $assignment->is_auto_generated,
+                'is_manually_modified' => $assignment->is_manually_modified,
+                'room_is_manual_override' => $assignment->room_is_manual_override,
+            ])
+            ->values();
+
+        return response()->json([
+            'room' => [
+                'id' => $room->id,
+                'room_code' => $room->room_code,
+                'room_name' => $room->room_name,
+                'room_type' => $room->room_type,
+                'room_category' => $room->room_category,
+                'capacity' => $room->capacity,
+            ],
+            'assignments' => $assignments,
         ]);
     }
 

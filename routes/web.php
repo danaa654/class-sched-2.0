@@ -69,6 +69,7 @@ Route::middleware('auth')->group(function () {
     Route::put('/academic-terms/{academicTerm}', [AcademicTermController::class, 'update'])->name('academic-terms.update');
     Route::delete('/academic-terms/{academicTerm}', [AcademicTermController::class, 'destroy'])->name('academic-terms.destroy');
     Route::put('/academic-terms/{academicTerm}/restore', [AcademicTermController::class, 'restore'])->name('academic-terms.restore');
+    Route::put('/academic-terms/{academicTerm}/archive', [AcademicTermController::class, 'archive'])->name('academic-terms.archive');
     Route::get('/academic-structure', [AcademicStructureController::class, 'index'])->name('academic-structure');
     Route::post('/colleges', [CollegeController::class, 'store'])->name('colleges.store');
     Route::put('/colleges/{college}', [CollegeController::class, 'update'])->name('colleges.update');
@@ -141,6 +142,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/section-subjects/{section}/{subject}/faculty-override', [SectionSubjectController::class, 'overrideFaculty'])->name('scheduling.section-subjects.faculty-override');
     Route::get('/scheduling/section-subjects/{section}/{subject}/room-options', [SectionSubjectController::class, 'roomOptions'])->name('scheduling.section-subjects.room-options');
     Route::post('/scheduling/section-subjects/{section}/{subject}/room-override', [SectionSubjectController::class, 'overrideRoom'])->name('scheduling.section-subjects.room-override');
+
+    // Room Scheduler (Room-Centric Time Grid) — read-only for now; the
+    // drag/drop write path is a later slice of this feature. Nested
+    // under {section} so the controller-wide manageScheduling
+    // middleware (see SectionSubjectController::middleware()) applies
+    // the same as every other action here, even though the returned
+    // room schedule itself spans every Section using that Room.
+    Route::get('/scheduling/section-subjects/{section}/rooms', [SectionSubjectController::class, 'roomOptionsForGrid'])->name('scheduling.section-subjects.rooms');
+    Route::get('/scheduling/section-subjects/{section}/rooms/{room}/schedule', [SectionSubjectController::class, 'roomSchedule'])->name('scheduling.section-subjects.room-schedule');
     Route::post('/scheduling/section-subjects/{section}/{subject}/time-override', [SectionSubjectController::class, 'overrideTime'])->name('scheduling.section-subjects.time-override');
     // Smart Day & Time Recommendation modal — ranked, conflict-free
     // alternatives when a manually-picked Day/Time fails validation.

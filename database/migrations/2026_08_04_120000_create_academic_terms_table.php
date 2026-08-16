@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('school_year_id')->constrained('school_years')->cascadeOnDelete();
             $table->foreignId('semester_id')->constrained('semesters')->cascadeOnDelete();
-            $table->enum('status', ['Active', 'Inactive'])->default('Inactive');
+            $table->enum('status', ['Active', 'Inactive', 'Archived'])->default('Inactive');
             $table->string('remarks')->nullable();
             $table->timestamps();
             $table->softDeletes();

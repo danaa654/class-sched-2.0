@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\AcademicTerm;
 use App\Models\Curriculum;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -80,6 +81,20 @@ class PreviewSectionBatchRequest extends FormRequest
 
             if ($curriculum && (int) $curriculum->major_id !== (int) $this->input('major_id')) {
                 $validator->errors()->add('curriculum_id', 'The selected prospectus does not belong to the selected program.');
+            }
+        });
+
+        // Same safety net as StoreSectionBatchRequest — this preview
+        // is only ever used before creating brand-new Sections, so it
+        // should never show a valid-looking preview for a term that
+        // will fail this exact check at final submission.
+        $validator->after(function (Validator $validator) {
+            if (! $this->filled('academic_year') || ! $this->filled('semester')) {
+                return;
+            }
+
+            if (! AcademicTerm::existsForSection($this->input('academic_year'), $this->input('semester'), allowArchived: false)) {
+                $validator->errors()->add('academic_year', 'No active or inactive Academic Term matches this Academic Year and Semester. Set up the Academic Term first under Academic Calendar.');
             }
         });
     }

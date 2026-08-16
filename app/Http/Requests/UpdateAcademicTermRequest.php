@@ -30,7 +30,7 @@ class UpdateAcademicTermRequest extends FormRequest
             'start_year' => ['required', 'integer'],
             'end_year' => ['required', 'integer', 'gt:start_year'],
             'semester' => ['required', 'string', Rule::in(Semester::NAMES)],
-            'status' => ['required', Rule::in(['Active', 'Inactive'])],
+            'status' => ['required', Rule::in(['Active', 'Inactive', 'Archived'])],
             'remarks' => ['nullable', 'string', 'max:255'],
 
             // Scheduling Preferences — read by the Auto Schedule AI

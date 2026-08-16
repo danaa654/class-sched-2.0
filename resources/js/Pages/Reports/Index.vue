@@ -16,6 +16,7 @@ const isDark = computed(() => theme.value === 'dark');
 const props = defineProps({
     filterOptions: { type: Object, required: true },
     filters: { type: Object, required: true },
+    termOptions: { type: Array, default: () => [] },
     reportType: { type: String, default: '' },
     summary: { type: Object, required: true },
     report: { type: Object, default: null },
@@ -35,6 +36,26 @@ const form = ref({
     room_id: props.filters.room_id || '',
 });
 const reportType = ref(props.reportType || '');
+
+// Academic Term quick filter — same "{academic_year}|{semester}" value
+// shape and "All Terms" / Archived-tagged options as the Sections page
+// (see SectionController@termFilterOptions). Choosing a term just fills
+// in the existing Academic Year + Semester selects below it; it doesn't
+// bypass them, so either can still be fine-tuned independently before
+// clicking Generate Report.
+const selectedTerm = ref(props.filters.term || 'all');
+
+function onTermChange() {
+    if (selectedTerm.value === 'all') {
+        form.value.academic_year = '';
+        form.value.semester = '';
+        return;
+    }
+
+    const [termYear, termSemester] = selectedTerm.value.split('|');
+    form.value.academic_year = termYear ?? '';
+    form.value.semester = termSemester ?? '';
+}
 
 const academicYearOptions = computed(() => props.filterOptions.academicYears.map((v) => ({ label: v, value: v })));
 const semesterOptions = computed(() => props.filterOptions.semesters.map((v) => ({ label: v, value: v })));
@@ -68,13 +89,18 @@ const needsSection = computed(() => ['schedule_by_section', 'section_subjects'].
 const forcesIrregular = computed(() => ['irregular_sections', 'irregular_merge_report'].includes(reportType.value));
 
 function generate() {
-    router.get(route('reports'), { ...form.value, report_type: reportType.value }, { preserveState: true, preserveScroll: true });
+    router.get(route('reports'), { ...form.value, term: selectedTerm.value, report_type: reportType.value }, { preserveState: true, preserveScroll: true });
 }
 
 function resetFilters() {
     form.value = { academic_year: '', semester: '', college_id: '', major_id: '', year_level: '', section_id: '', section_type: '', faculty_id: '', room_id: '' };
+    selectedTerm.value = 'all';
     reportType.value = '';
-    router.get(route('reports'), {}, { preserveState: false });
+    // Explicitly send term=all (not an empty query) so this always
+    // clears back to "All Years" — an empty query object would look
+    // identical to a first-ever visit and re-default to the Active
+    // Academic Term instead of actually resetting.
+    router.get(route('reports'), { term: 'all', academic_year: '', semester: '' }, { preserveState: false });
 }
 
 function printReport() {
@@ -138,6 +164,17 @@ const activeFiltersLabel = computed(() => {
         <Card class="mt-6 no-print">
             <template #content>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="text-xs font-semibold text-slate-500">Term</label>
+                        <Select v-model="selectedTerm" :options="termOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" @change="onTermChange">
+                            <template #option="{ option }">
+                                <span class="flex items-center gap-2">
+                                    {{ option.label }}
+                                    <Tag v-if="option.status === 'Archived'" value="Archived" severity="warn" class="!text-[10px] !py-0.5" />
+                                </span>
+                            </template>
+                        </Select>
+                    </div>
                     <div>
                         <label class="text-xs font-semibold text-slate-500">Academic Year</label>
                         <Select v-model="form.academic_year" :options="academicYearOptions" optionLabel="label" optionValue="value" placeholder="All Years" showClear class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />

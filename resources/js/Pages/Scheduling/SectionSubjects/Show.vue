@@ -29,6 +29,7 @@ import FacultyRecommendationSelector from '@/Components/Scheduling/FacultyRecomm
 import RoomRecommendationSelector from '@/Components/Scheduling/RoomRecommendationSelector.vue';
 import TimeRecommendationSelector from '@/Components/Scheduling/TimeRecommendationSelector.vue';
 import MergeRecommendationModal from '@/Components/Scheduling/MergeRecommendationModal.vue';
+import RoomGrid from '@/Components/Scheduling/RoomGrid.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -47,6 +48,10 @@ const props = defineProps({
     // Scheduling table options — Faculty/Room dropdowns.
     activeFaculty: { type: Array, default: () => [] },
     activeRooms: { type: Array, default: () => [] },
+    schedulingWindow: {
+        type: Object,
+        default: () => ({ start_time: '08:00', end_time: '18:00', available_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] }),
+    },
 });
 
 const toast = useToast();
@@ -140,8 +145,9 @@ const dayOptions = [
 ];
 
 // Quick-pick common combinations shown above the multi-select list.
+// Meetings/Week is capped at 2x (see MultiSelect's selectionLimit),
+// so only single- and double-day presets are offered here.
 const dayPresets = [
-    { label: 'MWF', value: ['Mon', 'Wed', 'Fri'] },
     { label: 'MW', value: ['Mon', 'Wed'] },
     { label: 'TTH', value: ['Tue', 'Thu'] },
     { label: 'WF', value: ['Wed', 'Fri'] },
@@ -294,6 +300,34 @@ const computeAutoEndTime = (row) => {
     const endMinutes = String(endTotalMinutes % 60).padStart(2, '0');
 
     return `${endHours}:${endMinutes}`;
+};
+
+// The curriculum's weekly contact hours, split evenly across however
+// many Days are selected, is the MAXIMUM a single meeting may run —
+// the Registrar can always trim a meeting shorter (e.g. only 4 of the
+// curriculum's 5 hrs fit because of Room/Faculty availability), but
+// never stretch it past what the curriculum actually calls for.
+const maxSessionMinutes = (row) => {
+    const totalHours = weeklyContactHours(row);
+    const dayCount = row.days?.length ?? 0;
+    if (!totalHours || !dayCount) return null;
+    return Math.round((totalHours / dayCount) * 60);
+};
+
+const clampEndTimeToMax = (row) => {
+    const cap = maxSessionMinutes(row);
+    if (!cap || !row.start_time || !row.end_time) return;
+
+    const [startHours, startMinutes] = row.start_time.split(':').map(Number);
+    const [endHours, endMinutes] = row.end_time.split(':').map(Number);
+    const actualMinutes = (endHours * 60 + endMinutes) - (startHours * 60 + startMinutes);
+
+    if (actualMinutes > cap) {
+        const cappedTotal = startHours * 60 + startMinutes + cap;
+        const h = String(Math.floor(cappedTotal / 60) % 24).padStart(2, '0');
+        const m = String(cappedTotal % 60).padStart(2, '0');
+        row.end_time = `${h}:${m}`;
+    }
 };
 
 const autoFillEndTime = (row) => {
@@ -748,6 +782,23 @@ const csrfToken = () => {
     return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
 };
 
+// Section Subjects page top-level tab — "Subjects" (the existing
+// scheduling spreadsheet) vs "Room Grid" (spec: room-centric
+// drag-and-drop view of the exact same SectionSubject rows).
+const pageTab = ref('subjects');
+
+// Room Grid writes go straight through updateSchedule() (immediate
+// save, not staged like the spreadsheet's dirty-row batch), so the
+// fresh row it returns is merged into `rows` the same way Faculty/
+// Room override selectors already do above.
+const onRoomGridRowUpdated = (fresh) => {
+    if (!fresh) return;
+    const row = rows.value.find((r) => r.id === fresh.id);
+    if (row) {
+        Object.assign(row, { ...fresh, days: toDaysArray(fresh.days) });
+    }
+};
+
 const dirtyRowIds = ref(new Set());
 const hasUnsavedChanges = computed(() => dirtyRowIds.value.size > 0);
 
@@ -774,17 +825,20 @@ const onDaysChange = (row, value) => {
     row.days = value;
     markDirty(row, 'days');
     autoFillEndTime(row);
+    clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
 };
 const onStartTimeChange = (row, date) => {
     row.start_time = dateToTimeString(date);
     markDirty(row, 'start_time');
     autoFillEndTime(row);
+    clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
 };
 const onEndTimeChange = (row, date) => {
     row.end_time = dateToTimeString(date);
     markDirty(row, 'end_time');
+    clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
 };
 
@@ -1714,8 +1768,41 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                 </template>
             </Card>
 
+            <!-- Subjects / Room Grid tab switcher -->
+            <div class="mb-4 flex items-center gap-1 border-b border-slate-200">
+                <button
+                    type="button"
+                    class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors"
+                    :class="pageTab === 'subjects' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                    @click="pageTab = 'subjects'"
+                >
+                    Subjects
+                </button>
+                <button
+                    type="button"
+                    class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors"
+                    :class="pageTab === 'room-grid' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                    @click="pageTab = 'room-grid'"
+                >
+                    Room Grid
+                </button>
+            </div>
+
+            <!-- Room Grid tab -->
+            <Card v-show="pageTab === 'room-grid'" class="!rounded-2xl border border-slate-100 shadow-sm">
+                <template #content>
+                    <RoomGrid
+                        :section="section"
+                        :rows="rows"
+                        :active-faculty="activeFaculty"
+                        :scheduling-window="schedulingWindow"
+                        @row-updated="onRoomGridRowUpdated"
+                    />
+                </template>
+            </Card>
+
             <!-- Subjects / Scheduling table -->
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <Card v-show="pageTab === 'subjects'" class="!rounded-2xl border border-slate-100 shadow-sm">
                 <template #content>
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                         <template #start>
@@ -2003,6 +2090,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     optionLabel="label"
                                                     optionValue="value"
                                                     placeholder="Select days"
+                                                    :selectionLimit="2"
                                                     class="w-full"
                                                     :class="{ 'p-invalid': stateFor(data.id).errors.days || sectionConflictRowIds.has(data.id), 'unscheduled-field': rowIsUnscheduled(data) }"
                                                     :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"

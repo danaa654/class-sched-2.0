@@ -6,6 +6,7 @@ use App\Http\Requests\PreviewSectionBatchRequest;
 use App\Http\Requests\StoreSectionBatchRequest;
 use App\Http\Requests\StoreSectionRequest;
 use App\Http\Requests\UpdateSectionRequest;
+use App\Models\AcademicTerm;
 use App\Models\Curriculum;
 use App\Models\Major;
 use App\Models\Section;
@@ -37,9 +38,43 @@ class SectionController extends Controller
 
         $search = trim((string) $request->query('section_search', ''));
 
+        // Term filter — "which Academic Term's Sections am I looking
+        // at?" Value is either "all" (no filtering, the historical
+        // behavior) or "{academic_year}|{semester}" matching Section's
+        // own academic_year/semester columns directly (already in the
+        // "First Semester"/"Second Semester"/"Summer" spelling, so no
+        // AcademicTerm::sectionSemesterValue() translation is needed
+        // here — that translation only matters when starting from an
+        // AcademicTerm record, which the default below does).
+        //
+        // No explicit ?term= given: default to the Active Academic
+        // Term if one exists (day-to-day use only sees the current
+        // term's Sections), otherwise fall back to "all" (nothing to
+        // default to — better to show everything than silently show
+        // nothing).
+        $activeTerm = AcademicTerm::active();
+        $defaultTerm = 'all';
+        if ($activeTerm) {
+            $activeTerm->loadMissing('schoolYear:id,name');
+            $activeSemesterValue = $activeTerm->sectionSemesterValue();
+            if ($activeTerm->schoolYear && $activeSemesterValue) {
+                $defaultTerm = "{$activeTerm->schoolYear->name}|{$activeSemesterValue}";
+            }
+        }
+
+        $term = trim((string) $request->query('term', $defaultTerm));
+
         $sections = Section::query()
             ->visibleTo($request->user())
             ->with(['major:id,name,code', 'curriculum:id,code,name,major_id'])
+            ->when($term !== 'all', function ($query) use ($term) {
+                [$termYear, $termSemester] = array_pad(explode('|', $term, 2), 2, null);
+
+                if ($termYear && $termSemester) {
+                    $query->where('academic_year', $termYear)
+                        ->where('semester', $termSemester);
+                }
+            })
             // Scheduling-progress indicator for the list — counts every
             // placement that has Faculty, Room, Days, Start, and End
             // Time all filled in, regardless of the row's `status`
@@ -117,13 +152,13 @@ class SectionController extends Controller
 
         return Inertia::render('Scheduling/Sections/Index', [
             'sections' => $sections,
-            'filters' => ['section_search' => $search],
+            'filters' => ['section_search' => $search, 'term' => $term],
+            'termOptions' => $this->termFilterOptions(),
             'activeMajors' => $activeMajors,
             'curriculums' => $curriculums,
             'yearLevels' => StoreSectionRequest::YEAR_LEVELS,
-            'semesterOptions' => StoreSectionRequest::SEMESTERS,
             'sectionTypes' => StoreSectionRequest::SECTION_TYPES,
-            'academicYears' => $this->academicYearOptions(),
+            'academicTermOptions' => $this->academicTermSectionOptions(),
         ]);
     }
 
@@ -321,19 +356,105 @@ class SectionController extends Controller
     }
 
     /**
-     * Build a rolling list of Academic Year options (e.g. "2026-2027"),
-     * spanning a couple of years back and several years ahead of today.
+     * Build the Sections page's Academic Term filter dropdown: every
+     * real Academic Term on record (Active, Inactive, or Archived),
+     * each resolved to the "{academic_year}|{semester}" value used to
+     * filter the Sections query, plus a leading "All Terms" option.
      *
-     * @return list<string>
+     * Terms that can't be resolved to a Section-matching value (see
+     * AcademicTerm::sectionSemesterValue()) are skipped — they'd never
+     * match any Section anyway, so listing them would just be a dead
+     * filter option.
+     *
+     * @return list<array{value: string, label: string, status: string}>
      */
-    private function academicYearOptions(): array
+    private function termFilterOptions(): array
     {
-        $currentYear = (int) now()->format('Y');
-        $startYear = $currentYear - 1;
+        $options = [
+            ['value' => 'all', 'label' => 'All Terms', 'status' => null],
+        ];
 
-        return collect(range($startYear, $startYear + 6))
-            ->map(fn (int $year) => "{$year}-" . ($year + 1))
-            ->values()
-            ->all();
+        AcademicTerm::query()
+            ->with(['schoolYear:id,name', 'semester:id,name'])
+            ->orderByDesc('id')
+            ->get()
+            ->each(function (AcademicTerm $term) use (&$options) {
+                $semesterValue = $term->sectionSemesterValue();
+
+                if (! $term->schoolYear || ! $semesterValue) {
+                    return;
+                }
+
+                $options[] = [
+                    'value' => "{$term->schoolYear->name}|{$semesterValue}",
+                    'label' => "{$term->schoolYear->name} · {$term->semester->name}",
+                    'status' => $term->status,
+                ];
+            });
+
+        return $options;
+    }
+
+    /**
+     * Build the Add/Edit Section form's Academic Year + Semester
+     * options from real AcademicTerm records — replaces the old
+     * rolling-range generator, which let a Section be created for a
+     * School Year/Semester combination with no AcademicTerm at all
+     * (no Scheduling Preferences, no class hours/days configured),
+     * orphaned from the Sections page's own term filter
+     * (termFilterOptions() above, which only ever lists real
+     * AcademicTerm records).
+     *
+     * Shaped as a flat list of { academic_year, semester, status }
+     * pairs (via AcademicTerm::sectionSemesterValue(), never a raw
+     * string compare — see that method's docblock) rather than a
+     * nested structure, mirroring how this page already hands the
+     * frontend a flat `curriculums` list (each row carrying its own
+     * major_id) for the Vue side to filter client-side — see
+     * RoomController's `departments` (each carrying college_id) for
+     * the same pattern elsewhere in the app. Vue derives both the
+     * Academic Year dropdown (unique academic_year values) and the
+     * Semester dropdown (filtered to the selected Academic Year) from
+     * this one list.
+     *
+     * Archived terms are excluded — creating a brand-new Section under
+     * an Archived term doesn't make sense, since that term is done and
+     * no longer meant to receive new scheduling data. A Section that
+     * already exists under a term which has since been Archived is
+     * unaffected by this exclusion — see the frontend's
+     * currentTermOption fallback, which keeps that Section's own
+     * Academic Year/Semester selectable on its own Edit form even
+     * though it won't appear when creating a new one.
+     *
+     * Terms that can't be resolved to a Section-matching semester
+     * value (see sectionSemesterValue()'s docblock) are skipped, same
+     * as termFilterOptions() — they'd never be selectable anyway.
+     *
+     * @return list<array{academic_year: string, semester: string, status: string}>
+     */
+    private function academicTermSectionOptions(): array
+    {
+        $options = [];
+
+        AcademicTerm::query()
+            ->where('status', '!=', 'Archived')
+            ->with(['schoolYear:id,name', 'semester:id,name'])
+            ->orderByDesc('id')
+            ->get()
+            ->each(function (AcademicTerm $term) use (&$options) {
+                $semesterValue = $term->sectionSemesterValue();
+
+                if (! $term->schoolYear || ! $semesterValue) {
+                    return;
+                }
+
+                $options[] = [
+                    'academic_year' => $term->schoolYear->name,
+                    'semester' => $semesterValue,
+                    'status' => $term->status,
+                ];
+            });
+
+        return $options;
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\AcademicTerm;
 use App\Models\Curriculum;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -43,7 +44,15 @@ class StoreSectionBatchRequest extends FormRequest
                 'required',
                 'string',
                 'max:20',
-                Rule::unique('sections', 'section_code')->whereNull('deleted_at'),
+                // Scoped to the same academic_year + semester — same
+                // reasoning as StoreSectionRequest: two Sections in
+                // different terms may legitimately share a code (this
+                // batch's own academic_year/semester fields apply to
+                // every row it generates).
+                Rule::unique('sections', 'section_code')
+                    ->where('academic_year', $this->input('academic_year'))
+                    ->where('semester', $this->input('semester'))
+                    ->whereNull('deleted_at'),
             ],
             'sections.*.estimated_students' => ['required', 'integer', 'min:1'],
         ];
@@ -57,6 +66,20 @@ class StoreSectionBatchRequest extends FormRequest
 
                 if ($curriculum && (int) $curriculum->major_id !== (int) $this->input('major_id')) {
                     $validator->errors()->add('curriculum_id', 'The selected prospectus does not belong to the selected program.');
+                }
+            }
+
+            // The actual safety net behind the Add Section form's
+            // Academic Year/Semester dropdowns (now sourced from real
+            // AcademicTerm records — see
+            // SectionController::academicTermSectionOptions()): a
+            // direct/scripted request could still submit a combination
+            // with no AcademicTerm behind it, or one that's Archived,
+            // and this batch generator is only ever creating brand-new
+            // Sections, so Archived terms don't count as a match here.
+            if ($this->filled('academic_year') && $this->filled('semester')) {
+                if (! AcademicTerm::existsForSection($this->input('academic_year'), $this->input('semester'), allowArchived: false)) {
+                    $validator->errors()->add('academic_year', 'No active or inactive Academic Term matches this Academic Year and Semester. Set up the Academic Term first under Academic Calendar.');
                 }
             }
 

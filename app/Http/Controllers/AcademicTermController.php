@@ -9,6 +9,7 @@ use App\Models\SchoolYear;
 use App\Models\Semester;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -121,6 +122,33 @@ class AcademicTermController extends Controller
         $record->restore();
 
         return redirect()->route('academic-calendar')->with('success', 'Academic term restored successfully.');
+    }
+
+    /**
+     * Archive the specified academic term.
+     *
+     * Only an Inactive term may be archived — an Active term must be
+     * switched to Inactive first (or superseded by making a different
+     * term Active, which auto-flips it via AcademicTerm::booted()).
+     * This is a pure status flip: it never touches, migrates, or
+     * cascades to Sections, Curriculum, or any other data tied to the
+     * term's School Year/Semester.
+     *
+     * The frontend only shows the Archive action for Inactive terms,
+     * but that's a UI convenience, not enforcement, so the same rule
+     * is re-checked here against a direct request.
+     */
+    public function archive(AcademicTerm $academicTerm): RedirectResponse
+    {
+        if ($academicTerm->status !== 'Inactive') {
+            throw ValidationException::withMessages([
+                'status' => 'Only an Inactive academic term can be archived.',
+            ]);
+        }
+
+        $academicTerm->update(['status' => 'Archived']);
+
+        return redirect()->route('academic-calendar')->with('success', 'Academic term archived successfully.');
     }
 
     /**

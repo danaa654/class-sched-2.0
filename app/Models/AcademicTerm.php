@@ -58,6 +58,36 @@ class AcademicTerm extends Model
     }
 
     /**
+     * Whether a real AcademicTerm exists matching the given Section-
+     * spelled Academic Year + Semester (e.g. "2026-2027" +
+     * "First Semester") — matched via sectionSemesterValue() rather
+     * than a raw string compare, same reasoning as that method's own
+     * docblock.
+     *
+     * Used as the actual server-side safety net behind the Add/Edit
+     * Section forms' Academic Year/Semester dropdowns: those dropdowns
+     * are now built from real AcademicTerm records, but that alone
+     * doesn't stop a direct/scripted request from submitting a
+     * combination with no AcademicTerm behind it at all.
+     *
+     * @param bool $allowArchived When false (the default used for
+     *   creating a NEW Section), an Archived term does not count as a
+     *   match — creating a Section under a term that's done doesn't
+     *   make sense. When true (used when updating an existing
+     *   Section), an Archived term still counts, so editing a Section
+     *   that already belongs to a since-Archived term isn't blocked.
+     */
+    public static function existsForSection(string $academicYear, string $semester, bool $allowArchived = false): bool
+    {
+        return static::query()
+            ->when(! $allowArchived, fn ($query) => $query->where('status', '!=', 'Archived'))
+            ->whereHas('schoolYear', fn ($query) => $query->where('name', $academicYear))
+            ->with('semester:id,name')
+            ->get(['id', 'school_year_id', 'semester_id'])
+            ->contains(fn (self $term) => $term->sectionSemesterValue() === $semester);
+    }
+
+    /**
      * The Section.semester enum value ("First Semester" / "Second
      * Semester" / "Summer") this term's Semester corresponds to.
      *

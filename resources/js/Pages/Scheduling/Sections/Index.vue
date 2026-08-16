@@ -50,8 +50,8 @@ const props = defineProps({
     activeMajors: { type: Array, default: () => [] },
     curriculums: { type: Array, default: () => [] },
     yearLevels: { type: Array, default: () => [] },
-    semesterOptions: { type: Array, default: () => [] },
-    academicYears: { type: Array, default: () => [] },
+    academicTermOptions: { type: Array, default: () => [] },
+    termOptions: { type: Array, default: () => [] },
     sectionTypes: { type: Array, default: () => ['Regular', 'Irregular'] },
 });
 
@@ -90,6 +90,7 @@ watch(
 /* ------------------------------------------------------------------ */
 
 const search = ref(props.filters.section_search ?? '');
+const selectedTerm = ref(props.filters.term ?? 'all');
 const loading = ref(false);
 let searchDebounce = null;
 
@@ -98,7 +99,7 @@ const reloadSections = (extra = {}) => {
 
     router.get(
         route('scheduling.sections'),
-        { section_search: search.value, ...extra },
+        { section_search: search.value, term: selectedTerm.value, ...extra },
         {
             preserveState: true,
             preserveScroll: true,
@@ -109,6 +110,13 @@ const reloadSections = (extra = {}) => {
             },
         },
     );
+};
+
+// Switching the Academic Term filter re-queries immediately (unlike
+// the text search, which debounces) — it's a deliberate dropdown pick,
+// not something the user is still typing.
+const onTermChange = () => {
+    reloadSections();
 };
 
 /**
@@ -151,8 +159,66 @@ const statusOptions = [
 ];
 
 const yearLevelOptions = computed(() => props.yearLevels.map((level) => ({ label: level, value: level })));
-const semesterSelectOptions = computed(() => props.semesterOptions.map((sem) => ({ label: sem, value: sem })));
-const academicYearOptions = computed(() => props.academicYears.map((year) => ({ label: year, value: year })));
+// Academic Year / Semester — sourced from real AcademicTerm records
+// (see SectionController::academicTermSectionOptions()), not a
+// generated range, so a Section can never be created for a School
+// Year/Semester with no AcademicTerm behind it (no Scheduling
+// Preferences, no class hours/days configured). Archived terms are
+// already excluded server-side.
+//
+// Mirrors the Curriculum/Major and Rooms Department/College pattern
+// already used in this app: the backend sends one flat list (each row
+// carrying its own academic_year), and Semester options are filtered
+// down to whichever Academic Year is currently selected on each form.
+const academicYearOptions = computed(() => {
+    const seen = new Set();
+    const options = [];
+
+    for (const term of props.academicTermOptions) {
+        if (!seen.has(term.academic_year)) {
+            seen.add(term.academic_year);
+            options.push({ label: term.academic_year, value: term.academic_year });
+        }
+    }
+
+    return options;
+});
+
+const semesterOptionsFor = (academicYear) => {
+    if (!academicYear) {
+        return [];
+    }
+
+    return props.academicTermOptions
+        .filter((term) => term.academic_year === academicYear)
+        .map((term) => ({ label: term.semester, value: term.semester }));
+};
+
+// A Section already saved under a term that's since been Archived (or,
+// in principle, any academic_year/semester no longer in the list)
+// would otherwise show a blank Select on its own Edit form — this adds
+// its current value back in as a selectable option ONLY on that form,
+// so opening Edit never silently clears a value the Section actually
+// has. It intentionally doesn't affect the Add Section batch generator,
+// which should only ever offer real, non-Archived terms.
+const withCurrentValueOption = (options, academicYear, semester, valueKey) => {
+    if (!academicYear || !semester) {
+        return options;
+    }
+
+    const currentValue = valueKey === 'academic_year' ? academicYear : semester;
+    const alreadyListed = options.some((option) => option.value === currentValue);
+
+    return alreadyListed ? options : [...options, { label: currentValue, value: currentValue }];
+};
+
+const editAcademicYearOptions = computed(() =>
+    withCurrentValueOption(academicYearOptions.value, sectionForm.academic_year, sectionForm.semester, 'academic_year'),
+);
+const editSemesterOptions = computed(() =>
+    withCurrentValueOption(semesterOptionsFor(sectionForm.academic_year), sectionForm.academic_year, sectionForm.semester, 'semester'),
+);
+const batchSemesterOptions = computed(() => semesterOptionsFor(batchForm.academic_year));
 const sectionTypeOptions = computed(() =>
     (props.sectionTypes ?? ['Regular', 'Irregular']).map((type) => ({ label: type, value: type })),
 );
@@ -205,6 +271,22 @@ watch(
         }
     },
 );
+
+// If the Academic Year changes and the currently selected Semester
+// isn't offered under it, clear the Semester selection — mirrors the
+// Program -> Prospectus reset above.
+watch(
+    () => sectionForm.academic_year,
+    () => {
+        const stillValid = editSemesterOptions.value.some(
+            (semester) => semester.value === sectionForm.semester,
+        );
+        if (!stillValid) {
+            sectionForm.semester = null;
+        }
+    },
+);
+
 
 // Edit opens a dialog pre-filled with the section's current info, so a
 // typo (section code, name, year level, etc.) can be fixed right here
@@ -676,6 +758,26 @@ const onDeleteSection = (section) => {
                                     class="w-full !pl-9"
                                 />
                             </span>
+                            <Select
+                                v-model="selectedTerm"
+                                :options="termOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                class="w-full sm:w-64"
+                                @change="onTermChange"
+                            >
+                                <template #option="{ option }">
+                                    <span class="flex items-center gap-2">
+                                        {{ option.label }}
+                                        <Tag
+                                            v-if="option.status === 'Archived'"
+                                            value="Archived"
+                                            severity="warn"
+                                            class="!text-[10px] !py-0.5"
+                                        />
+                                    </span>
+                                </template>
+                            </Select>
                         </template>
                         <template #end>
                             <div class="flex items-center gap-2">
@@ -874,10 +976,11 @@ const onDeleteSection = (section) => {
                             <Select
                                 id="batch_semester"
                                 v-model="batchForm.semester"
-                                :options="semesterSelectOptions"
+                                :options="batchSemesterOptions"
                                 optionLabel="label"
                                 optionValue="value"
-                                placeholder="e.g. 1st Semester"
+                                :disabled="!batchForm.academic_year"
+                                :placeholder="batchForm.academic_year ? 'e.g. 1st Semester' : 'Select an academic year first'"
                                 :invalid="!!batchForm.errors.semester"
                                 class="w-full"
                             />
@@ -1307,7 +1410,7 @@ const onDeleteSection = (section) => {
                     <Select
                         id="academic_year"
                         v-model="sectionForm.academic_year"
-                        :options="academicYearOptions"
+                        :options="editAcademicYearOptions"
                         optionLabel="label"
                         optionValue="value"
                         placeholder="Select academic year"
@@ -1327,7 +1430,7 @@ const onDeleteSection = (section) => {
                     <Select
                         id="semester"
                         v-model="sectionForm.semester"
-                        :options="semesterSelectOptions"
+                        :options="editSemesterOptions"
                         optionLabel="label"
                         optionValue="value"
                         placeholder="Select semester"
