@@ -75,6 +75,34 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             // honored when the authenticated user has the Administrator
             // role — see SectionSubjectController::workloadWarningFor().
             'workload_confirmed' => ['sometimes', 'boolean'],
+            // The Section the Room Grid is CURRENTLY OPEN for — required
+            // on the Room Grid move endpoint so the backend can
+            // independently tell a same-section move from a
+            // cross-section one (see SectionPolicy::moveScheduleAssignment()
+            // and SectionSubjectController::moveRoomGridAssignment()).
+            // Never trusted for authorization on its own — it is only
+            // ever compared against the schedule assignment's OWN
+            // section_id, which is loaded server-side from the
+            // database.
+            'current_section_id' => ['sometimes', 'nullable', 'integer', 'exists:sections,id'],
+            // Set true once the user has explicitly confirmed the
+            // "Move Schedule Assignment?" modal warning that this
+            // move will modify ANOTHER Section's schedule. Required by
+            // the backend before a cross-section move is saved — see
+            // moveRoomGridAssignment(). Mirrors the existing
+            // capacity_confirmed / hours_confirmed / workload_confirmed
+            // acknowledgement pattern above.
+            'cross_section_confirmed' => ['sometimes', 'boolean'],
+            // Set true when the Room Grid's merged-block drag chose
+            // "Move only <this section>" instead of "Move both
+            // sections (keep merged)" — see RoomGrid.vue's onDrop() and
+            // SectionSubjectController::performScheduleAssignmentUpdate().
+            // Detaches this row's is_merged/merged_into_section_subject_id
+            // link WITHOUT touching its Faculty/Room/Days/Time (unlike
+            // IrregularSectionMergeService::unmerge(), which clears the
+            // schedule back to Draft) — the row keeps whatever slot this
+            // same request just moved it to.
+            'clear_merge_link' => ['sometimes', 'boolean'],
         ];
     }
 

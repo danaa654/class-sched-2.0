@@ -37,6 +37,12 @@ const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     section: { type: Object, required: true },
+    // Every other Section this user can see for the same Academic
+    // Year + Semester (Section::visibleTo() — same RBAC scope the
+    // Sections list itself uses), powering the header's section
+    // switcher so a Dean/OIC doesn't have to leave this page and
+    // reopen the Sections list to move between e.g. every BSIT block.
+    siblingSections: { type: Array, default: () => [] },
     sectionSubjects: { type: Array, default: () => [] },
     filters: { type: Object, default: () => ({ subject_search: '' }) },
     curriculums: { type: Array, default: () => [] },
@@ -56,6 +62,76 @@ const props = defineProps({
 
 const toast = useToast();
 const page = usePage();
+
+// A Section whose section_name is identical to its section_code (e.g.
+// both "BSHM-2A") would otherwise render duplicated — "BSHM-2A —
+// BSHM-2A". Only append the name when it actually adds information,
+// same convention RoomGrid.vue's roomLabel() already uses for Rooms.
+const sectionLabel = (sec) => {
+    if (!sec) return '';
+    const code = (sec.section_code || '').trim();
+    const name = (sec.section_name || '').trim();
+    if (!name || name.toLowerCase() === code.toLowerCase()) return code;
+    return `${code} — ${name}`;
+};
+
+/* ------------------------------------------------------------------ */
+/* Section switcher — jump to a sibling Section without leaving the    */
+/* page (header dropdown next to the Section name).                    */
+/* ------------------------------------------------------------------ */
+
+// Scheduling-progress status for a Section, matching the Sections
+// list's own thresholds exactly (SectionController::index() /
+// Sections/Index.vue): no rows at all -> "none"; rows exist but zero
+// assigned -> "not_scheduled"; some but not all assigned ->
+// "partial"; every row assigned -> "full". Drives the switcher
+// dropdown's status dot so a Dean/OIC can see at a glance which
+// sibling Sections still need attention without opening each one.
+const sectionScheduleStatus = (sec) => {
+    const total = sec.total_subjects_count ?? 0;
+    const assigned = sec.assigned_subjects_count ?? 0;
+    if (total === 0) return 'none';
+    if (assigned === 0) return 'not_scheduled';
+    if (assigned < total) return 'partial';
+    return 'full';
+};
+
+const sectionStatusDotClass = (status) => ({
+    full: 'bg-green-500',
+    partial: 'bg-amber-500',
+    not_scheduled: 'bg-slate-300',
+    none: 'bg-slate-200',
+}[status] ?? 'bg-slate-200');
+
+const sectionSwitcherOptions = computed(() =>
+    props.siblingSections.map((s) => ({
+        id: s.id,
+        label: sectionLabel(s),
+        major: s.major?.code || s.major?.name || '',
+        status: sectionScheduleStatus(s),
+        totalSubjects: s.total_subjects_count ?? 0,
+        assignedSubjects: s.assigned_subjects_count ?? 0,
+    })),
+);
+
+const selectedSectionId = ref(props.section.id);
+watch(
+    () => props.section.id,
+    (id) => {
+        selectedSectionId.value = id;
+    },
+);
+
+const currentSwitcherOption = computed(() =>
+    sectionSwitcherOptions.value.find((o) => o.id === selectedSectionId.value) ?? null,
+);
+
+const onSwitchSection = (id) => {
+    if (!id || id === props.section.id) return;
+    router.visit(route('scheduling.section-subjects.show', id), {
+        preserveScroll: true,
+    });
+};
 
 watch(
     () => page.props.flash?.success,
@@ -1659,7 +1735,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             <div class="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
                     <h1 class="text-2xl font-bold tracking-tight text-[#1E293B] flex items-center gap-2">
-                        {{ section.section_code }} — {{ section.section_name }}
+                        {{ sectionLabel(section) }}
                         <Button
                             icon="pi pi-info-circle"
                             text
@@ -1672,6 +1748,56 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             @click="toggleHelp"
                         />
                     </h1>
+                    <!-- Section switcher — jump straight to another Section
+                         (same Academic Year/Semester, same visibility scope
+                         as the Sections list) without going Back to Sections. -->
+                    <Select
+                        v-if="sectionSwitcherOptions.length > 1"
+                        v-model="selectedSectionId"
+                        :options="sectionSwitcherOptions"
+                        optionLabel="label"
+                        optionValue="id"
+                        filter
+                        placeholder="Switch section"
+                        class="mt-2 w-full sm:w-72"
+                        size="small"
+                        @update:modelValue="onSwitchSection"
+                    >
+                        <template #value="{ value }">
+                            <span v-if="currentSwitcherOption" class="flex items-center gap-2">
+                                <span
+                                    class="inline-block h-2 w-2 rounded-full shrink-0"
+                                    :class="[
+                                        sectionStatusDotClass(currentSwitcherOption.status),
+                                        currentSwitcherOption.status === 'full' ? 'animate-pulse' : '',
+                                    ]"
+                                ></span>
+                                <span>{{ currentSwitcherOption.label }}</span>
+                            </span>
+                            <span v-else>{{ value }}</span>
+                        </template>
+                        <template #option="{ option }">
+                            <div class="flex items-center justify-between gap-3 text-sm">
+                                <span class="flex items-center gap-2">
+                                    <span
+                                        class="inline-block h-2 w-2 rounded-full shrink-0"
+                                        :class="[
+                                            sectionStatusDotClass(option.status),
+                                            option.status === 'full' ? 'animate-pulse' : '',
+                                        ]"
+                                        :title="{
+                                            full: `Fully Scheduled (${option.assignedSubjects}/${option.totalSubjects})`,
+                                            partial: `Partially Scheduled (${option.assignedSubjects}/${option.totalSubjects})`,
+                                            not_scheduled: 'Not Scheduled',
+                                            none: 'No Subjects Yet',
+                                        }[option.status]"
+                                    ></span>
+                                    <span>{{ option.label }}</span>
+                                </span>
+                                <span v-if="option.major" class="text-xs text-slate-400">{{ option.major }}</span>
+                            </div>
+                        </template>
+                    </Select>
                 </div>
                 <Popover ref="helpPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
                     <p class="w-80 max-w-[85vw] text-sm text-slate-600 leading-relaxed">
@@ -2371,7 +2497,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </div>
                     <div>
                         <p class="text-[0.7rem] uppercase tracking-wide text-slate-400">Section</p>
-                        <p class="font-medium text-slate-800">{{ section.section_code }} — {{ section.section_name }}</p>
+                        <p class="font-medium text-slate-800">{{ sectionLabel(section) }}</p>
                     </div>
                     <div>
                         <p class="text-[0.7rem] uppercase tracking-wide text-slate-400">Major</p>

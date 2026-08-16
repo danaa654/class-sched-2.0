@@ -135,6 +135,13 @@ Route::middleware('auth')->group(function () {
     // Section Subjects page (scheduling.section-subjects.show) IS the
     // scheduling workspace; there is no separate workspace page/route.
     Route::patch('/scheduling/section-subjects/{section}/{subject}/schedule', [SectionSubjectController::class, 'updateSchedule'])->name('scheduling.section-subjects.schedule');
+    // Room Grid drag-and-drop — moves a schedule block that may belong
+    // to a DIFFERENT Section than the one currently open (spec: "Room
+    // Grid drag-and-drop revision"). Deliberately not nested under
+    // {section} — see SectionSubjectController::moveRoomGridAssignment()'s
+    // docblock for why authorization here is per-assignment, not
+    // per-currently-viewed-Section.
+    Route::patch('/scheduling/room-grid/section-subjects/{subject}/move', [SectionSubjectController::class, 'moveRoomGridAssignment'])->name('scheduling.room-grid.move');
     // Smart Assignment Recommendation Engine (Prompt 8.6) — ranked
     // Faculty/Room/Time suggestions for one row, never auto-assigns.
     Route::get('/scheduling/section-subjects/{section}/{subject}/recommend', [SectionSubjectController::class, 'recommend'])->name('scheduling.section-subjects.recommend');

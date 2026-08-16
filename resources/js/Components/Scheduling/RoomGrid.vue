@@ -52,6 +52,38 @@ const roomLabel = (room) => {
     return `${code} — ${name}`;
 };
 
+// Left border + tint so Lecture vs Laboratory rooms are visually
+// distinguishable at a glance in the sidebar lists, without relying
+// on reading the small "Lecture · Cap 40" caption every time.
+const roomTypeAccentClass = (room) => {
+    if (room?.room_type === 'Laboratory') return 'border-l-4 border-l-purple-400 bg-purple-50/40';
+    if (room?.room_type === 'Lecture') return 'border-l-4 border-l-sky-400 bg-sky-50/40';
+    return 'border-l-4 border-l-slate-200';
+};
+
+const roomTypeDotClass = (room) => {
+    if (room?.room_type === 'Laboratory') return 'bg-purple-400';
+    if (room?.room_type === 'Lecture') return 'bg-sky-400';
+    return 'bg-slate-300';
+};
+
+// Left border + tint so Major vs Minor vs General Education subjects
+// are visually distinguishable in the Unscheduled Subjects list, same
+// convention as roomTypeAccentClass() above.
+const subjectCategoryAccentClass = (row) => {
+    const category = row?.subject?.category;
+    if (category === 'Major') return 'border-l-4 border-l-emerald-400 bg-emerald-50/40';
+    if (category === 'Minor' || category === 'General Education') return 'border-l-4 border-l-amber-400 bg-amber-50/40';
+    return 'border-l-4 border-l-slate-200';
+};
+
+const subjectCategoryDotClass = (row) => {
+    const category = row?.subject?.category;
+    if (category === 'Major') return 'bg-emerald-400';
+    if (category === 'Minor' || category === 'General Education') return 'bg-amber-400';
+    return 'bg-slate-300';
+};
+
 const emit = defineEmits(['row-updated']);
 
 const toast = useToast();
@@ -212,10 +244,17 @@ const hourRows = computed(() => {
     return rows.length ? rows : ['08:00', '08:30', '09:00', '09:30', '10:00'];
 });
 
-/* Blocks placed on the grid, one entry per (day, assignment). Each   */
-/* carries the grid row it starts on and how many hour-rows it spans. */
+/* Blocks placed on the grid, one entry per (day, assignment) —      */
+/* THEN merged blocks (multiple SectionSubject rows that share the    */
+/* exact same Day/Start/End — see IrregularSectionMergeService, which */
+/* copies the host's Room/Days/Time verbatim onto every merged row)   */
+/* are collapsed into ONE visual block instead of stacking invisibly  */
+/* on top of each other. Two DIFFERENT (non-merged) sections can      */
+/* never legitimately land on identical Room+Day+Time — that's a Room */
+/* conflict ScheduleConflictService already blocks — so sharing a     */
+/* slot is itself the signal that a merge produced it.                */
 const placedBlocks = computed(() => {
-    const blocks = [];
+    const raw = [];
     assignments.value.forEach((a) => {
         const dayTokens = (a.days || '').split(',').filter(Boolean);
         const startMin = a.start_time ? toMinutes(a.start_time) : null;
@@ -229,14 +268,97 @@ const placedBlocks = computed(() => {
 
         dayTokens.forEach((day) => {
             if (!days.value.includes(day)) return;
-            blocks.push({ ...a, day, startIndex, span });
+            raw.push({ ...a, day, startIndex, span });
         });
     });
-    return blocks;
+
+    // Group by (day, startIndex, span) — everything in a group is the
+    // same class session shared across sections via a merge.
+    const groups = new Map();
+    raw.forEach((b) => {
+        const key = `${b.day}-${b.startIndex}-${b.span}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(b);
+    });
+
+    return Array.from(groups.values()).map((members) => {
+        if (members.length === 1) return members[0];
+
+        // Which row does editing/dragging THIS block act on?
+        // - If the current section is one of the merged members, always
+        //   use ITS OWN row — never the host's, even though the host is
+        //   preferred elsewhere (see below). Editing/moving must change
+        //   the current section's own booking, not silently rewrite a
+        //   different section's class out from under it.
+        // - Otherwise (every member belongs to some other section — this
+        //   block is only relevant here as a drop/merge target) prefer
+        //   the true host (Regular section) row, since a merged
+        //   Irregular row can never itself be a merge host (see
+        //   findHostCandidates) — anchoring on it would make a later
+        //   merge-drop silently fail to match a candidate.
+        const own = members.find((m) => m.is_current_section);
+        const host = own ?? members.find((m) => m.section_type === 'Regular') ?? members[0];
+
+        const sectionCodes = [...new Set(members.map((m) => m.section_code).filter(Boolean))];
+
+        return {
+            ...host,
+            section_code: sectionCodes.join(' / '),
+            is_current_section: !!own,
+            // A merged block is only draggable/editable here if the row
+            // we're actually going to act on (host) is itself
+            // authorized — never because SOME member happens to be.
+            can_edit: !!host.can_edit,
+            merged_member_section_subject_ids: members.map((m) => m.section_subject_id),
+            // Full per-member detail — powers the "Move both sections
+            // (keep merged) / Move only <section>" choice offered when
+            // dragging a merged block (see onDrop()). Each member keeps
+            // its own section_subject_id/section_id/section_code/
+            // can_edit so the move can be scoped/authorized correctly
+            // per row, never assumed from the collapsed host alone.
+            merge_members: members.map((m) => ({
+                section_subject_id: m.section_subject_id,
+                section_id: m.section_id,
+                section_code: m.section_code,
+                is_current_section: !!m.is_current_section,
+                can_edit: !!m.can_edit,
+            })),
+        };
+    });
 });
 
 const blockAt = (day, rowIndex) => placedBlocks.value.find((b) => b.day === day && b.startIndex === rowIndex);
 const isCovered = (day, rowIndex) => placedBlocks.value.some((b) => b.day === day && rowIndex > b.startIndex && rowIndex < b.startIndex + b.span);
+
+// Three visual states for a placed block, per spec:
+// - "current": this Section's own booking — normal blue, click to edit.
+// - "authorized": belongs to a DIFFERENT Section, but that Section is
+//   within the logged-in user's authorized scheduling scope
+//   (can_edit, computed server-side from College/Department scope —
+//   see roomSchedule()) — still draggable ("OTHER SECTION"), never
+//   forcing the user to switch to that Section first.
+// - "locked": the schedule's Section is OUTSIDE the user's authorized
+//   scheduling scope — visible (Room Grid stays room-centric), never
+//   draggable/editable.
+const blockAuthState = (block) => {
+    if (!block) return 'locked';
+    if (block.is_current_section) return 'current';
+    return block.can_edit ? 'authorized' : 'locked';
+};
+
+const blockClass = (block) => {
+    const state = blockAuthState(block);
+    if (state === 'current') return 'bg-blue-50 border border-blue-200 text-blue-700 cursor-grab hover:border-blue-400';
+    if (state === 'authorized') return 'bg-emerald-50 border border-emerald-300 border-dashed text-emerald-700 cursor-grab hover:border-emerald-500';
+    return 'bg-slate-100 border border-slate-300 text-slate-500 cursor-not-allowed';
+};
+
+const blockTitle = (block) => {
+    const state = blockAuthState(block);
+    if (state === 'current') return 'Click to edit · Drag to move';
+    if (state === 'authorized') return `Belongs to ${block.section_code} — within your authorized scheduling scope. Drag to move.`;
+    return 'This schedule is outside your scheduling scope.';
+};
 
 /* ------------------------------------------------------------------ */
 /* Unscheduled subjects for the CURRENT section only (spec: "only      */
@@ -268,6 +390,7 @@ const draggingMode = ref(null); // 'new' | 'move'
 const draggingRow = ref(null); // full SectionSubject row, for 'new'
 const draggingSubjectId = ref(null); // section_subject_id, for 'move'
 const draggingDuration = ref(60); // minutes, for 'move'
+const draggingBlock = ref(null); // full block being moved, for 'move' — powers the cross-section confirmation dialog
 const savingCell = ref(null); // "day-rowIndex" while a write is in flight
 
 const onDragStartNew = (row) => {
@@ -276,16 +399,42 @@ const onDragStartNew = (row) => {
 };
 
 const onDragStartBlock = (block) => {
-    if (!block.is_current_section) return; // only this section's own blocks are movable here
+    // AUTHORIZATION IS PER-ASSIGNMENT, NOT PER-CURRENTLY-VIEWED-SECTION
+    // — a block can belong to a different Section than the one this
+    // Room Grid is open for and still be draggable, as long as the
+    // logged-in user is authorized for THAT block's own Section
+    // (block.can_edit, computed server-side in roomSchedule()). Never
+    // gate on is_current_section alone.
+    if (!block.can_edit) return;
     draggingMode.value = 'move';
     draggingSubjectId.value = block.section_subject_id;
     draggingDuration.value = (toMinutes(block.end_time) - toMinutes(block.start_time)) || 60;
+    draggingBlock.value = block; // full block, for the "moving another section's class" confirmation
 };
 
-const writeSchedule = async (subjectId, payload, { successMessage } = {}) => {
+// Backend errors that are WARNINGS, not hard conflicts — the
+// Registrar can explicitly confirm and save anyway (see
+// performScheduleAssignmentUpdate()'s Capacity/Hours checks). Any
+// OTHER error key (room_id/faculty_id/days — real Room/Faculty/
+// Section/Time conflicts from ScheduleConflictService) is a hard
+// block and must never be offered a "confirm anyway" retry.
+const CONFIRMABLE_WARNING_KEYS = { capacity: 'capacity_confirmed', hours: 'hours_confirmed' };
+
+const writeSchedule = async (subjectId, payload, { successMessage, crossSection = false, silent = false } = {}) => {
     try {
+        // Moving a block that belongs to a DIFFERENT Section than the
+        // one currently open goes through the dedicated Room Grid move
+        // endpoint, which authorizes against THAT block's own Section
+        // (see moveRoomGridAssignment()'s docblock) rather than the
+        // currently-viewed {section}. Everything else (editing/placing
+        // the current section's own subjects) keeps using the existing
+        // per-Section endpoint unchanged.
+        const url = crossSection
+            ? route('scheduling.room-grid.move', subjectId)
+            : route('scheduling.section-subjects.schedule', [props.section.id, subjectId]);
+
         const response = await fetch(
-            route('scheduling.section-subjects.schedule', [props.section.id, subjectId]),
+            url,
             {
                 method: 'PATCH',
                 headers: {
@@ -299,6 +448,36 @@ const writeSchedule = async (subjectId, payload, { successMessage } = {}) => {
         const data = await response.json();
 
         if (!response.ok) {
+            const errorKeys = data.errors ? Object.keys(data.errors) : [];
+            const isConfirmable = errorKeys.length > 0 && errorKeys.every((k) => k in CONFIRMABLE_WARNING_KEYS);
+
+            // Capacity/Hours mismatches are flagged-not-blocked
+            // everywhere else in the app (Subjects tab spreadsheet,
+            // Assign modal) — the Room Grid drag/drop must offer the
+            // same "Confirm to save anyway" instead of just dead-ending
+            // on a permanent error toast.
+            if (isConfirmable) {
+                const detail = Object.values(data.errors).join(' ');
+                const result = await Swal.fire({
+                    icon: 'warning',
+                    title: 'Conflict',
+                    text: detail,
+                    showCancelButton: true,
+                    confirmButtonText: 'Confirm & Save',
+                    cancelButtonText: 'Cancel',
+                    customClass: { container: 'roomgrid-swal-on-top' },
+                });
+
+                if (!result.isConfirmed) return false;
+
+                const confirmedPayload = { ...payload };
+                errorKeys.forEach((key) => {
+                    confirmedPayload[CONFIRMABLE_WARNING_KEYS[key]] = true;
+                });
+
+                return writeSchedule(subjectId, confirmedPayload, { successMessage, crossSection, silent });
+            }
+
             const detail = data.errors
                 ? Object.values(data.errors).join(' ')
                 : (data.message ?? 'Could not save — check for a Room, Faculty, or Section conflict.');
@@ -306,7 +485,9 @@ const writeSchedule = async (subjectId, payload, { successMessage } = {}) => {
             return false;
         }
 
-        toast.add({ severity: 'success', summary: 'Scheduled', detail: successMessage ?? data.message ?? 'Schedule updated.', life: 3000 });
+        if (!silent) {
+            toast.add({ severity: 'success', summary: 'Scheduled', detail: successMessage ?? data.message ?? 'Schedule updated.', life: 3000 });
+        }
         emit('row-updated', data.sectionSubject);
         await loadRoomSchedule(selectedRoom.value);
         return true;
@@ -323,14 +504,156 @@ const onDrop = async (day, rowIndex) => {
 
     if (mode === 'move') {
         const subjectId = draggingSubjectId.value;
+        const block = draggingBlock.value;
         draggingSubjectId.value = null;
+        draggingBlock.value = null;
         if (!subjectId) return;
 
         const startTime = hourRows.value[rowIndex];
         const endTime = toHHMM(toMinutes(startTime) + draggingDuration.value);
+
+        // No-op drop (same room/day/time it already occupies) — skip
+        // the round trip and, for a cross-section block, skip the
+        // confirmation dialog entirely.
+        if (
+            block
+            && block.day === day
+            && block.startIndex === rowIndex
+        ) {
+            return;
+        }
+
+        // MERGED BLOCK — offer a choice instead of silently moving only
+        // the collapsed "host" row and leaving its merge partner(s)
+        // behind at the old slot (that mismatch is what used to happen
+        // here). block.merge_members carries every underlying
+        // SectionSubject row this visual block represents.
+        const mergeMembers = block?.merge_members ?? [];
+        let moveTargets;
+
+        if (mergeMembers.length > 1) {
+            const editableMembers = mergeMembers.filter((m) => m.can_edit);
+            if (editableMembers.length === 0) return;
+
+            const allEditable = editableMembers.length === mergeMembers.length;
+            const inputOptions = {};
+            if (allEditable) inputOptions.both = 'Move both sections (keep merged)';
+            editableMembers.forEach((m) => {
+                inputOptions[`only-${m.section_subject_id}`] = `Move only ${m.section_code}`;
+            });
+
+            const choice = await Swal.fire({
+                icon: 'question',
+                title: 'Move Merged Schedule',
+                html: `
+                    <div class="text-left text-sm space-y-1">
+                        <div><strong>${block.subject_code ?? 'This subject'}</strong> — ${block.section_code}</div>
+                        <div class="text-slate-500">This class is shared across sections via a merge. Move both together, or only one?</div>
+                    </div>
+                `,
+                input: 'radio',
+                inputOptions,
+                inputValue: allEditable ? 'both' : Object.keys(inputOptions)[0],
+                showCancelButton: true,
+                confirmButtonText: 'Continue',
+                cancelButtonText: 'Cancel',
+                customClass: { container: 'roomgrid-swal-on-top' },
+                inputValidator: (value) => (!value ? 'Choose an option to continue.' : undefined),
+            });
+            if (!choice.isConfirmed || !choice.value) return;
+
+            moveTargets = choice.value === 'both'
+                ? editableMembers
+                : editableMembers.filter((m) => `only-${m.section_subject_id}` === choice.value);
+        } else {
+            moveTargets = [{
+                section_subject_id: subjectId,
+                section_id: block?.section_id,
+                section_code: block?.section_code,
+                is_current_section: block?.is_current_section,
+            }];
+        }
+
+        // A "move only <one section>" pick out of a merged group is the
+        // only case that needs to drop that row's merge link — see
+        // clear_merge_link's docblock. Moving the whole merged group
+        // together keeps them linked; a lone, never-merged block was
+        // never linked to begin with.
+        const clearMergeLink = mergeMembers.length > 1 && moveTargets.length === 1 && moveTargets.length < mergeMembers.length;
+
+        const anyCrossSection = moveTargets.some((t) => t.section_id !== props.section.id);
+
+        // For a move involving a schedule belonging to ANOTHER Section
+        // (spec: "Move Schedule Assignment?" confirmation) — a direct
+        // drag/drop is only "optional confirmation" for the CURRENT
+        // section's own blocks, which the existing UI already treats
+        // as an immediate move with no dialog.
+        if (anyCrossSection) {
+            const oldDayLabel = dayLabels[block.day] ?? block.day;
+            const newDayLabel = dayLabels[day] ?? day;
+            const otherSectionCodes = [...new Set(
+                moveTargets.filter((t) => t.section_id !== props.section.id).map((t) => t.section_code),
+            )].join(', ');
+            const result = await Swal.fire({
+                icon: 'question',
+                title: 'Move Schedule Assignment?',
+                html: `
+                    <div class="text-left text-sm space-y-2">
+                        <div><strong>${block.subject_code ?? 'This subject'}</strong> — ${block.section_code}</div>
+                        <div class="text-slate-500">
+                            <div>Current: ${roomLabel(selectedRoom.value)}, ${oldDayLabel} ${formatHourLabel(block.start_time)}–${formatHourLabel(block.end_time)}</div>
+                            <div>New: ${roomLabel(selectedRoom.value)}, ${newDayLabel} ${formatHourLabel(startTime)}–${formatHourLabel(endTime)}</div>
+                        </div>
+                        <div class="pt-1">This schedule belongs to another section within your authorized scheduling scope. Moving it will modify <strong>${otherSectionCodes}</strong>'s schedule.</div>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'Move & Save',
+                cancelButtonText: 'Cancel',
+                customClass: { container: 'roomgrid-swal-on-top' },
+            });
+            if (!result.isConfirmed) return;
+        }
+
         savingCell.value = `${day}-${rowIndex}`;
-        await writeSchedule(subjectId, { room_id: selectedRoom.value.id, days: [day], start_time: startTime, end_time: endTime });
+        let allOk = true;
+        for (const target of moveTargets) {
+            const targetCrossSection = target.section_id !== props.section.id;
+            // eslint-disable-next-line no-await-in-loop
+            const rowOk = await writeSchedule(
+                target.section_subject_id,
+                {
+                    room_id: selectedRoom.value.id,
+                    days: [day],
+                    start_time: startTime,
+                    end_time: endTime,
+                    // Backend independently re-derives same-section vs
+                    // cross-section from these — never trusted for
+                    // authorization by itself, only for telling the two
+                    // cases apart (see moveRoomGridAssignment()).
+                    current_section_id: props.section.id,
+                    cross_section_confirmed: targetCrossSection,
+                    clear_merge_link: clearMergeLink,
+                },
+                { crossSection: targetCrossSection, silent: true },
+            );
+            if (!rowOk) allOk = false;
+        }
         savingCell.value = null;
+
+        if (allOk) {
+            const summary = moveTargets.length > 1
+                ? `${block.subject_code ?? 'Schedule'} moved for ${moveTargets.map((t) => t.section_code).join(' & ')}.`
+                : (anyCrossSection
+                    ? `${block?.subject_code ?? 'Schedule'} moved for ${moveTargets[0].section_code ?? 'the other section'}.`
+                    : 'Schedule updated.');
+            toast.add({ severity: 'success', summary: 'Scheduled', detail: summary, life: 3000 });
+        }
+        // On failure, writeSchedule's own error toast already explains
+        // why (Room/Faculty/Section conflict, capacity, etc.) — the
+        // grid re-reads from loadRoomSchedule() either way, so a
+        // failed move simply leaves the block exactly where the server
+        // still has it (no local optimistic mutation to roll back).
         return;
     }
 
@@ -338,7 +661,100 @@ const onDrop = async (day, rowIndex) => {
         const row = draggingRow.value;
         draggingRow.value = null;
         if (!row) return;
+
+        // INTELLIGENT IRREGULAR SECTION SCHEDULING, drag-and-drop entry
+        // point — mirrors the "Merge Recommendation" flow already
+        // available from the Subjects tab (IrregularSectionMergeService
+        // via the same merge-recommendation/merge endpoints), just
+        // triggered by dropping directly onto an already-occupied slot
+        // instead of clicking a button. Only offered when: this Section
+        // is Irregular (merging only ever makes sense in that
+        // direction — a Regular section's class is the host, never the
+        // guest), the target slot belongs to a DIFFERENT section
+        // (blockAt(...).is_current_section === false), and it's the
+        // exact same Subject. Anything else (different subject, own
+        // section's own block, empty slot) falls through to the normal
+        // Assign modal/conflict path unchanged.
+        const targetBlock = blockAt(day, rowIndex);
+        if (
+            isIrregularSection.value &&
+            targetBlock &&
+            !targetBlock.is_current_section &&
+            targetBlock.subject_code === row.subject?.subject_code
+        ) {
+            await attemptMergeDrop(row, targetBlock);
+            return;
+        }
+
         openAssignModal(row, day, rowIndex);
+    }
+};
+
+// Section prop only ever carries section_type as a plain string (see
+// Show.vue's props), so this mirrors isIrregularSection in Show.vue
+// rather than depending on it directly.
+const isIrregularSection = computed(() => props.section.section_type === 'Irregular');
+
+const attemptMergeDrop = async (row, targetBlock) => {
+    let recommendation;
+    try {
+        const response = await fetch(
+            route('scheduling.section-subjects.merge-recommendation', [props.section.id, row.id]),
+            { headers: { Accept: 'application/json' } },
+        );
+        recommendation = await response.json();
+        if (!response.ok) throw new Error(recommendation.message ?? 'Could not check merge compatibility.');
+    } catch (e) {
+        toast.add({ severity: 'error', summary: 'Error', detail: e.message ?? 'Could not check merge compatibility.', life: 6000 });
+        return;
+    }
+
+    const candidate = (recommendation.candidates ?? [])
+        .find((c) => c.section_subject_id === targetBlock.section_subject_id);
+
+    if (!candidate || !candidate.compatible) {
+        toast.add({
+            severity: 'warn',
+            summary: 'Not a Compatible Merge',
+            detail: candidate?.blocking_reason
+                ?? `This class can't be merged into ${targetBlock.section_code}'s ${targetBlock.subject_code} session — try Merge Recommendation on the Subjects tab for the full reason, or drop into an empty slot to schedule it independently.`,
+            life: 8000,
+        });
+        return;
+    }
+
+    const result = await Swal.fire({
+        icon: 'question',
+        title: 'Merge into this class?',
+        html: `<div class="text-left text-sm">Instead of a new booking, <strong>${row.subject?.subject_code ?? 'this subject'}</strong> will join <strong>${targetBlock.section_code}</strong>'s existing class here — same Faculty, Room, and Time. No separate Room/Faculty booking is created.</div>`,
+        showCancelButton: true,
+        confirmButtonText: 'Merge',
+        cancelButtonText: 'Cancel',
+        customClass: { container: 'roomgrid-swal-on-top' },
+    });
+    if (!result.isConfirmed) return;
+
+    try {
+        const response = await fetch(
+            route('scheduling.section-subjects.merge', [props.section.id, row.id]),
+            {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-XSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify({ target_section_subject_id: targetBlock.section_subject_id }),
+            },
+        );
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message ?? 'Could not apply merge.');
+
+        toast.add({ severity: 'success', summary: 'Merged', detail: data.message, life: 5000 });
+        (data.sectionSubjects ?? []).forEach((fresh) => emit('row-updated', fresh));
+        await loadRoomSchedule(selectedRoom.value);
+    } catch (e) {
+        toast.add({ severity: 'error', summary: 'Error', detail: e.message ?? 'Could not apply merge.', life: 6000 });
     }
 };
 
@@ -676,6 +1092,10 @@ const removeAssignment = async () => {
 
             <div>
                 <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Recommended Rooms</p>
+                <div class="flex items-center gap-3 text-[9px] text-slate-400 mb-1.5">
+                    <span class="flex items-center gap-1"><span class="inline-block h-1.5 w-1.5 rounded-full bg-sky-400"></span>Lecture</span>
+                    <span class="flex items-center gap-1"><span class="inline-block h-1.5 w-1.5 rounded-full bg-purple-400"></span>Laboratory</span>
+                </div>
                 <div v-if="roomsLoading" class="text-xs text-slate-400 py-1.5">Loading…</div>
                 <div v-else-if="recommendedRooms.length === 0" class="text-xs text-slate-400 py-1.5">No department rooms found.</div>
                 <ul v-else class="space-y-1">
@@ -685,10 +1105,13 @@ const removeAssignment = async () => {
                         class="rounded-md px-2 py-1.5 cursor-pointer text-xs border transition-colors"
                         :class="selectedRoom?.id === room.id
                             ? 'bg-blue-50 border-blue-200 text-blue-700 font-medium'
-                            : 'border-transparent hover:bg-slate-50 text-slate-700'"
+                            : `border-transparent hover:bg-slate-50 text-slate-700 ${roomTypeAccentClass(room)}`"
                         @click="selectRoom(room)"
                     >
-                        <div class="font-medium truncate">{{ roomLabel(room) }}</div>
+                        <div class="font-medium truncate flex items-center gap-1.5">
+                            <span class="inline-block h-1.5 w-1.5 rounded-full shrink-0" :class="roomTypeDotClass(room)"></span>
+                            {{ roomLabel(room) }}
+                        </div>
                         <div class="text-[10px] text-slate-400">{{ room.room_type }} · Cap {{ room.capacity }}</div>
                     </li>
                 </ul>
@@ -703,10 +1126,11 @@ const removeAssignment = async () => {
                         class="rounded-md px-2 py-1.5 cursor-pointer text-xs border transition-colors"
                         :class="selectedRoom?.id === room.id
                             ? 'bg-blue-50 border-blue-200 text-blue-700 font-medium'
-                            : 'border-transparent hover:bg-slate-50 text-slate-700'"
+                            : `border-transparent hover:bg-slate-50 text-slate-700 ${roomTypeAccentClass(room)}`"
                         @click="selectRoom(room)"
                     >
-                        <div class="font-medium flex items-center gap-1 truncate">
+                        <div class="font-medium flex items-center gap-1.5 truncate">
+                            <span class="inline-block h-1.5 w-1.5 rounded-full shrink-0" :class="roomTypeDotClass(room)"></span>
                             {{ roomLabel(room) }}
                             <Tag v-if="room.is_outside_department" value="Override" severity="warning" class="!text-[9px] !py-0" />
                         </div>
@@ -790,11 +1214,9 @@ const removeAssignment = async () => {
                                     <div
                                         v-else-if="blockAt(day, rowIndex)"
                                         class="absolute inset-0.5 rounded-md px-2 py-1 overflow-hidden text-[11px] leading-tight group"
-                                        :class="blockAt(day, rowIndex).is_current_section
-                                            ? 'bg-blue-50 border border-blue-200 text-blue-700 cursor-grab hover:border-blue-400'
-                                            : 'bg-slate-100 border border-slate-300 text-slate-600'"
-                                        :draggable="blockAt(day, rowIndex).is_current_section"
-                                        :title="blockAt(day, rowIndex).is_current_section ? 'Click to edit · Drag to move' : `Booked by ${blockAt(day, rowIndex).section_code}`"
+                                        :class="blockClass(blockAt(day, rowIndex))"
+                                        :draggable="blockAt(day, rowIndex).can_edit"
+                                        :title="blockTitle(blockAt(day, rowIndex))"
                                         @dragstart="onDragStartBlock(blockAt(day, rowIndex))"
                                         @click="blockAt(day, rowIndex).is_current_section ? openEditModal(blockAt(day, rowIndex)) : null"
                                     >
@@ -802,9 +1224,24 @@ const removeAssignment = async () => {
                                             v-if="blockAt(day, rowIndex).is_current_section"
                                             class="pi pi-pencil absolute top-1 right-1 text-[9px] opacity-0 group-hover:opacity-60"
                                         ></i>
+                                        <i
+                                            v-else-if="!blockAt(day, rowIndex).can_edit"
+                                            class="pi pi-lock absolute top-1 right-1 text-[9px] opacity-60"
+                                        ></i>
+                                        <i
+                                            v-else
+                                            class="pi pi-arrows-alt absolute top-1 right-1 text-[9px] opacity-0 group-hover:opacity-60"
+                                        ></i>
                                         <div class="font-semibold truncate">{{ blockAt(day, rowIndex).subject_code }}</div>
-                                        <div class="truncate">{{ blockAt(day, rowIndex).section_code }}</div>
+                                        <div class="truncate flex items-center gap-1">
+                                            {{ blockAt(day, rowIndex).section_code }}
+                                            <span
+                                                v-if="!blockAt(day, rowIndex).is_current_section && blockAt(day, rowIndex).can_edit"
+                                                class="text-[9px] uppercase tracking-wide bg-emerald-100 text-emerald-700 rounded px-1 py-0.5 shrink-0"
+                                            >OTHER SECTION</span>
+                                        </div>
                                         <div v-if="blockAt(day, rowIndex).faculty_name" class="truncate text-[10px] opacity-75">{{ blockAt(day, rowIndex).faculty_name }}</div>
+                                        <div v-if="!blockAt(day, rowIndex).can_edit" class="text-[9px] italic opacity-75 truncate">Outside your scheduling scope</div>
                                     </div>
                                 </div>
                             </template>
@@ -825,7 +1262,7 @@ const removeAssignment = async () => {
                 </div>
                 <p class="text-[11px] text-slate-400 mt-2">
                     Drag a subject from "Unscheduled Subjects" onto a slot to place it, or drag an existing block to move it. Click a block to edit its Faculty, Hours/Week, Meetings/Week, or Days.
-                    Blocks in gray belong to other sections and can't be moved from here. The Lunch Break slot is fixed and can't be scheduled into.
+                    Schedules belonging to any section within your authorized scheduling scope can be moved from here, even if it isn't the currently selected section — schedules outside your scope stay locked. The Lunch Break slot is fixed and can't be scheduled into.
                 </p>
             </div>
         </div>
@@ -833,6 +1270,10 @@ const removeAssignment = async () => {
         <!-- RIGHT SIDEBAR: Draggable unscheduled subjects for this section -->
         <div class="w-full lg:w-40 shrink-0">
             <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Unscheduled Subjects</p>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-slate-400 mb-1.5">
+                <span class="flex items-center gap-1"><span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>Major</span>
+                <span class="flex items-center gap-1"><span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-400"></span>Minor / GenEd</span>
+            </div>
             <div v-if="unscheduledSubjects.length === 0" class="text-xs text-slate-400 py-1.5">
                 Every subject in {{ section.section_code }} is placed.
             </div>
@@ -841,11 +1282,15 @@ const removeAssignment = async () => {
                     v-for="row in unscheduledSubjects"
                     :key="row.id"
                     draggable="true"
-                    class="rounded-md px-2 py-1.5 text-xs border border-slate-200 bg-white cursor-grab hover:border-blue-300 hover:bg-blue-50/40"
+                    class="rounded-md px-2 py-1.5 text-xs border border-slate-200 cursor-grab hover:border-blue-300 hover:bg-blue-50/40"
+                    :class="subjectCategoryAccentClass(row)"
                     :title="!selectedRoom ? 'Select a room first' : 'Drag onto the grid'"
                     @dragstart="onDragStartNew(row)"
                 >
-                    <div class="font-medium text-slate-700 truncate">{{ row.subject?.subject_code }}</div>
+                    <div class="font-medium text-slate-700 truncate flex items-center gap-1.5">
+                        <span class="inline-block h-1.5 w-1.5 rounded-full shrink-0" :class="subjectCategoryDotClass(row)"></span>
+                        {{ row.subject?.subject_code }}
+                    </div>
                     <div class="text-[10px] text-slate-400 truncate">{{ row.subject?.subject_title }}</div>
                 </li>
             </ul>

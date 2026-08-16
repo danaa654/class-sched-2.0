@@ -202,7 +202,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
      */
     public function show(Request $request, Section $section): Response
     {
-        $section->load(['major:id,name,code', 'curriculum:id,code,name,major_id']);
+        $section->load(['major.department.college', 'curriculum:id,code,name,major_id']);
 
         $search = trim((string) $request->query('subject_search', ''));
 
@@ -302,8 +302,63 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'lunch_end' => SchoolYear::LUNCH_BREAK_END,
         ];
 
+        // Sibling Sections — every other Section the current user can
+        // already see (Section::visibleTo(), the same College/Department
+        // RBAC scope the Sections list itself uses — Dean/OIC only ever
+        // gets their own College's Sections, Assistant Dean and
+        // Admin/Registrar get everything), restricted to this Section's
+        // Sibling Sections — every other Section the current user can
+        // already see (Section::visibleTo(), the same College/Department
+        // RBAC scope the Sections list itself uses — Dean/OIC only ever
+        // gets their own College's Sections, Assistant Dean and
+        // Admin/Registrar get everything), further narrowed to THIS
+        // Section's own College (e.g. viewing a BSHM section only offers
+        // other SHTM programs like BSTM — never BSIT or BSCRIM) and
+        // restricted to this Section's own Academic Year + Semester so
+        // switching via the dropdown never silently jumps into a
+        // different, unrelated term. Powers the header's section-switcher
+        // so a Dean/OIC (or Admin/Registrar) managing an entire College's
+        // schedule doesn't have to bounce back to the Sections list
+        // between every Section within that College.
+        $sectionCollegeId = $section->major?->department?->college_id;
+
+        $siblingSections = Section::query()
+            ->visibleTo($request->user())
+            ->where('academic_year', $section->academic_year)
+            ->where('semester', $section->semester)
+            ->when(
+                $sectionCollegeId,
+                fn ($query) => $query->whereHas(
+                    'major.department',
+                    fn ($inner) => $inner->where('college_id', $sectionCollegeId),
+                ),
+            )
+            ->with('major:id,name,code')
+            // Same "how far along is scheduling?" counts the Sections
+            // list (SectionController::index()) already computes, so the
+            // dropdown can show a status dot (green = Fully Scheduled,
+            // amber = Partially Scheduled, gray = Not Scheduled/No
+            // Subjects Yet) without a second round trip per Section.
+            ->withCount([
+                'sectionSubjects as total_subjects_count',
+                'sectionSubjects as assigned_subjects_count' => function ($query) {
+                    $query->where(function ($inner) {
+                        $inner->whereNotNull('faculty_id')
+                            ->whereNotNull('room_id')
+                            ->whereNotNull('days')
+                            ->whereNotNull('start_time')
+                            ->whereNotNull('end_time');
+                    })->orWhereHas('subject', function ($subjectQuery) {
+                        $subjectQuery->where('subject_type', 'practicum');
+                    });
+                },
+            ])
+            ->orderBy('section_code')
+            ->get(['id', 'section_code', 'section_name', 'major_id']);
+
         return Inertia::render('Scheduling/SectionSubjects/Show', [
             'section' => $section,
+            'siblingSections' => $siblingSections,
             'sectionSubjects' => $sectionSubjects,
             'filters' => ['subject_search' => $search],
             'availableSubjects' => $availableSubjects,
@@ -343,6 +398,78 @@ class SectionSubjectController extends Controller implements HasMiddleware
     ): \Illuminate\Http\JsonResponse {
         abort_unless($subject->section_id === $section->id, 404);
 
+        return $this->performScheduleAssignmentUpdate($request, $subject);
+    }
+
+    /**
+     * Room Grid — move an existing schedule block to another Day/Time
+     * and/or Room, INCLUDING a block that belongs to a different
+     * Section than the one currently open on the page (spec:
+     * "current section = UI context, scheduling scope = permission").
+     *
+     * Deliberately NOT nested under {section} — the Room Grid is
+     * room-centric and shows every Section's bookings in that Room.
+     * Authorization is never "does the URL's Section belong to me?"
+     * nor "does it match the Section currently open?" — it's
+     * evaluated purely against whether the SCHEDULE ASSIGNMENT'S OWN
+     * Section is within the authenticated user's authorized
+     * scheduling scope (SectionPolicy::moveScheduleAssignment() ->
+     * manageScheduling()/College-Department scope). A CCS-scoped user
+     * can move any BSIT-* Section's block regardless of which BSIT-*
+     * Section's Room Grid they currently have open — they are never
+     * required to switch sections first. $currentSectionId is used
+     * ONLY to decide whether the "Move Schedule Assignment?"
+     * cross-section confirmation applies, never as an authorization
+     * input itself. Frontend visibility/lock state must never be
+     * relied on alone — this check is the actual authorization
+     * boundary; a bypassed or hand-crafted request hits it exactly
+     * the same way and gets a 403 when the Section is outside scope.
+     *
+     * Reuses the exact same validation + conflict-check + save path as
+     * the Subjects tab's inline editor (performScheduleAssignmentUpdate())
+     * — never a second, parallel scheduling write path — so Room
+     * Grid drags and Subjects-tab edits can never disagree about what
+     * counts as a conflict.
+     */
+    public function moveRoomGridAssignment(UpdateSectionSubjectScheduleRequest $request, SectionSubject $subject): JsonResponse
+    {
+        $subject->loadMissing(['section.major.department', 'subject']);
+
+        // The single, real authorization boundary: is this schedule's
+        // OWN Section within the user's authorized scheduling scope?
+        // Aborts with 403 automatically when it isn't — regardless of
+        // which Section is currently selected in the UI.
+        Gate::authorize('moveScheduleAssignment', $subject->section);
+
+        $currentSectionId = $request->validated('current_section_id');
+        $isCrossSection = $currentSectionId && (int) $currentSectionId !== $subject->section_id;
+
+        // A cross-section move is never saved on the strength of the
+        // frontend's own "Move Schedule Assignment?" dialog alone —
+        // the backend independently requires the acknowledgement flag
+        // before writing, so a request that skips/tampers with the UI
+        // still can't silently move another Section's schedule.
+        if ($isCrossSection && ! $request->boolean('cross_section_confirmed')) {
+            return response()->json([
+                'message' => "This schedule belongs to {$subject->section->section_code}, a section within your authorized scheduling scope. Moving it will modify {$subject->section->section_code}'s schedule. Confirm to proceed.",
+                'requires_cross_section_confirmation' => true,
+            ], 409);
+        }
+
+        return $this->performScheduleAssignmentUpdate($request, $subject);
+    }
+
+    /**
+     * Shared write path behind both updateSchedule() (Subjects tab,
+     * always the currently-open Section) and moveRoomGridAssignment()
+     * (Room Grid, potentially a DIFFERENT authorized Section) — see
+     * moveRoomGridAssignment()'s docblock for why these must never be
+     * two separate implementations of the same conflict rules.
+     */
+    private function performScheduleAssignmentUpdate(
+        UpdateSectionSubjectScheduleRequest $request,
+        SectionSubject $subject
+    ): JsonResponse {
         $validated = $request->validated();
 
         // Merge the incoming (possibly partial) edit onto the row's
@@ -377,7 +504,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // both validate against the exact same rules.
         $errors = array_merge($errors, $this->conflictService->validate(
             [
-                'section_id' => $section->id,
+                'section_id' => $subject->section_id,
                 'faculty_id' => $facultyId,
                 'room_id' => $roomId,
                 'days' => $dayTokens,
@@ -453,6 +580,28 @@ class SectionSubjectController extends Controller implements HasMiddleware
             $status = 'Scheduled';
         }
 
+        // Manual Override flag — a Room outside this Section's own
+        // Department/College scope tier (same "program"/"college"/
+        // "shared" scope resolveRoomScopeTier() in RecommendationService
+        // uses) is still allowed per spec ("do not block the move
+        // simply because the room belongs to another department"), but
+        // gets flagged so Reports/Room Grid can visually call it out,
+        // same convention overrideRoom() already uses for the Subjects
+        // tab's Room picker. Only re-evaluated when room_id actually
+        // changed in this request — an unrelated Day/Time-only move
+        // must never silently clear an override flag set earlier.
+        $roomIsManualOverride = $subject->room_is_manual_override;
+        if (array_key_exists('room_id', $validated) && $roomId) {
+            $subject->loadMissing('section.major.department');
+            $newRoom = Room::find($roomId);
+            $sectionDepartmentId = $subject->section?->major?->department_id;
+            $sectionCollegeId = $subject->section?->major?->department?->college_id;
+            $roomIsManualOverride = (bool) $newRoom
+                && $newRoom->department_id !== $sectionDepartmentId
+                && $newRoom->college_id !== $sectionCollegeId
+                && ($newRoom->department_id !== null || $newRoom->college_id !== null);
+        }
+
         $subject->update([
             'faculty_id' => $facultyId,
             'room_id' => $subject->subject->isPracticum() ? null : $roomId,
@@ -461,6 +610,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'end_time' => $subject->subject->isPracticum() ? null : $endTime,
             'capacity' => $capacity,
             'status' => $status,
+            'room_is_manual_override' => $roomIsManualOverride,
             // Persist the Registrar's confirmation so an acknowledged
             // Capacity/Hours warning stays acknowledged (doesn't turn
             // yellow again) the next time this page loads — see the
@@ -477,6 +627,18 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'auto_generated_meta' => null,
             'is_workload_override' => (bool) $workloadWarning,
             'workload_override_by' => $workloadWarning ? $request->user()?->id : null,
+            // Room Grid "Move only <this section>" on a merged block —
+            // this row is being placed at a slot that may no longer
+            // match its former merge partner's, so the merge link is
+            // dropped WITHOUT touching the Faculty/Room/Days/Time this
+            // same update just set (unlike IrregularSectionMergeService::
+            // unmerge(), which wipes the row back to Draft/unscheduled —
+            // wrong here, since the row keeps a real, just-chosen slot).
+            // A no-op for a row that was never merged.
+            ...($request->boolean('clear_merge_link') ? [
+                'is_merged' => false,
+                'merged_into_section_subject_id' => null,
+            ] : []),
         ]);
 
         return response()->json([
@@ -704,10 +866,34 @@ class SectionSubjectController extends Controller implements HasMiddleware
         $section->loadMissing('major.department');
 
         $departmentId = $section->major?->department_id;
+        $collegeId = $section->major?->department?->college_id;
 
+        // Recommended = same scope tiers RecommendationService::recommendRooms()
+        // treats as eligible (resolveRoomScopeTier()): a Room scoped to this
+        // Section's own Department ("program" tier), a Room scoped only to
+        // this Section's College with no specific Department ("college"
+        // tier — e.g. "Ground Zero" under College of Criminology / All
+        // Programs), or a Room with no College/Department at all ("shared"
+        // tier — e.g. "All Colleges" rooms). Previously this only matched
+        // an exact department_id, so college-scoped rooms silently never
+        // appeared here even though the scoring engine elsewhere considers
+        // them valid — hence "No department rooms found." for sections
+        // whose only local options are college-scoped.
         $recommended = Room::query()
             ->where('status', 'Active')
-            ->when($departmentId, fn ($query) => $query->where('department_id', $departmentId))
+            ->where(function ($query) use ($departmentId, $collegeId) {
+                $query->whereNull('college_id')->whereNull('department_id');
+
+                if ($departmentId) {
+                    $query->orWhere('department_id', $departmentId);
+                }
+
+                if ($collegeId) {
+                    $query->orWhere(function ($q) use ($collegeId) {
+                        $q->where('college_id', $collegeId)->whereNull('department_id');
+                    });
+                }
+            })
             ->orderBy('room_name')
             ->get(['id', 'room_code', 'room_name', 'room_type', 'room_category', 'capacity', 'department_id', 'college_id']);
 
@@ -777,8 +963,10 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * plain `where('room_id', $room->id)` already leaves them out
      * without any extra filtering.
      */
-    public function roomSchedule(Section $section, Room $room): JsonResponse
+    public function roomSchedule(Request $request, Section $section, Room $room): JsonResponse
     {
+        $user = $request->user();
+
         $assignments = SectionSubject::query()
             ->where('room_id', $room->id)
             // The CURRENT Section's own bookings must always appear here,
@@ -797,27 +985,55 @@ class SectionSubjectController extends Controller implements HasMiddleware
             ->whereNotNull('days')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
-            ->with(['subject:id,subject_code,subject_title', 'faculty:id,first_name,last_name', 'section:id,section_code,section_name'])
-            ->get()
-            ->map(fn (SectionSubject $assignment) => [
-                'section_subject_id' => $assignment->id,
-                'subject_code' => $assignment->subject?->subject_code,
-                'subject_title' => $assignment->subject?->subject_title,
-                'section_id' => $assignment->section_id,
-                'section_code' => $assignment->section?->section_code,
-                'is_current_section' => $assignment->section_id === $section->id,
-                'faculty_id' => $assignment->faculty_id,
-                'faculty_name' => $assignment->faculty
-                    ? trim("{$assignment->faculty->first_name} {$assignment->faculty->last_name}")
-                    : null,
-                'days' => $assignment->days,
-                'start_time' => $assignment->start_time,
-                'end_time' => $assignment->end_time,
-                'status' => $assignment->status,
-                'is_auto_generated' => $assignment->is_auto_generated,
-                'is_manually_modified' => $assignment->is_manually_modified,
-                'room_is_manual_override' => $assignment->room_is_manual_override,
+            ->with([
+                'subject:id,subject_code,subject_title',
+                'faculty:id,first_name,last_name',
+                'section:id,section_code,section_name,section_type,major_id',
+                'section.major:id,name,code,department_id',
+                'section.major.department:id,name,college_id',
             ])
+            ->get()
+            ->map(function (SectionSubject $assignment) use ($section, $user) {
+                // EDIT authorization = SCHEDULING SCOPE, not "is this
+                // the currently selected Section". A user with
+                // scheduling authority over the assignment's OWN
+                // Section (their authorized College/Department) can
+                // move it regardless of which Section's Room Grid is
+                // currently open — $section (currently selected) is
+                // used below only to label is_current_section for the
+                // UI/confirmation-modal decision, never for this
+                // authorization check. See
+                // SectionPolicy::moveScheduleAssignment().
+                $canEdit = $user ? Gate::forUser($user)->allows('moveScheduleAssignment', $assignment->section) : false;
+
+                return [
+                    'section_subject_id' => $assignment->id,
+                    'subject_code' => $assignment->subject?->subject_code,
+                    'subject_title' => $assignment->subject?->subject_title,
+                    'section_id' => $assignment->section_id,
+                    'section_code' => $assignment->section?->section_code,
+                    'section_name' => $assignment->section?->section_name,
+                    'section_type' => $assignment->section?->section_type,
+                    'is_current_section' => $assignment->section_id === $section->id,
+                    // Whether the logged-in user is authorized to move/edit
+                    // THIS assignment, regardless of which Section's Room
+                    // Grid is currently open. Frontend uses this — never
+                    // is_current_section alone — to decide draggability.
+                    'can_edit' => $canEdit,
+                    'faculty_id' => $assignment->faculty_id,
+                    'faculty_name' => $assignment->faculty
+                        ? trim("{$assignment->faculty->first_name} {$assignment->faculty->last_name}")
+                        : null,
+                    'days' => $assignment->days,
+                    'start_time' => $assignment->start_time,
+                    'end_time' => $assignment->end_time,
+                    'status' => $assignment->status,
+                    'is_auto_generated' => $assignment->is_auto_generated,
+                    'is_manually_modified' => $assignment->is_manually_modified,
+                    'room_is_manual_override' => $assignment->room_is_manual_override,
+                    'is_merged' => $assignment->is_merged,
+                ];
+            })
             ->values();
 
         return response()->json([
