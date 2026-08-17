@@ -411,6 +411,20 @@ class ScheduleConflictService
      * resource, not a table scan, and it works identically for a
      * brand-new placement (no existing SectionSubject rows to lock
      * yet) as it does for a move.
+     *
+     * SECTION-LEVEL SCHEDULE FINALIZATION — this is also the single
+     * enforcement gate for that feature. Every caller listed above
+     * already routes its write through this method before touching
+     * anything, so checking `is_finalized` here (rather than
+     * duplicating the check at each call site) guarantees a finalized
+     * Section's schedule cannot be modified by ANY write path,
+     * present or future, without deliberately bypassing this method.
+     *
+     * @throws \App\Exceptions\SectionFinalizedException  when the
+     *         locked Section's schedule is finalized. Thrown from
+     *         inside the transaction so it rolls back with no
+     *         partial write, same pattern as ScheduleConflictAbort /
+     *         ScheduleVersionConflictException.
      */
     public function lockResources(?int $roomId, ?int $facultyId, ?int $sectionId): ?Section
     {
@@ -427,7 +441,13 @@ class ScheduleConflictService
         // to wait on — and pass it straight into checkSectionVersion()
         // / bumpScheduleVersion() below without a second round trip.
         if ($sectionId) {
-            return Section::whereKey($sectionId)->lockForUpdate()->first();
+            $lockedSection = Section::whereKey($sectionId)->lockForUpdate()->first();
+
+            if ($lockedSection !== null && $lockedSection->is_finalized) {
+                throw new \App\Exceptions\SectionFinalizedException($lockedSection);
+            }
+
+            return $lockedSection;
         }
 
         return null;

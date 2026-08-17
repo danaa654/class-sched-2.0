@@ -60,6 +60,13 @@ class HandleInertiaRequests extends Middleware
                     'manageFaculty' => $user->can('create', \App\Models\Faculty::class),
                     'manageRooms' => $user->can('create', \App\Models\Room::class),
                     'manageSections' => $user->can('create', \App\Models\Section::class),
+                    // Section-level schedule finalization/unlock —
+                    // Registrar/Admin only (SectionPolicy::finalize()/
+                    // unlockSchedule()). Gates the Finalize/Unlock
+                    // button in Sections/Index.vue; the real
+                    // enforcement is still the Policy + Gate on every
+                    // request, this is UI-visibility only.
+                    'manageFinalization' => \App\Support\AccessScope::isUnrestricted($user),
                 ] : [],
                 // The College a Dean/OIC is scoped to (null for
                 // unrestricted/Assistant Dean roles). Lets the

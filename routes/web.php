@@ -125,6 +125,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/sections/batch', [SectionController::class, 'storeBatch'])->name('scheduling.sections.store-batch');
     Route::put('/scheduling/sections/{section}', [SectionController::class, 'update'])->name('scheduling.sections.update');
     Route::delete('/scheduling/sections/{section}', [SectionController::class, 'destroy'])->name('scheduling.sections.destroy');
+    Route::post('/scheduling/sections/{section}/finalize', [SectionController::class, 'finalize'])->name('scheduling.sections.finalize');
+    Route::post('/scheduling/sections/{section}/unlock', [SectionController::class, 'unlock'])->name('scheduling.sections.unlock');
     Route::get('/scheduling/section-subjects', [SectionSubjectController::class, 'index'])->name('scheduling.section-subjects');
     Route::get('/scheduling/section-subjects/{section}', [SectionSubjectController::class, 'show'])->name('scheduling.section-subjects.show');
     // REAL-TIME SCHEDULE CHANGE DETECTION — lightweight polling target.

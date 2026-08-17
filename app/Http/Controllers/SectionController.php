@@ -332,6 +332,101 @@ class SectionController extends Controller
     }
 
     /**
+     * SECTION-LEVEL SCHEDULE FINALIZATION.
+     *
+     * Locks this Section's schedule so no further writes (Room Grid
+     * drag, manual cell edit, Save Schedule, Auto Generate) can touch
+     * it — see ScheduleConflictService::lockResources(), which is the
+     * actual runtime-enforced gate this flag controls. This endpoint
+     * only flips the flag; it does not itself validate that the
+     * schedule is "complete" — a Dean/Registrar can finalize a
+     * partially-scheduled Section deliberately (e.g. remaining rows
+     * are intentionally TBA), same as they can Save Schedule with
+     * gaps today.
+     */
+    public function finalize(Request $request, Section $section): RedirectResponse
+    {
+        $this->authorize('finalize', $section);
+
+        // Only a FULLY scheduled Section may be finalized — every
+        // SectionSubject must have Faculty/Room/Days/Start/End all
+        // filled in (or be a Practicum/OJT row, which never needs
+        // those — see SectionController::index()'s assigned_subjects_
+        // count withCount() for the exact same rule applied there).
+        $totalCount = $section->sectionSubjects()->count();
+        $assignedCount = $section->sectionSubjects()
+            ->where(function ($query) {
+                $query->where(function ($inner) {
+                    $inner->whereNotNull('faculty_id')
+                        ->whereNotNull('room_id')
+                        ->whereNotNull('days')
+                        ->whereNotNull('start_time')
+                        ->whereNotNull('end_time');
+                })->orWhereHas('subject', function ($subjectQuery) {
+                    $subjectQuery->where('subject_type', 'practicum');
+                });
+            })
+            ->count();
+
+        if ($totalCount === 0 || $assignedCount < $totalCount) {
+            return back()->with('error', "Section {$section->section_code} isn't fully scheduled yet — every subject needs Faculty, Room, Days, and Time before its schedule can be finalized.");
+        }
+
+        // NOTE: is_finalized/finalized_at/finalized_by are deliberately
+        // excluded from Section::$fillable (see the model's docblock)
+        // so a generic UpdateSectionRequest can never flip them — but
+        // that same guard means a plain ->update() here would silently
+        // discard all three (Laravel drops non-fillable attributes on
+        // mass assignment without erroring). forceFill() is the correct
+        // escape hatch for this one legitimate, controller-owned write
+        // path — same reasoning as schedule_version being off-limits to
+        // mass assignment (ScheduleConflictService::bumpScheduleVersion()
+        // instead uses increment(), which bypasses $fillable the same way).
+        $section->forceFill([
+            'is_finalized' => true,
+            'finalized_at' => now(),
+            'finalized_by' => $request->user()->id,
+        ])->save();
+
+        return back()->with('success', "Section {$section->section_code}'s schedule has been finalized.");
+    }
+
+    /**
+     * SECTION-LEVEL SCHEDULE FINALIZATION.
+     *
+     * Reverses finalize() — Registrar/Admin only (SectionPolicy::
+     * unlockSchedule()), deliberately not the Dean/OIC who finalized
+     * it. Requires a short reason so there's an audit trail of why a
+     * "done" schedule was reopened; this becomes part of the
+     * flash-message success text today, and is the natural place to
+     * hook in an activity log entry later using the same pattern as
+     * term_college_finalizations.
+     */
+    public function unlock(Request $request, Section $section): RedirectResponse
+    {
+        $this->authorize('unlockSchedule', $section);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        // Same forceFill() reasoning as finalize() above — is_finalized/
+        // finalized_at/finalized_by are guarded out of $fillable, so a
+        // plain ->update() here would silently no-op instead of
+        // unlocking the section.
+        $section->forceFill([
+            'is_finalized' => false,
+            'finalized_at' => null,
+            'finalized_by' => null,
+        ])->save();
+
+        return back()->with(
+            'success',
+            "Section {$section->section_code}'s schedule has been unlocked. Reason: {$validated['reason']}"
+        );
+    }
+
+    /**
      * Central "can this user create/preview a section for this Major's
      * College?" check, shared by store(), previewBatch(), and
      * storeBatch() so all three entry points into Section creation

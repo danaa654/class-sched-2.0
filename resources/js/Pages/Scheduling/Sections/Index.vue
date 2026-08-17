@@ -65,6 +65,10 @@ const page = usePage();
 // SectionController re-derives and re-checks the College server-side
 // on every create request regardless of what's shown here.
 const scopedCollegeId = computed(() => page.props.auth?.collegeId ?? null);
+// SECTION-LEVEL SCHEDULE FINALIZATION — Registrar/Admin only, both to
+// finalize AND to unlock (SectionPolicy::finalize()/unlockSchedule()).
+// This is UI-visibility only; the Policy re-checks server-side.
+const canManageFinalization = computed(() => !!page.props.auth?.can?.manageFinalization);
 const hasNoAssignedCollege = computed(() => !!page.props.auth?.hasNoAssignedCollege);
 
 // Show a toast whenever the backend flashes a success/error message.
@@ -724,6 +728,63 @@ const onDeleteSection = (section) => {
         }
     });
 };
+
+const onFinalizeSection = (section) => {
+    Swal.fire({
+        title: 'Finalize this schedule?',
+        html: `<strong>${section.section_name}</strong>'s schedule will be locked — Room Grid, manual edits, and Auto Generate will all be blocked until an Admin/Registrar unlocks it again.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#2563EB',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, finalize it',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.post(route('scheduling.sections.finalize', section.id), {}, {
+                preserveScroll: true,
+                onSuccess: () => onRefresh(),
+                onError: () => {
+                    toast.add({
+                        severity: 'error',
+                        summary: 'Could not finalize',
+                        detail: 'Something went wrong finalizing this schedule. Please try again.',
+                        life: 4000,
+                    });
+                },
+            });
+        }
+    });
+};
+
+const onUnlockSection = (section) => {
+    Swal.fire({
+        title: 'Unlock this schedule?',
+        input: 'text',
+        inputLabel: `Reason for unlocking ${section.section_name}`,
+        inputPlaceholder: 'e.g. Correcting a room conflict flagged by the Dean',
+        inputValidator: (value) => (!value ? 'A reason is required.' : undefined),
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#2563EB',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Unlock',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.post(route('scheduling.sections.unlock', section.id), { reason: result.value }, {
+                preserveScroll: true,
+                onSuccess: () => onRefresh(),
+                onError: () => {
+                    toast.add({
+                        severity: 'error',
+                        summary: 'Could not unlock',
+                        detail: 'Something went wrong unlocking this schedule. Please try again.',
+                        life: 4000,
+                    });
+                },
+            });
+        }
+    });
+};
 </script>
 
 <template>
@@ -864,10 +925,17 @@ const onDeleteSection = (section) => {
                         </Column>
                         <Column header="Status" style="width: 9rem">
                             <template #body="{ data }">
-                                <Tag
-                                    :value="data.status"
-                                    :severity="data.status === 'Active' ? 'success' : 'secondary'"
-                                />
+                                <div class="flex items-center gap-1.5">
+                                    <Tag
+                                        :value="data.status"
+                                        :severity="data.status === 'Active' ? 'success' : 'secondary'"
+                                    />
+                                    <i
+                                        v-if="data.is_finalized"
+                                        class="pi pi-lock text-amber-500"
+                                        v-tooltip.top="`Finalized${data.finalized_at ? ' ' + new Date(data.finalized_at).toLocaleDateString() : ''}`"
+                                    ></i>
+                                </div>
                             </template>
                         </Column>
                         <Column header="Scheduling" style="width: 11rem">
@@ -894,7 +962,7 @@ const onDeleteSection = (section) => {
                                 />
                             </template>
                         </Column>
-                        <Column header="Actions" style="width: 12rem">
+                        <Column header="Actions" style="width: 15rem">
                             <template #body="{ data }">
                                 <div class="flex gap-1">
                                     <Button
@@ -914,6 +982,28 @@ const onDeleteSection = (section) => {
                                         size="small"
                                         aria-label="Edit"
                                         @click.stop="openEdit(data)"
+                                    />
+                                    <Button
+                                        v-if="canManageFinalization && !data.is_finalized && data.total_subjects_count > 0 && data.assigned_subjects_count === data.total_subjects_count"
+                                        icon="pi pi-lock"
+                                        text
+                                        rounded
+                                        severity="warn"
+                                        size="small"
+                                        aria-label="Finalize Schedule"
+                                        v-tooltip.top="'Finalize schedule'"
+                                        @click.stop="onFinalizeSection(data)"
+                                    />
+                                    <Button
+                                        v-if="canManageFinalization && data.is_finalized"
+                                        icon="pi pi-lock-open"
+                                        text
+                                        rounded
+                                        severity="warn"
+                                        size="small"
+                                        aria-label="Unlock Schedule"
+                                        v-tooltip.top="'Unlock schedule'"
+                                        @click.stop="onUnlockSection(data)"
                                     />
                                     <Button
                                         icon="pi pi-trash"

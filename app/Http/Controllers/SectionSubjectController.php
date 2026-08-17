@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\ScheduleConflictAbort;
 use App\Exceptions\ScheduleVersionConflictException;
+use App\Exceptions\SectionFinalizedException;
 use App\Http\Requests\BatchUpdateSectionSubjectScheduleRequest;
 use App\Http\Requests\StoreSectionRequest;
 use App\Http\Requests\StoreSectionSubjectRequest;
@@ -744,6 +745,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 'code' => 'SCHEDULE_VERSION_CONFLICT',
                 'current_version' => $conflict->currentVersion,
             ], 409);
+        } catch (SectionFinalizedException $finalized) {
+            return response()->json([
+                'message' => "This section's schedule is finalized and can no longer be edited.",
+                'code' => 'SECTION_FINALIZED',
+            ], 423);
         }
 
         return response()->json([
@@ -905,6 +911,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 'message' => $abort->errors['faculty_id'] ?? reset($abort->errors),
                 'errors' => $abort->errors,
             ], 422);
+        } catch (SectionFinalizedException $finalized) {
+            return response()->json([
+                'message' => "This section's schedule is finalized and can no longer be edited.",
+                'code' => 'SECTION_FINALIZED',
+            ], 423);
         }
 
         return response()->json([
@@ -1043,6 +1054,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 'message' => $abort->errors['room_id'] ?? reset($abort->errors),
                 'errors' => $abort->errors,
             ], 422);
+        } catch (SectionFinalizedException $finalized) {
+            return response()->json([
+                'message' => "This section's schedule is finalized and can no longer be edited.",
+                'code' => 'SECTION_FINALIZED',
+            ], 423);
         }
 
         return response()->json([
@@ -1205,7 +1221,13 @@ class SectionSubjectController extends Controller implements HasMiddleware
             ->with([
                 'subject:id,subject_code,subject_title',
                 'faculty:id,first_name,last_name',
-                'section:id,section_code,section_name,section_type,major_id',
+                // is_finalized must be selected here — the map() below
+                // reads $assignment->section->is_finalized to drive the
+                // Room Grid's locked/padlock rendering. A column-limited
+                // eager load that omits it silently returns null (cast to
+                // false), so the block would never show as locked even on
+                // a genuinely finalized Section.
+                'section:id,section_code,section_name,section_type,major_id,is_finalized',
                 'section.major:id,name,code,department_id',
                 'section.major.department:id,name,college_id',
             ])
@@ -1236,7 +1258,16 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // THIS assignment, regardless of which Section's Room
                     // Grid is currently open. Frontend uses this — never
                     // is_current_section alone — to decide draggability.
-                    'can_edit' => $canEdit,
+                    // Also false whenever the assignment's own Section is
+                    // finalized (see is_finalized below) — a finalized
+                    // Section's blocks are never draggable no matter how
+                    // wide the user's scheduling scope is.
+                    'can_edit' => $canEdit && ! $assignment->section?->is_finalized,
+                    // SECTION-LEVEL SCHEDULE FINALIZATION — lets the Room
+                    // Grid render a distinct 4th visual state (locked
+                    // padlock, amber) for a finalized Section's blocks,
+                    // separate from "outside your scope" locked blocks.
+                    'is_finalized' => (bool) $assignment->section?->is_finalized,
                     'faculty_id' => $assignment->faculty_id,
                     'faculty_name' => $assignment->faculty
                         ? trim("{$assignment->faculty->first_name} {$assignment->faculty->last_name}")
@@ -1626,6 +1657,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 'code' => 'SCHEDULE_VERSION_CONFLICT',
                 'current_version' => $conflict->currentVersion,
             ], 409);
+        } catch (SectionFinalizedException $finalized) {
+            return response()->json([
+                'message' => "This section's schedule is finalized — Auto Generate can't run against it.",
+                'code' => 'SECTION_FINALIZED',
+            ], 423);
         }
 
         return response()->json([
@@ -1912,6 +1948,13 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 'code' => 'SCHEDULE_VERSION_CONFLICT',
                 'current_version' => $conflict->currentVersion,
             ], 409);
+        } catch (SectionFinalizedException $finalized) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => "This section's schedule is finalized and can no longer be edited.",
+                'code' => 'SECTION_FINALIZED',
+            ], 423);
         } catch (\Throwable $e) {
             DB::rollBack();
 
@@ -1990,26 +2033,30 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // ScheduleConflictService::bumpScheduleVersion() docblock for
         // why this must happen inside the same locked transaction as
         // the writes it's meant to announce.
-        DB::transaction(function () use ($section, $subjectIds) {
-            $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
+        try {
+            DB::transaction(function () use ($section, $subjectIds) {
+                $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
-            foreach ($subjectIds as $subjectId) {
-                $sectionSubject = SectionSubject::create([
-                    'section_id' => $section->id,
-                    'subject_id' => $subjectId,
-                    'source' => 'Curriculum',
-                    'capacity' => $section->estimated_students,
-                ]);
+                foreach ($subjectIds as $subjectId) {
+                    $sectionSubject = SectionSubject::create([
+                        'section_id' => $section->id,
+                        'subject_id' => $subjectId,
+                        'source' => 'Curriculum',
+                        'capacity' => $section->estimated_students,
+                    ]);
 
-                // EDP Code is minted the moment a subject is placed into the
-                // section — it doesn't wait for scheduling. No-op if the row
-                // somehow already has one.
-                $sectionSubject->setRelation('section', $section);
-                $this->edpCodeService->generateForSectionSubject($sectionSubject);
-            }
+                    // EDP Code is minted the moment a subject is placed into the
+                    // section — it doesn't wait for scheduling. No-op if the row
+                    // somehow already has one.
+                    $sectionSubject->setRelation('section', $section);
+                    $this->edpCodeService->generateForSectionSubject($sectionSubject);
+                }
 
-            $this->conflictService->bumpScheduleVersion($lockedSection);
-        });
+                $this->conflictService->bumpScheduleVersion($lockedSection);
+            });
+        } catch (SectionFinalizedException $finalized) {
+            return back()->with('error', "This section's schedule is finalized — subjects can't be added until it's unlocked.");
+        }
 
         $count = $subjectIds->count();
 
@@ -2074,7 +2121,8 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // Subjects view: schedule_version never moved, so
         // useSchedulePolling() had nothing to detect and the "No
         // subjects assigned yet." view never learned it was stale.
-        DB::transaction(function () use ($section, $validated) {
+        try {
+            DB::transaction(function () use ($section, $validated) {
             $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
             foreach ($validated['subject_ids'] as $subjectId) {
@@ -2099,7 +2147,10 @@ class SectionSubjectController extends Controller implements HasMiddleware
             }
 
             $this->conflictService->bumpScheduleVersion($lockedSection);
-        });
+            });
+        } catch (SectionFinalizedException $finalized) {
+            return back()->with('error', "This section's schedule is finalized — subjects can't be added until it's unlocked.");
+        }
 
         $count = count($validated['subject_ids']);
 
@@ -2118,13 +2169,17 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // schedule_version so any other tab already viewing this
         // Section's subject list is told, via the existing polling
         // banner, that what it's showing is now stale.
-        DB::transaction(function () use ($section, $subject) {
-            $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
+        try {
+            DB::transaction(function () use ($section, $subject) {
+                $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
-            $section->sectionSubjects()->where('subject_id', $subject->id)->delete();
+                $section->sectionSubjects()->where('subject_id', $subject->id)->delete();
 
-            $this->conflictService->bumpScheduleVersion($lockedSection);
-        });
+                $this->conflictService->bumpScheduleVersion($lockedSection);
+            });
+        } catch (SectionFinalizedException $finalized) {
+            return back()->with('error', "This section's schedule is finalized — subjects can't be removed until it's unlocked.");
+        }
 
         return back()->with('success', 'Subject removed from the section.');
     }

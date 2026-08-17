@@ -41,6 +41,13 @@ class Section extends Model
     ];
 
     /**
+     * Deliberately NOT in $fillable: is_finalized/finalized_at/
+     * finalized_by are only ever set by SectionController::finalize()
+     * / unlock(), never via mass assignment from a generic update
+     * request — same reasoning as schedule_version below.
+     */
+
+    /**
      * `section_code_active` is a DB-generated column (see the sections
      * migration) that exists purely to make the section_code unique
      * index soft-delete-aware. It carries no information the app needs
@@ -67,7 +74,37 @@ class Section extends Model
             // 2026_08_17_090000_add_schedule_version_to_sections_table
             // migration for the full mechanism.
             'schedule_version' => 'integer',
+            'is_finalized' => 'boolean',
+            'finalized_at' => 'datetime',
         ];
+    }
+
+    /**
+     * SECTION-LEVEL SCHEDULE FINALIZATION — the single source of truth
+     * the frontend and backend both defer to for "can this Section's
+     * schedule be touched right now?". Backend enforcement lives in
+     * ScheduleConflictService::lockResources() (throws
+     * SectionFinalizedException); this accessor is what RoomGrid.vue
+     * / SectionSubjects/Show.vue check to render the locked state
+     * before a request is even made.
+     */
+    public function isEditable(): bool
+    {
+        return ! $this->is_finalized;
+    }
+
+    /**
+     * The User who finalized this Section's schedule. Null while
+     * not finalized, and also null (without unlocking the schedule)
+     * if that User account is later deleted — see the
+     * add_finalization_fields_to_sections_table migration's
+     * nullOnDelete().
+     *
+     * @return BelongsTo<User, Section>
+     */
+    public function finalizedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'finalized_by');
     }
 
     /**

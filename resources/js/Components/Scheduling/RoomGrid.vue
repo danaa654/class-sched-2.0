@@ -378,18 +378,24 @@ const conflictedBlockIds = computed(() => {
 
 const blockHasConflict = (block) => !!block && conflictedBlockIds.value.has(block.section_subject_id);
 
-// Three visual states for a placed block, per spec:
+// Four visual states for a placed block, per spec:
 // - "current": this Section's own booking — normal blue, click to edit.
 // - "authorized": belongs to a DIFFERENT Section, but that Section is
 //   within the logged-in user's authorized scheduling scope
 //   (can_edit, computed server-side from College/Department scope —
 //   see roomSchedule()) — still draggable ("OTHER SECTION"), never
 //   forcing the user to switch to that Section first.
+// - "finalized": the schedule's Section has been finalized (locked)
+//   — visible, never draggable/editable, regardless of scheduling
+//   scope. Distinct color from "locked" (out-of-scope) so a Dean
+//   can tell "I can't touch this because it's someone else's
+//   college" apart from "I can't touch this because it's done."
 // - "locked": the schedule's Section is OUTSIDE the user's authorized
 //   scheduling scope — visible (Room Grid stays room-centric), never
 //   draggable/editable.
 const blockAuthState = (block) => {
     if (!block) return 'locked';
+    if (block.is_finalized) return 'finalized';
     if (block.is_current_section) return 'current';
     return block.can_edit ? 'authorized' : 'locked';
 };
@@ -399,6 +405,7 @@ const blockClass = (block) => {
     const state = blockAuthState(block);
     if (state === 'current') return 'bg-blue-50 border border-blue-200 text-blue-700 cursor-grab hover:border-blue-400';
     if (state === 'authorized') return 'bg-emerald-50 border border-emerald-300 border-dashed text-emerald-700 cursor-grab hover:border-emerald-500';
+    if (state === 'finalized') return 'bg-amber-50 border border-amber-300 text-amber-800 cursor-not-allowed';
     return 'bg-slate-100 border border-slate-300 text-slate-500 cursor-not-allowed';
 };
 
@@ -409,6 +416,7 @@ const blockTitle = (block) => {
     const state = blockAuthState(block);
     if (state === 'current') return 'Click to edit · Drag to move';
     if (state === 'authorized') return `Belongs to ${block.section_code} — within your authorized scheduling scope. Drag to move.`;
+    if (state === 'finalized') return `${block.section_code}'s schedule is finalized — an Admin/Registrar must unlock it before this can be edited.`;
     return 'This schedule is outside your scheduling scope.';
 };
 
@@ -1407,11 +1415,15 @@ const removeAssignment = async () => {
                                         :draggable="blockAt(day, rowIndex).can_edit"
                                         :title="blockTitle(blockAt(day, rowIndex))"
                                         @dragstart="onDragStartBlock(blockAt(day, rowIndex))"
-                                        @click="blockAt(day, rowIndex).is_current_section ? openEditModal(blockAt(day, rowIndex)) : null"
+                                        @click="blockAt(day, rowIndex).is_current_section && !blockAt(day, rowIndex).is_finalized ? openEditModal(blockAt(day, rowIndex)) : null"
                                     >
                                         <i
                                             v-if="blockHasConflict(blockAt(day, rowIndex))"
                                             class="pi pi-exclamation-triangle absolute top-1 right-1 text-[10px] text-red-600"
+                                        ></i>
+                                        <i
+                                            v-else-if="blockAt(day, rowIndex).is_finalized"
+                                            class="pi pi-lock absolute top-1 right-1 text-[9px] text-amber-700 opacity-80"
                                         ></i>
                                         <i
                                             v-else-if="blockAt(day, rowIndex).is_current_section"
@@ -1431,6 +1443,7 @@ const removeAssignment = async () => {
                                         </div>
                                         <div v-if="blockAt(day, rowIndex).faculty_name" class="truncate text-[10px] opacity-75">{{ blockAt(day, rowIndex).faculty_name }}</div>
                                         <div v-if="blockHasConflict(blockAt(day, rowIndex))" class="text-[9px] font-semibold text-red-700 truncate">⚠ Conflict — needs rescheduling</div>
+                                        <div v-else-if="blockAt(day, rowIndex).is_finalized" class="text-[9px] italic opacity-75 truncate">Finalized — locked</div>
                                         <div v-else-if="!blockAt(day, rowIndex).can_edit" class="text-[9px] italic opacity-75 truncate">Outside your scheduling scope</div>
                                     </div>
                                 </div>
@@ -1452,7 +1465,7 @@ const removeAssignment = async () => {
                 </div>
                 <p class="text-[11px] text-slate-400 mt-2">
                     Drag a subject from "Unscheduled Subjects" onto a slot to place it, or drag an existing block to move it. Click a block to edit its Faculty, Hours/Week, Meetings/Week, or Days.
-                    Schedules belonging to any section within your authorized scheduling scope can be moved from here, even if it isn't the currently selected section — schedules outside your scope stay locked. The Lunch Break slot is fixed and can't be scheduled into.
+                    Schedules belonging to any section within your authorized scheduling scope can be moved from here, even if it isn't the currently selected section — schedules outside your scope stay locked, and a finalized section's schedule (amber, padlock) stays locked for everyone until an Admin/Registrar unlocks it. The Lunch Break slot is fixed and can't be scheduled into.
                 </p>
             </div>
         </div>
@@ -1471,11 +1484,11 @@ const removeAssignment = async () => {
                 <li
                     v-for="row in unscheduledSubjects"
                     :key="row.id"
-                    draggable="true"
+                    :draggable="!section.is_finalized"
                     class="rounded-md px-2 py-1.5 text-xs border border-slate-200 cursor-grab hover:border-blue-300 hover:bg-blue-50/40"
                     :class="subjectCategoryAccentClass(row)"
-                    :title="!selectedRoom ? 'Select a room first' : 'Drag onto the grid'"
-                    @dragstart="onDragStartNew(row)"
+                    :title="section.is_finalized ? 'This section is finalized and can\'t be edited.' : (!selectedRoom ? 'Select a room first' : 'Drag onto the grid')"
+                    @dragstart="section.is_finalized ? null : onDragStartNew(row)"
                 >
                     <div class="font-medium text-slate-700 truncate flex items-center gap-1.5">
                         <span class="inline-block h-1.5 w-1.5 rounded-full shrink-0" :class="subjectCategoryDotClass(row)"></span>
