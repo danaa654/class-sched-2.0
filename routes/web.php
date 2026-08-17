@@ -14,6 +14,7 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\FacultyAvailabilityController;
 use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\MajorController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ReportsController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\RoomRecommendationController;
@@ -189,6 +190,17 @@ Route::middleware('auth')->group(function () {
     // submits every row at once here; all rows save in a single
     // transaction (Prompt 8.4 — Manual Scheduling Per Subject).
     Route::post('/scheduling/section-subjects/{section}/schedule/batch', [SectionSubjectController::class, 'batchUpdateSchedule'])->name('scheduling.section-subjects.schedule.batch');
+    // SCHEDULING NOTIFICATION SYSTEM (spec Section 11) — polling API
+    // + page. All read/mark-read only; notifications themselves are
+    // only ever created server-side by NotificationService from
+    // inside the scheduling operations that trigger them.
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications');
+    Route::get('/notifications/recent', [NotificationController::class, 'recent'])->name('notifications.recent');
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount'])->name('notifications.unread-count');
+    Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
+    Route::patch('/notifications/mark-all-read', [NotificationController::class, 'markAllRead'])->name('notifications.mark-all-read');
+    Route::get('/notifications/{notification}/redirect', [NotificationController::class, 'redirect'])->name('notifications.redirect');
+
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
 
     // SETTINGS — system-wide configuration only (see SettingsController

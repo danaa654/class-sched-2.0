@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\AcademicTerm;
+use App\Models\Notification;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -88,6 +89,14 @@ class HandleInertiaRequests extends Middleware
                 ->where('status', 'Active')
                 ->with(['schoolYear:id,name', 'semester:id,name'])
                 ->first(['id', 'school_year_id', 'semester_id', 'status']),
+            // SCHEDULING NOTIFICATION SYSTEM — unread count for the
+            // header bell badge (see NotificationBell.vue), shared on
+            // every full Inertia visit so the badge is correct on
+            // first paint before the poll kicks in. A closure so it's
+            // never queried on a partial reload that doesn't need it.
+            'unreadNotificationCount' => fn () => $user
+                ? Notification::query()->where('recipient_user_id', $user->id)->where('is_read', false)->count()
+                : 0,
         ];
     }
 }

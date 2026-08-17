@@ -10,6 +10,7 @@ use App\Models\AcademicTerm;
 use App\Models\Curriculum;
 use App\Models\Major;
 use App\Models\Section;
+use App\Services\NotificationService;
 use App\Services\SectionBatchGeneratorService;
 use App\Support\AccessScope;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -165,7 +166,7 @@ class SectionController extends Controller
     /**
      * Store a newly created section.
      */
-    public function store(StoreSectionRequest $request): RedirectResponse
+    public function store(StoreSectionRequest $request, NotificationService $notifications): RedirectResponse
     {
         // NEVER trust an implicit College from the frontend — derive it
         // from the Major record server-side (spec Section 23).
@@ -177,8 +178,16 @@ class SectionController extends Controller
         // retries) can fire two requests that both pass validation
         // before either one has inserted. Catch that race here instead
         // of letting it surface as a raw 500 error page.
+        //
+        // TRANSACTIONAL CREATE + NOTIFY — same reasoning as finalize()/
+        // unlock() below: the insert, its audit row, and the Dean/OIC
+        // "Section Created" notification all commit together or not
+        // at all.
         try {
-            Section::create($request->validated());
+            DB::transaction(function () use ($request, $notifications) {
+                $section = Section::create($request->validated());
+                $notifications->created($section, $request->user());
+            });
         } catch (UniqueConstraintViolationException $e) {
             throw ValidationException::withMessages([
                 'section_code' => 'This section code was just taken by another request. Please use a different code.',
@@ -250,7 +259,7 @@ class SectionController extends Controller
      * the common Academic Year / Semester / Program / Year Level /
      * Prospectus (Curriculum) / Status / Remarks.
      */
-    public function storeBatch(StoreSectionBatchRequest $request): RedirectResponse
+    public function storeBatch(StoreSectionBatchRequest $request, NotificationService $notifications): RedirectResponse
     {
         $data = $request->validated();
 
@@ -265,9 +274,9 @@ class SectionController extends Controller
         $this->authorizeSectionCollege($request, (int) $data['major_id']);
 
         try {
-            DB::transaction(function () use ($data) {
+            DB::transaction(function () use ($data, $request, $notifications) {
                 foreach ($data['sections'] as $row) {
-                    Section::create([
+                    $section = Section::create([
                         'section_code' => $row['section_code'],
                         'section_name' => $row['section_code'],
                         'section_type' => $data['section_type'],
@@ -280,6 +289,13 @@ class SectionController extends Controller
                         'status' => $data['status'],
                         'remarks' => $data['remarks'] ?? null,
                     ]);
+
+                    // One "Section Created" notification per row — a
+                    // batch of BSIT-1A/1B/1C is still each its own
+                    // real Section (see this method's docblock), so
+                    // each gets its own notification rather than one
+                    // rolled-up "3 sections created" message.
+                    $notifications->created($section, $request->user());
                 }
             });
         } catch (UniqueConstraintViolationException $e) {
@@ -344,7 +360,7 @@ class SectionController extends Controller
      * are intentionally TBA), same as they can Save Schedule with
      * gaps today.
      */
-    public function finalize(Request $request, Section $section): RedirectResponse
+    public function finalize(Request $request, Section $section, NotificationService $notifications): RedirectResponse
     {
         $this->authorize('finalize', $section);
 
@@ -372,21 +388,33 @@ class SectionController extends Controller
             return back()->with('error', "Section {$section->section_code} isn't fully scheduled yet — every subject needs Faculty, Room, Days, and Time before its schedule can be finalized.");
         }
 
-        // NOTE: is_finalized/finalized_at/finalized_by are deliberately
-        // excluded from Section::$fillable (see the model's docblock)
-        // so a generic UpdateSectionRequest can never flip them — but
-        // that same guard means a plain ->update() here would silently
-        // discard all three (Laravel drops non-fillable attributes on
-        // mass assignment without erroring). forceFill() is the correct
-        // escape hatch for this one legitimate, controller-owned write
-        // path — same reasoning as schedule_version being off-limits to
-        // mass assignment (ScheduleConflictService::bumpScheduleVersion()
-        // instead uses increment(), which bypasses $fillable the same way).
-        $section->forceFill([
-            'is_finalized' => true,
-            'finalized_at' => now(),
-            'finalized_by' => $request->user()->id,
-        ])->save();
+        // TRANSACTIONAL FINALIZE + NOTIFY (spec Section 10) — the lock
+        // write, the audit row, and the Dean/OIC notification all
+        // commit together or not at all. If anything inside throws,
+        // the whole thing rolls back: the Section is never left
+        // locked without its audit/notification, and a notification
+        // is never created for a finalize that didn't actually stick.
+        DB::transaction(function () use ($request, $section, $notifications) {
+            // NOTE: is_finalized/finalized_at/finalized_by are
+            // deliberately excluded from Section::$fillable (see the
+            // model's docblock) so a generic UpdateSectionRequest can
+            // never flip them — but that same guard means a plain
+            // ->update() here would silently discard all three
+            // (Laravel drops non-fillable attributes on mass
+            // assignment without erroring). forceFill() is the
+            // correct escape hatch for this one legitimate,
+            // controller-owned write path — same reasoning as
+            // schedule_version being off-limits to mass assignment
+            // (ScheduleConflictService::bumpScheduleVersion() instead
+            // uses increment(), which bypasses $fillable the same way).
+            $section->forceFill([
+                'is_finalized' => true,
+                'finalized_at' => now(),
+                'finalized_by' => $request->user()->id,
+            ])->save();
+
+            $notifications->finalized($section, $request->user());
+        });
 
         return back()->with('success', "Section {$section->section_code}'s schedule has been finalized.");
     }
@@ -402,7 +430,7 @@ class SectionController extends Controller
      * hook in an activity log entry later using the same pattern as
      * term_college_finalizations.
      */
-    public function unlock(Request $request, Section $section): RedirectResponse
+    public function unlock(Request $request, Section $section, NotificationService $notifications): RedirectResponse
     {
         $this->authorize('unlockSchedule', $section);
 
@@ -410,15 +438,22 @@ class SectionController extends Controller
             'reason' => ['required', 'string', 'max:500'],
         ]);
 
-        // Same forceFill() reasoning as finalize() above — is_finalized/
-        // finalized_at/finalized_by are guarded out of $fillable, so a
-        // plain ->update() here would silently no-op instead of
-        // unlocking the section.
-        $section->forceFill([
-            'is_finalized' => false,
-            'finalized_at' => null,
-            'finalized_by' => null,
-        ])->save();
+        // TRANSACTIONAL UNLOCK + NOTIFY — same reasoning as finalize()
+        // above (spec Section 10): unlock write, audit row, and
+        // Dean/OIC notification all commit together or not at all.
+        DB::transaction(function () use ($request, $section, $notifications, $validated) {
+            // Same forceFill() reasoning as finalize() above —
+            // is_finalized/finalized_at/finalized_by are guarded out
+            // of $fillable, so a plain ->update() here would silently
+            // no-op instead of unlocking the section.
+            $section->forceFill([
+                'is_finalized' => false,
+                'finalized_at' => null,
+                'finalized_by' => null,
+            ])->save();
+
+            $notifications->unlocked($section, $request->user(), $validated['reason']);
+        });
 
         return back()->with(
             'success',

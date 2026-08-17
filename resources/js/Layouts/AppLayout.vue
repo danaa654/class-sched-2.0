@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
 import Button from 'primevue/button';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
+import NotificationBell from '@/Components/NotificationBell.vue';
 import AmbientBackground from '@/Components/AmbientBackground.vue';
 import { useTheme } from '@/composables/useTheme';
 
@@ -125,6 +126,7 @@ const isActive = (routeName) => {
                     <i class="pi pi-calendar text-[11px]"></i>
                     {{ activeAcademicTermLabel }}
                 </span>
+                <NotificationBell v-if="user" />
                 <ThemeToggle />
                 <span v-if="user" class="text-sm text-slate-300">
                     {{ user.name }}

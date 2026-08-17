@@ -23,6 +23,7 @@ use App\Services\EDPCodeService;
 use App\Services\FacultyWorkloadService;
 use App\Services\IrregularSectionMergeService;
 use App\Services\RecommendationService;
+use App\Services\NotificationService;
 use App\Services\ScheduleConflictService;
 use Closure;
 use Illuminate\Http\JsonResponse;
@@ -43,7 +44,8 @@ class SectionSubjectController extends Controller implements HasMiddleware
         private readonly RecommendationService $recommendationService,
         private readonly AutoScheduleService $autoScheduleService,
         private readonly FacultyWorkloadService $workloadService,
-        private readonly IrregularSectionMergeService $mergeService
+        private readonly IrregularSectionMergeService $mergeService,
+        private readonly NotificationService $notifications
     ) {
     }
 
@@ -577,6 +579,22 @@ class SectionSubjectController extends Controller implements HasMiddleware
             return response()->json(['errors' => $errors], 422);
         }
 
+        // SCHEDULING NOTIFICATION SYSTEM (spec Section 7) — snapshot
+        // the row's CURRENT values before the write below so they can
+        // be diffed against what actually got saved. Taken outside
+        // the locked transaction (read-only, and the values being
+        // compared are the same ones already merged above), but the
+        // notification itself is only ever fired after the
+        // transaction below commits successfully — see the dispatch
+        // call after DB::transaction().
+        $beforeSnapshot = [
+            'faculty_id' => $subject->faculty_id,
+            'room_id' => $subject->room_id,
+            'days' => $subject->days,
+            'start_time' => $subject->start_time,
+            'end_time' => $subject->end_time,
+        ];
+
         // MANUAL ASSIGNMENT VALIDATION — Faculty Workload. Not a hard
         // conflict (see workloadWarningFor()'s docblock): the Registrar
         // gets a 409 "Teaching Load Limit Exceeded" warning the first
@@ -740,6 +758,19 @@ class SectionSubjectController extends Controller implements HasMiddleware
         } catch (ScheduleConflictAbort $abort) {
             return response()->json(['errors' => $abort->errors], 422);
         } catch (ScheduleVersionConflictException $conflict) {
+            // SCHEDULING NOTIFICATION SYSTEM (audit spec Section 4) —
+            // a genuine race: another user's save committed between
+            // this request loading the row and it trying to write.
+            // Admin/Registrar only, deduplicated per Section by the
+            // same 5s window every other notification uses, so a
+            // burst of retries against the same busy row doesn't fan
+            // out into a wall of alerts.
+            $this->notifications->concurrencyConflict(
+                $subject->section ?? $subject->section()->first(),
+                $request->user(),
+                "Schedule conflict on {$subject->section?->section_code}: another user saved a change to this section's schedule first."
+            );
+
             return response()->json([
                 'message' => 'Schedule has changed since it was loaded. Please refresh the schedule and try again.',
                 'code' => 'SCHEDULE_VERSION_CONFLICT',
@@ -752,11 +783,77 @@ class SectionSubjectController extends Controller implements HasMiddleware
             ], 423);
         }
 
+        // SCHEDULING NOTIFICATION SYSTEM (spec Section 7) — only
+        // reached after the transaction above committed a real,
+        // conflict-free write (a rolled-back attempt returns early
+        // via one of the catch blocks above and never reaches here,
+        // so a failed save never produces a notification — spec
+        // Section 17). Diff the before/after snapshot into one
+        // notification covering every field that actually changed in
+        // this single save, never one notification per field.
+        $subject->loadMissing('section', 'faculty', 'room');
+        $changes = $this->diffScheduleSnapshot($beforeSnapshot, $subject);
+        if (! empty($changes) && $subject->section) {
+            $this->notifications->scheduleUpdated($subject->section, $subject, $request->user(), $changes);
+        }
+
         return response()->json([
             'sectionSubject' => $subject->fresh(['subject', 'faculty', 'room']),
             'schedule_version' => $subject->section()->value('schedule_version'),
             'message' => 'Schedule updated.',
         ]);
+    }
+
+    /**
+     * Turns a before/after SectionSubject schedule snapshot into the
+     * list of human-readable field changes NotificationService::
+     * scheduleUpdated() needs (spec Section 7's Faculty/Room/Time/Day
+     * examples). Only fields that actually changed are included.
+     *
+     * @param  array{faculty_id: int|null, room_id: int|null, days: string|null, start_time: string|null, end_time: string|null}  $before
+     * @return list<array{field: string, old: string|null, new: string|null}>
+     */
+    private function diffScheduleSnapshot(array $before, SectionSubject $after): array
+    {
+        $changes = [];
+
+        if ($before['faculty_id'] !== $after->faculty_id) {
+            $changes[] = [
+                'field' => 'Faculty',
+                'old' => $before['faculty_id'] ? Faculty::find($before['faculty_id'])?->full_name : null,
+                'new' => $after->faculty?->full_name,
+            ];
+        }
+
+        if ($before['room_id'] !== $after->room_id) {
+            $changes[] = [
+                'field' => 'Room',
+                'old' => $before['room_id'] ? Room::find($before['room_id'])?->room_name : null,
+                'new' => $after->room?->room_name,
+            ];
+        }
+
+        if ($before['days'] !== $after->days) {
+            $changes[] = [
+                'field' => 'Day',
+                'old' => $before['days'],
+                'new' => $after->days,
+            ];
+        }
+
+        if ($before['start_time'] !== $after->start_time || $before['end_time'] !== $after->end_time) {
+            $formatTime = fn (?string $start, ?string $end) => $start && $end
+                ? date('g:i A', strtotime($start)).' – '.date('g:i A', strtotime($end))
+                : null;
+
+            $changes[] = [
+                'field' => 'Time',
+                'old' => $formatTime($before['start_time'], $before['end_time']),
+                'new' => $formatTime($after->start_time, $after->end_time),
+            ];
+        }
+
+        return $changes;
     }
 
     /**
@@ -1664,6 +1761,22 @@ class SectionSubjectController extends Controller implements HasMiddleware
             ], 423);
         }
 
+        // SCHEDULING NOTIFICATION SYSTEM (audit spec Section 5) — one
+        // notification for the whole run, COMPLETED or NEEDS_ATTENTION
+        // depending on whether every subject was placed. Deliberately
+        // outside AutoScheduleService::generate() itself (that method
+        // runs several short-lived transactions internally, one per
+        // placement, rather than one long one — see its docblock), so
+        // this fires once the whole run (not any single placement) is
+        // known to have finished.
+        $this->notifications->autoScheduleFinished(
+            $section,
+            $request->user(),
+            (int) $summary['scheduled'],
+            (int) $summary['total'],
+            $summary['unresolved'] ?? []
+        );
+
         return response()->json([
             ...$summary,
             'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
@@ -1681,9 +1794,25 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * (never manually-assigned ones) and runs Auto Generate again from
      * a clean slate.
      */
-    public function regenerateSchedule(Section $section): JsonResponse
+    public function regenerateSchedule(Request $request, Section $section): JsonResponse
     {
         $summary = $this->autoScheduleService->regenerate($section);
+
+        // SCHEDULING NOTIFICATION SYSTEM (audit spec Section 5) — same
+        // reasoning as autoGenerate() above. A regenerate that
+        // replaces an existing (possibly previously-saved) schedule
+        // is exactly the "Auto schedule overwritten/replaced" case
+        // the spec calls out as worth treating as an important event
+        // in its own right — covered here by the same COMPLETED/
+        // NEEDS_ATTENTION notification, since the recipient cares
+        // about the resulting state either way, not the mechanism.
+        $this->notifications->autoScheduleFinished(
+            $section,
+            $request->user(),
+            (int) $summary['scheduled'],
+            (int) $summary['total'],
+            $summary['unresolved'] ?? []
+        );
 
         return response()->json([
             ...$summary,
@@ -2122,7 +2251,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // useSchedulePolling() had nothing to detect and the "No
         // subjects assigned yet." view never learned it was stale.
         try {
-            DB::transaction(function () use ($section, $validated) {
+            DB::transaction(function () use ($section, $validated, $request) {
             $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
             foreach ($validated['subject_ids'] as $subjectId) {
@@ -2144,6 +2273,13 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 // somehow already has one.
                 $sectionSubject->setRelation('section', $section->loadMissing('major'));
                 $this->edpCodeService->generateForSectionSubject($sectionSubject);
+
+                // SCHEDULING NOTIFICATION SYSTEM (audit spec Section
+                // 6) — one notification per subject added, matching
+                // the "CAP102 was added to BSIT-4B" example. Fired
+                // inside this same transaction so a rolled-back add
+                // never produces a notification.
+                $this->notifications->subjectAdded($section, $sectionSubject, $request->user());
             }
 
             $this->conflictService->bumpScheduleVersion($lockedSection);
@@ -2173,9 +2309,20 @@ class SectionSubjectController extends Controller implements HasMiddleware
             DB::transaction(function () use ($section, $subject) {
                 $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
+                // Capture the code before the delete — the row (and
+                // its ->subject relation) won't exist to load from
+                // afterward. See NotificationService::subjectRemoved()
+                // docblock.
+                $subjectCode = $subject->subject_code;
+
                 $section->sectionSubjects()->where('subject_id', $subject->id)->delete();
 
                 $this->conflictService->bumpScheduleVersion($lockedSection);
+
+                // SCHEDULING NOTIFICATION SYSTEM (audit spec Section
+                // 6) — fired inside this same transaction so a
+                // rolled-back removal never produces a notification.
+                $this->notifications->subjectRemoved($section, $subjectCode, request()->user());
             });
         } catch (SectionFinalizedException $finalized) {
             return back()->with('error', "This section's schedule is finalized — subjects can't be removed until it's unlocked.");
