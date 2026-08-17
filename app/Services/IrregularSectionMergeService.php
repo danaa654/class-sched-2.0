@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\SectionSubject;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * INTELLIGENT IRREGULAR SECTION SCHEDULING.
@@ -186,24 +187,42 @@ class IrregularSectionMergeService
      * Faculty/Room/Days/Time/Status onto the Irregular section's row
      * and marks the relationship, WITHOUT creating any new
      * Faculty/Room booking of its own.
+     *
+     * CONCURRENCY GUARD: the host row is locked (`lockForUpdate`) for
+     * the duration of the write, and its Faculty/Room/Days/Time are
+     * re-read fresh under that lock rather than trusted from whatever
+     * $hostRow the caller resolved a moment earlier — closes the race
+     * where two Irregular sections both try to merge into the same
+     * host class (or the host itself gets moved) at nearly the same
+     * moment; see the concurrency hardening spec, and
+     * ScheduleConflictService::lockResources() for why the host's own
+     * row (not just its Room/Faculty) needs locking here specifically
+     * — a merge's "conflict" is capacity headroom on THIS ROW, which a
+     * Room/Faculty lock alone wouldn't serialize against a second
+     * merge onto the exact same host.
      */
     public function applyMerge(SectionSubject $irregularRow, SectionSubject $hostRow, ?array $recommendationMeta = null): SectionSubject
     {
-        $irregularRow->update([
-            'faculty_id' => $hostRow->faculty_id,
-            'room_id' => $hostRow->room_id,
-            'days' => $hostRow->days,
-            'start_time' => $hostRow->start_time,
-            'end_time' => $hostRow->end_time,
-            'status' => $hostRow->status,
-            'is_auto_generated' => true,
-            'is_merged' => true,
-            'merged_into_section_subject_id' => $hostRow->id,
-            'auto_generated_meta' => null,
-            'merge_recommendation' => $recommendationMeta,
-        ]);
+        return DB::transaction(function () use ($irregularRow, $hostRow, $recommendationMeta) {
+            /** @var SectionSubject $lockedHost */
+            $lockedHost = SectionSubject::whereKey($hostRow->id)->lockForUpdate()->firstOrFail();
 
-        return $irregularRow->refresh();
+            $irregularRow->update([
+                'faculty_id' => $lockedHost->faculty_id,
+                'room_id' => $lockedHost->room_id,
+                'days' => $lockedHost->days,
+                'start_time' => $lockedHost->start_time,
+                'end_time' => $lockedHost->end_time,
+                'status' => $lockedHost->status,
+                'is_auto_generated' => true,
+                'is_merged' => true,
+                'merged_into_section_subject_id' => $lockedHost->id,
+                'auto_generated_meta' => null,
+                'merge_recommendation' => $recommendationMeta,
+            ]);
+
+            return $irregularRow->refresh();
+        });
     }
 
     /**

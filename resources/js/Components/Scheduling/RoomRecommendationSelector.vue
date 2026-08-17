@@ -54,6 +54,10 @@ const suggestions = ref([]);
 const loadingOptions = ref(false);
 const applying = ref(false);
 const recommendedIds = ref(new Set());
+// Surfaces a 422 conflict (e.g. "Room Conflict: ... already booked
+// for ... on Tue,Thu 10:30-12:00") right where the pick was made,
+// instead of only logging it while silently reverting the dropdown.
+const conflictError = ref('');
 
 watch(
     () => props.modelValue,
@@ -161,6 +165,7 @@ const select = async (event) => {
     if (!picked?.id || picked.id === current.value?.id) return;
 
     applying.value = true;
+    conflictError.value = '';
     try {
         const response = await fetch(overrideUrl(), {
             method: 'POST',
@@ -181,6 +186,7 @@ const select = async (event) => {
     } catch (e) {
         // Revert the visible text back to the last confirmed room on failure.
         query.value = current.value?.name ?? '';
+        conflictError.value = e.message || 'Could not apply this room selection.';
         // eslint-disable-next-line no-console
         console.error(e);
     } finally {
@@ -245,6 +251,14 @@ const select = async (event) => {
                 <span class="text-xs text-slate-500 px-2">No rooms found.</span>
             </template>
         </AutoComplete>
+
+        <!-- Conflict error — set when the backend rejects this pick
+             (e.g. a Room Conflict with another Section already using
+             this Day/Time). Tells the Registrar WHY the pick snapped
+             back instead of it just silently reverting. -->
+        <p v-if="conflictError" class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1 mt-1.5">
+            <i class="pi pi-exclamation-circle mr-1"></i>{{ conflictError }}
+        </p>
 
         <!-- Recommendation Badge -->
         <div class="flex items-center gap-1 mt-1.5">

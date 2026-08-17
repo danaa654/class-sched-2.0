@@ -14,9 +14,12 @@ use Illuminate\Support\Facades\Log;
  *
  * When a Subject is already scheduled for one "sibling" Section of the
  * same cohort (same Major, Curriculum, Academic Year, Semester, and
- * Year Level — e.g. BSIT-4A/4B/4C/4D), this service tries to copy that
- * exact assignment onto another sibling Section that still needs it,
- * changing only the Day(s).
+ * Year Level — e.g. BSIT-4A/4B/4C/4D), this service tries to build a
+ * NEW, independent assignment for the target Section using that
+ * sibling's Faculty/Room/duration as a PREFERENCE — never the exact
+ * assignment itself — changing the Day(s) so the target Section never
+ * ends up double-booked into the donor's own slot. The donor's
+ * SectionSubject row is only ever READ here, never written to.
  *
  * This is a SHORTCUT that runs BEFORE the general-purpose
  * RecommendationService ranking, for two reasons the Registrar's

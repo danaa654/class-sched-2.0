@@ -5,6 +5,9 @@ namespace App\Services;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Subject;
+use App\Exceptions\ScheduleConflictAbort;
+use App\Exceptions\ScheduleVersionConflictException;
+use Illuminate\Support\Facades\DB;
 
 /**
  * "⚡ Auto Generate Schedule" (Prompt 8.9).
@@ -54,10 +57,29 @@ class AutoScheduleService
     /**
      * Generate schedules for every unscheduled Subject in the Section.
      * Returns a summary the frontend uses to render the review panel.
+     *
+     * CONCURRENCY HARDENING (spec Section 15) — $expectedVersion is
+     * the Section's schedule_version the frontend had loaded right
+     * before clicking "Auto Generate". When supplied, it's checked
+     * under lock (see ScheduleConflictService::checkSectionVersion())
+     * BEFORE any row is touched, so a run started against stale data
+     * (another user already changed this Section's schedule) is
+     * rejected with a ScheduleVersionConflictException rather than
+     * generating on top of it. Every accepted placement below still
+     * goes through persistIfStillAvailable()'s own lock + re-validate
+     * + write, so this is a belt-and-suspenders check at the start of
+     * the run, not a substitute for it.
+     *
+     * @throws ScheduleVersionConflictException
      */
-    public function generate(Section $section): array
+    public function generate(Section $section, ?int $expectedVersion = null): array
     {
         $section->loadMissing('major.department');
+
+        DB::transaction(function () use ($section, $expectedVersion) {
+            $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
+            $this->conflictService->checkSectionVersion($lockedSection, $expectedVersion);
+        });
 
         $targets = $this->unscheduledRows($section);
 
@@ -101,6 +123,18 @@ class AutoScheduleService
                 .' merged into existing Regular section classes.';
         }
 
+        // Advance the Section's schedule_version exactly once for
+        // this run, but only when it actually wrote something — a run
+        // that placed nothing (every candidate lost its race, or
+        // there was simply nothing left to try) must not bump the
+        // version with no corresponding change (spec Section 20).
+        if (count($results) > 0) {
+            DB::transaction(function () use ($section) {
+                $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
+                $this->conflictService->bumpScheduleVersion($lockedSection);
+            });
+        }
+
         return [
             'total' => $targets->count(),
             'scheduled' => count($results),
@@ -120,21 +154,31 @@ class AutoScheduleService
      */
     public function clear(Section $section): int
     {
-        return $section->sectionSubjects()
-            ->where('is_auto_generated', true)
-            ->update([
-                'faculty_id' => null,
-                'room_id' => null,
-                'days' => null,
-                'start_time' => null,
-                'end_time' => null,
-                'status' => 'Draft',
-                'is_auto_generated' => false,
-                'auto_generated_meta' => null,
-                'is_merged' => false,
-                'merged_into_section_subject_id' => null,
-                'merge_recommendation' => null,
-            ]);
+        return DB::transaction(function () use ($section) {
+            $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
+
+            $cleared = $section->sectionSubjects()
+                ->where('is_auto_generated', true)
+                ->update([
+                    'faculty_id' => null,
+                    'room_id' => null,
+                    'days' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'status' => 'Draft',
+                    'is_auto_generated' => false,
+                    'auto_generated_meta' => null,
+                    'is_merged' => false,
+                    'merged_into_section_subject_id' => null,
+                    'merge_recommendation' => null,
+                ]);
+
+            if ($cleared > 0) {
+                $this->conflictService->bumpScheduleVersion($lockedSection);
+            }
+
+            return $cleared;
+        });
     }
 
     /**
@@ -386,6 +430,68 @@ class AutoScheduleService
     }
 
     /**
+     * CONCURRENCY GUARD for Auto Generate — every write this service
+     * makes (independent placement, sibling-pattern placement) goes
+     * through here rather than a bare $sectionSubject->update(...).
+     * Auto Generate builds its candidate (Faculty/Room/Time) from data
+     * read BEFORE this point — another Admin's manual drag/drop, or a
+     * second concurrent Auto Generate run for a different Section, can
+     * commit to the exact same Room/Faculty/Time in between. Locking
+     * (see ScheduleConflictService::lockResources()) and RE-VALIDATING
+     * against the latest committed state, both inside the same
+     * transaction as the write, is what makes this safe rather than
+     * just fast — never trust the availability Auto Generate's own
+     * candidate search saw a few milliseconds ago (see the concurrency
+     * hardening spec, Scenarios 4 & 5).
+     *
+     * Returns false (caller falls through to the next candidate, or —
+     * if it was the last one — reports this subject as unresolved/
+     * needing manual scheduling) instead of throwing, so ONE subject
+     * losing a race never aborts the rest of the batch other subjects
+     * in the same Auto Generate run are still being placed for.
+     */
+    private function persistIfStillAvailable(SectionSubject $sectionSubject, array $slot, callable $write): bool
+    {
+        try {
+            DB::transaction(function () use ($sectionSubject, $slot, $write) {
+                $this->conflictService->lockResources(
+                    $slot['room_id'] ?? null,
+                    $slot['faculty_id'] ?? null,
+                    $sectionSubject->section_id
+                );
+
+                $errors = $this->conflictService->validate([
+                    'section_id' => $sectionSubject->section_id,
+                    'faculty_id' => $slot['faculty_id'] ?? null,
+                    'room_id' => $slot['room_id'] ?? null,
+                    'days' => $slot['days'] ?? [],
+                    'start_time' => $slot['start_time'] ?? null,
+                    'end_time' => $slot['end_time'] ?? null,
+                ], $this->conflictService->mergeExclusionIds($sectionSubject));
+
+                if (! empty($errors)) {
+                    throw new ScheduleConflictAbort($errors);
+                }
+
+                $write();
+
+                // NOTE: the version bump for a full Auto Generate run
+                // happens ONCE at the end of generate() (see its
+                // docblock) rather than per placement here — an Auto
+                // Generate run that places 12 subjects should read as
+                // one logical write for optimistic-concurrency
+                // purposes, matching how "Save Schedule" treats an
+                // entire batch as one write. The lock+re-validate
+                // above is still per-placement, exactly as before.
+            });
+
+            return true;
+        } catch (ScheduleConflictAbort) {
+            return false;
+        }
+    }
+
+    /**
      * Persist the winning combination and build the Recommendation
      * Score summary (Faculty %, Room %, Time %, reasons) the review
      * panel displays.
@@ -428,16 +534,40 @@ class AutoScheduleService
             'overall_score' => (int) round(($faculty['score'] + $room['score'] + $time['score']) / 3),
         ];
 
-        $sectionSubject->update([
-            'faculty_id' => $faculty['id'],
+        $slot = [
             'room_id' => $room['id'],
-            'days' => implode(',', $time['days']),
+            'faculty_id' => $faculty['id'],
+            'days' => $time['days'],
             'start_time' => $time['start_time'],
             'end_time' => $time['end_time'],
-            'status' => 'Draft',
-            'is_auto_generated' => true,
-            'auto_generated_meta' => $meta,
-        ]);
+        ];
+
+        $persisted = $this->persistIfStillAvailable($sectionSubject, $slot, function () use ($sectionSubject, $faculty, $room, $time, $meta) {
+            $sectionSubject->update([
+                'faculty_id' => $faculty['id'],
+                'room_id' => $room['id'],
+                'days' => implode(',', $time['days']),
+                'start_time' => $time['start_time'],
+                'end_time' => $time['end_time'],
+                'status' => 'Draft',
+                'is_auto_generated' => true,
+                'auto_generated_meta' => $meta,
+            ]);
+        });
+
+        if (! $persisted) {
+            // Lost the race to another concurrent save (manual drag or
+            // a different Auto Generate run) between candidate search
+            // and commit — leave this ONE subject unscheduled rather
+            // than silently overwriting whoever won, or aborting the
+            // rest of the batch. The Registrar can re-run Auto
+            // Generate / Regenerate for just this subject afterward.
+            return $this->unresolved(
+                $sectionSubject,
+                "The best available slot ({$room['name']}, {$time['days'][0]} {$time['start_time']}\u{2013}{$time['end_time']}) "
+                    .'was taken by another schedule change at the same moment. Try Auto Generate again for this subject.'
+            );
+        }
 
         return [
             'success' => true,
@@ -452,12 +582,16 @@ class AutoScheduleService
     }
 
     /**
-     * Persist a Faculty + Room + Days + Time combination copied from
-     * a sibling Section's already-scheduled row (see
-     * SiblingSectionPatternService), and build the same review-panel
+     * Persist a NEW, independent ScheduleAssignment for THIS
+     * SectionSubject's own Section — never the donor's row, never the
+     * donor's row id — using a sibling Section's already-scheduled
+     * Faculty/Room/duration purely as a PREFERENCE/REFERENCE (see
+     * SiblingSectionPatternService). Builds the same review-panel
      * shape apply() produces so the frontend needs no special-casing
      * — it just additionally sees `pattern_source` identifying which
-     * sibling Section this assignment was copied from.
+     * sibling Section this preference was based on. The donor's own
+     * SectionSubject row is never read again after this point and is
+     * never written to.
      */
     private function applySiblingPattern(SectionSubject $sectionSubject, array $pattern): array
     {
@@ -470,14 +604,14 @@ class AutoScheduleService
                 'name' => $faculty->full_name ?? $faculty->name ?? '',
                 'score' => 100,
                 'confidence' => 'High',
-                'reasons' => ["Copied from {$pattern['donor_section_code']}, which already teaches this subject with this faculty member."],
+                'reasons' => ["Based on {$pattern['donor_section_code']}, which already teaches this subject with this faculty member."],
             ],
             'room' => [
                 'id' => $room->id,
                 'name' => $room->room_name ?? $room->name ?? '',
                 'score' => 100,
                 'confidence' => 'High',
-                'reasons' => ["Copied from {$pattern['donor_section_code']}'s existing schedule for this subject."],
+                'reasons' => ["Based on {$pattern['donor_section_code']}'s existing schedule for this subject."],
             ],
             'time' => [
                 'days' => $pattern['days'],
@@ -485,7 +619,7 @@ class AutoScheduleService
                 'end_time' => $pattern['end_time'],
                 'score' => 100,
                 'confidence' => 'High',
-                'reasons' => ["Same duration as {$pattern['donor_section_code']}'s schedule for this subject, on a different day to avoid conflicts."],
+                'reasons' => ["Same duration as {$pattern['donor_section_code']}'s schedule for this subject, on a different day to avoid conflicts — a new, independent assignment for this section."],
             ],
             'overall_score' => 100,
             'pattern_source' => [
@@ -494,16 +628,34 @@ class AutoScheduleService
             ],
         ];
 
-        $sectionSubject->update([
-            'faculty_id' => $pattern['faculty_id'],
+        $slot = [
             'room_id' => $pattern['room_id'],
-            'days' => implode(',', $pattern['days']),
+            'faculty_id' => $pattern['faculty_id'],
+            'days' => $pattern['days'],
             'start_time' => $pattern['start_time'],
             'end_time' => $pattern['end_time'],
-            'status' => 'Draft',
-            'is_auto_generated' => true,
-            'auto_generated_meta' => $meta,
-        ]);
+        ];
+
+        $persisted = $this->persistIfStillAvailable($sectionSubject, $slot, function () use ($sectionSubject, $pattern, $meta) {
+            $sectionSubject->update([
+                'faculty_id' => $pattern['faculty_id'],
+                'room_id' => $pattern['room_id'],
+                'days' => implode(',', $pattern['days']),
+                'start_time' => $pattern['start_time'],
+                'end_time' => $pattern['end_time'],
+                'status' => 'Draft',
+                'is_auto_generated' => true,
+                'auto_generated_meta' => $meta,
+            ]);
+        });
+
+        if (! $persisted) {
+            // Same race-loss handling as apply() — fall through to the
+            // general search below instead, rather than leaving this
+            // subject unresolved just because its preferred sibling
+            // slot got taken in between.
+            return $this->searchIndependent($sectionSubject->section()->firstOrFail(), $sectionSubject);
+        }
 
         return [
             'success' => true,

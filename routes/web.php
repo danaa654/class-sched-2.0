@@ -127,6 +127,12 @@ Route::middleware('auth')->group(function () {
     Route::delete('/scheduling/sections/{section}', [SectionController::class, 'destroy'])->name('scheduling.sections.destroy');
     Route::get('/scheduling/section-subjects', [SectionSubjectController::class, 'index'])->name('scheduling.section-subjects');
     Route::get('/scheduling/section-subjects/{section}', [SectionSubjectController::class, 'show'])->name('scheduling.section-subjects.show');
+    // REAL-TIME SCHEDULE CHANGE DETECTION — lightweight polling target.
+    // Returns only { section_id, schedule_version, updated_at }, never
+    // the schedule itself, so the frontend can poll cheaply while
+    // viewing scheduling.section-subjects.show. See
+    // SectionSubjectController::scheduleVersion().
+    Route::get('/scheduling/section-subjects/{section}/version', [SectionSubjectController::class, 'scheduleVersion'])->name('scheduling.section-subjects.version');
     Route::post('/scheduling/section-subjects/{section}/generate-curriculum', [SectionSubjectController::class, 'generateCurriculumSubjects'])->name('scheduling.section-subjects.generate-curriculum');
     Route::get('/scheduling/section-subjects/{section}/curriculum-preview', [SectionSubjectController::class, 'curriculumPreview'])->name('scheduling.section-subjects.curriculum-preview');
     Route::post('/scheduling/section-subjects/{section}', [SectionSubjectController::class, 'store'])->name('scheduling.section-subjects.store');

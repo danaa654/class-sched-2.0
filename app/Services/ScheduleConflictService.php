@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\ScheduleVersionConflictException;
 use App\Models\AcademicTerm;
 use App\Models\Faculty;
 use App\Models\Room;
@@ -386,6 +387,102 @@ class ScheduleConflictService
         $riders = $subject->mergedPlacements()->pluck('id')->all();
 
         return array_values(array_unique(array_merge($ids, $riders)));
+    }
+
+    /**
+     * CONCURRENCY GUARD — acquires a row-level `SELECT ... FOR UPDATE`
+     * lock on the Room/Faculty/Section themselves (never on the
+     * SectionSubject rows being written) before validate() runs and
+     * the write happens, both inside the SAME DB::transaction(). This
+     * closes the check-then-write race: without it, two requests can
+     * both read "this room is free" before either has saved, and both
+     * pass validate() — see the concurrency hardening spec.
+     *
+     * MUST be called in this exact fixed order (Room, then Faculty,
+     * then Section) by every caller — manual Save Schedule, Room Grid
+     * move, merge, AND Auto Generate — so two transactions that both
+     * touch, say, a Room and a Section can never deadlock each other
+     * by acquiring the two locks in opposite orders. A missing
+     * resource (null id) is simply skipped; there's nothing to
+     * serialize against.
+     *
+     * Locking the single parent row (not every SectionSubject in that
+     * Room/Faculty/Section) keeps this cheap: it's a mutex per
+     * resource, not a table scan, and it works identically for a
+     * brand-new placement (no existing SectionSubject rows to lock
+     * yet) as it does for a move.
+     */
+    public function lockResources(?int $roomId, ?int $facultyId, ?int $sectionId): ?Section
+    {
+        if ($roomId) {
+            Room::whereKey($roomId)->lockForUpdate()->first();
+        }
+        if ($facultyId) {
+            Faculty::whereKey($facultyId)->lockForUpdate()->first();
+        }
+
+        // The locked Section row is returned (rather than discarded,
+        // as before) so callers can read its CURRENT schedule_version
+        // — under the very same lock a racing request would also have
+        // to wait on — and pass it straight into checkSectionVersion()
+        // / bumpScheduleVersion() below without a second round trip.
+        if ($sectionId) {
+            return Section::whereKey($sectionId)->lockForUpdate()->first();
+        }
+
+        return null;
+    }
+
+    /**
+     * CONCURRENCY HARDENING — Optimistic Concurrency Control (spec
+     * Section 3/4).
+     *
+     * Compares a caller-submitted `expected_schedule_version` against
+     * the Section's CURRENT schedule_version. $lockedSection MUST
+     * already have been read under `lockForUpdate()` (see
+     * lockResources()) inside the same transaction as the eventual
+     * write, so this reads the true latest-committed value — never a
+     * stale snapshot — and blocks until any other in-flight
+     * transaction touching this Section has committed or rolled back.
+     *
+     * A null $expectedVersion means the caller didn't opt into
+     * version checking for this write (e.g. an older/partial
+     * frontend payload) — this is intentionally a no-op, not a
+     * failure, so version checking can be adopted per-endpoint
+     * without breaking callers that don't send it yet.
+     *
+     * @throws ScheduleVersionConflictException  when the submitted
+     *         version no longer matches the current one — the caller
+     *         is expected to let this propagate out of the
+     *         transaction so it rolls back with no partial write.
+     */
+    public function checkSectionVersion(?Section $lockedSection, ?int $expectedVersion): void
+    {
+        if ($expectedVersion === null || $lockedSection === null) {
+            return;
+        }
+
+        if ((int) $lockedSection->schedule_version !== (int) $expectedVersion) {
+            throw new ScheduleVersionConflictException((int) $lockedSection->schedule_version, $expectedVersion);
+        }
+    }
+
+    /**
+     * Advances a Section's schedule_version by exactly 1. MUST only
+     * be called after a successful write, on a $section instance
+     * already locked via lockResources() within the SAME transaction
+     * — so the increment can never race with, or be lost to, another
+     * transaction's own read-check-write of the same counter. A
+     * failed/rolled-back transaction never reaches this call, so the
+     * version is left untouched on failure (spec Section 20).
+     */
+    public function bumpScheduleVersion(?Section $section): void
+    {
+        if ($section === null) {
+            return;
+        }
+
+        $section->increment('schedule_version');
     }
 
     private function minutesBetween(string $start, string $end): int

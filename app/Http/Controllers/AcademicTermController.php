@@ -152,14 +152,122 @@ class AcademicTermController extends Controller
     }
 
     /**
+     * CONCURRENCY/DATA-INTEGRITY GUARD — before ever writing new
+     * Scheduling Preferences (Class Start/End Time, Available Class
+     * Days) onto an EXISTING School Year, check every already-
+     * scheduled SectionSubject under that School Year (across every
+     * Semester, since Scheduling Preferences live on the School Year,
+     * not the Academic Term — see resolveSchoolYear()'s docblock)
+     * still fits inside the proposed window/days.
+     *
+     * Without this, shrinking the window (e.g. Class Start Time
+     * 8:00 AM -> 9:00 AM, or dropping Saturday) would silently strand
+     * already-saved schedules outside the very policy that's
+     * supposed to govern them — the Room Grid/Subjects page would
+     * keep showing them as "Scheduled" with no indication they now
+     * violate the active calendar, and the Auto Schedule AI would
+     * treat the window as authoritative while these leftover rows
+     * quietly disagree with it.
+     *
+     * A brand-new School Year (not yet persisted) is skipped — it
+     * can't have any schedules yet, so there's nothing to strand.
+     *
+     * @param  array<string, mixed>  $validated
+     *
+     * @throws ValidationException  listing which already-scheduled
+     *         subjects would fall outside the proposed window/days,
+     *         so the Admin/Registrar can fix or clear those first
+     *         instead of the change being silently allowed.
+     */
+    private function assertNoOutOfWindowSchedules(SchoolYear $schoolYear, array $validated): void
+    {
+        if (! $schoolYear->exists) {
+            return;
+        }
+
+        $newStartMinutes = $this->toMinutes($validated['class_start_time']);
+        $newEndMinutes = $this->toMinutes($validated['class_end_time']);
+        $newAvailableDays = $validated['available_days'];
+
+        $scheduled = \App\Models\SectionSubject::query()
+            ->whereHas('section', fn ($q) => $q->where('academic_year', $schoolYear->name))
+            ->whereNotNull('days')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->with(['section:id,section_code', 'subject:id,subject_code'])
+            ->get();
+
+        $timeConflicts = [];
+        $dayConflicts = [];
+
+        foreach ($scheduled as $sectionSubject) {
+            $dayTokens = array_filter(explode(',', (string) $sectionSubject->days));
+            $label = sprintf(
+                '%s (%s) — %s %s-%s',
+                $sectionSubject->subject?->subject_code ?? 'Subject',
+                $sectionSubject->section?->section_code ?? 'Section',
+                implode('/', $dayTokens),
+                $sectionSubject->start_time,
+                $sectionSubject->end_time
+            );
+
+            $outOfDays = array_diff($dayTokens, $newAvailableDays);
+            if (! empty($outOfDays)) {
+                $dayConflicts[] = $label;
+            }
+
+            $startMinutes = $this->toMinutes((string) $sectionSubject->start_time);
+            $endMinutes = $this->toMinutes((string) $sectionSubject->end_time);
+            if ($startMinutes < $newStartMinutes || $endMinutes > $newEndMinutes) {
+                $timeConflicts[] = $label;
+            }
+        }
+
+        if (empty($timeConflicts) && empty($dayConflicts)) {
+            return;
+        }
+
+        $summarize = fn (array $items) => implode('; ', array_slice($items, 0, 3))
+            .(count($items) > 3 ? ' (+'.(count($items) - 3).' more)' : '');
+
+        $errors = [];
+
+        if (! empty($timeConflicts)) {
+            $errors['class_start_time'] = 'Cannot save: '.count($timeConflicts)
+                .' already-scheduled subject(s) fall outside this window — '.$summarize($timeConflicts)
+                .'. Reschedule or remove them first, or widen the window.';
+        }
+
+        if (! empty($dayConflicts)) {
+            $errors['available_days'] = 'Cannot save: '.count($dayConflicts)
+                .' already-scheduled subject(s) use a day being removed — '.$summarize($dayConflicts)
+                .'. Reschedule or remove them first.';
+        }
+
+        throw ValidationException::withMessages($errors);
+    }
+
+    /**
+     * Minutes-since-midnight for an "H:i"/"H:i:s" time string. Small,
+     * local helper — SchoolYear's own toMinutes()/fromMinutes() are
+     * private to that model, and this check needs to compare against
+     * the SUBMITTED (not-yet-saved) window, so it can't just call
+     * $schoolYear->isWithinSchedulingPolicy() either.
+     */
+    private function toMinutes(string $time): int
+    {
+        [$hours, $minutes] = array_map('intval', explode(':', $time));
+
+        return ($hours * 60) + $minutes;
+    }
+
+    /**
      * Find the School Year matching the submitted Start Year/End Year
      * (creating it — Active by default — the first time it's used),
      * and always sync its Scheduling Preferences to whatever was just
      * submitted on the Academic Term form. Lunch Break is always
      * forced to the fixed 12:00 PM - 1:00 PM window regardless of
      * input (see SchoolYear::LUNCH_BREAK_START/END).
-     *
-     * @param  array<string, mixed>  $validated
      */
     private function resolveSchoolYear(array $validated): SchoolYear
     {
@@ -176,6 +284,8 @@ class AcademicTermController extends Controller
         } elseif ($schoolYear->trashed()) {
             $schoolYear->restore();
         }
+
+        $this->assertNoOutOfWindowSchedules($schoolYear, $validated);
 
         $schoolYear->class_start_time = $validated['class_start_time'];
         $schoolYear->class_end_time = $validated['class_end_time'];

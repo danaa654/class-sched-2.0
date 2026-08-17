@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ScheduleConflictAbort;
+use App\Exceptions\ScheduleVersionConflictException;
 use App\Http\Requests\BatchUpdateSectionSubjectScheduleRequest;
 use App\Http\Requests\StoreSectionRequest;
 use App\Http\Requests\StoreSectionSubjectRequest;
@@ -192,6 +194,40 @@ class SectionSubjectController extends Controller implements HasMiddleware
     }
 
     /**
+     * REAL-TIME SCHEDULE CHANGE DETECTION — lightweight polling
+     * endpoint.
+     *
+     * Returns ONLY the Section's current `schedule_version` (plus
+     * `updated_at`) — never the schedule itself — so the scheduling
+     * workspace's frontend can cheaply poll "has this changed?"
+     * without re-fetching Faculty/Room/Subject option lists or
+     * re-running any scheduling computation on every tick.
+     *
+     * This is an early-warning/UX signal only. It does NOT replace
+     * the authoritative optimistic-concurrency check already
+     * performed inside a locked transaction by
+     * ScheduleConflictService::checkSectionVersion() for every actual
+     * write (updateSchedule(), moveRoomGridAssignment(),
+     * batchUpdateSchedule(), autoGenerate()) — a stale write is still
+     * rejected with HTTP 409 there regardless of what this endpoint
+     * last reported.
+     *
+     * Authorization: SectionPolicy::manageScheduling is already
+     * enforced for every action on this controller by
+     * self::middleware() above (route-bound {section}), so this
+     * method never exposes a Section's version to a user who
+     * couldn't already view that Section's schedule.
+     */
+    public function scheduleVersion(Section $section): JsonResponse
+    {
+        return response()->json([
+            'section_id' => $section->id,
+            'schedule_version' => $section->schedule_version,
+            'updated_at' => optional($section->updated_at)->toIso8601String(),
+        ]);
+    }
+
+    /**
      * Display the Section Subjects page for a single Section — this IS
      * the Registrar's scheduling workspace. Every subject assigned to
      * the section is shown with its schedule slot (Faculty, Room,
@@ -358,6 +394,17 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         return Inertia::render('Scheduling/SectionSubjects/Show', [
             'section' => $section,
+            // CONCURRENCY HARDENING — the Section's schedule_version
+            // at page-load time. The frontend should carry this
+            // forward as `expected_schedule_version` on every
+            // scheduling write it makes for this Section (single-cell
+            // edit, Room Grid move, Auto Generate, Save Schedule) so
+            // the backend can detect a save made against stale data.
+            // Also present on `section.schedule_version` itself since
+            // Section is already serialized above — surfaced
+            // top-level too for a frontend that doesn't want to dig
+            // into the nested resource.
+            'scheduleVersion' => $section->schedule_version,
             'siblingSections' => $siblingSections,
             'sectionSubjects' => $sectionSubjects,
             'filters' => ['subject_search' => $search],
@@ -498,35 +545,19 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $dayTokens = array_filter(explode(',', (string) $days));
 
-        // Section / Faculty / Room / Time-overlap conflict checks all
-        // live in ScheduleConflictService — never duplicated here — so
-        // the manual workspace and the future Genetic Algorithm scheduler
-        // both validate against the exact same rules.
-        $errors = array_merge($errors, $this->conflictService->validate(
-            [
-                'section_id' => $subject->section_id,
-                'faculty_id' => $facultyId,
-                'room_id' => $roomId,
-                'days' => $dayTokens,
-                'start_time' => $startTime,
-                'end_time' => $endTime,
-            ],
-            // Merge-aware — a merged row sharing its host's exact
-            // Faculty/Room/Time is by design, never a conflict to
-            // flag against itself. See ScheduleConflictService::
-            // mergeExclusionIds().
-            $this->conflictService->mergeExclusionIds($subject)
-        ));
-
         // Weekly Hours Mismatch Warning — the scheduled Days x
         // (End-Start) doesn't add up to what the Subject's curriculum
         // hours require (e.g. curriculum needs 5 hrs/week, the
         // Registrar could only fit 4 because of Room/Faculty
         // availability). Same "flagged, not blocked" pattern as
         // Room Capacity above — needs an explicit hours_confirmed=true
-        // to save anyway.
+        // to save anyway. Soft warnings (Capacity/Hours) are read-only
+        // checks against data that can't be raced the way a Room/
+        // Faculty/Section booking can, so these stay OUTSIDE the
+        // locked transaction below — only the actual booking conflict
+        // check + write needs the lock.
+        $subject->loadMissing('subject');
         if (! empty($dayTokens) && $startTime && $endTime) {
-            $subject->loadMissing('subject');
             $requiredHours = ((int) $subject->subject->lecture_hours) + ((int) $subject->subject->laboratory_hours);
             if ($requiredHours <= 0) {
                 $requiredHours = 3; // matches RecommendationService::scoreArbitraryTime()'s fallback
@@ -550,7 +581,6 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // gets a 409 "Teaching Load Limit Exceeded" warning the first
         // time, and only an Administrator can resubmit with
         // workload_confirmed=true to Override & Save.
-        $subject->loadMissing('subject');
         $workloadWarning = $this->workloadWarningFor($facultyId, $subject->subject, $subject->id);
 
         if ($workloadWarning) {
@@ -568,81 +598,157 @@ class SectionSubjectController extends Controller implements HasMiddleware
             }
         }
 
-        // Practicum/OJT subjects have no Room, Days, or Time — the row
-        // is complete the moment it exists (Faculty here is a
-        // Coordinator/Adviser, and is optional per resolvePracticum()'s
-        // docblock), so it's never held at Draft waiting on fields
-        // that will never be filled.
-        $status = 'Draft';
-        if ($subject->subject->isPracticum()) {
-            $status = 'Scheduled';
-        } elseif ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
-            $status = 'Scheduled';
-        }
+        // CONCURRENCY-SAFE FROM HERE ON — the authoritative Room/
+        // Faculty/Section conflict re-check AND the write happen
+        // inside ONE locked transaction (see ScheduleConflictService::
+        // lockResources()'s docblock for why fixed lock order matters
+        // and why per-resource locks are enough). A conflict found
+        // under lock throws ScheduleConflictAbort, which rolls the
+        // transaction back with NO partial write and is caught below
+        // to preserve the exact same 422 {errors} response shape this
+        // endpoint already returned before this hardening — the
+        // response contract doesn't change, only the guarantee behind
+        // it does. Without this, two requests can both read "this
+        // room/faculty is free" before either has saved, and both
+        // pass validate() — see the concurrency hardening spec.
+        try {
+            $subject = DB::transaction(function () use (
+                $subject, $facultyId, $roomId, $dayTokens, $startTime, $endTime,
+                $days, $capacity, $request, $validated, $workloadWarning,
+            ) {
+                $lockedSection = $this->conflictService->lockResources($roomId, $facultyId, $subject->section_id);
 
-        // Manual Override flag — a Room outside this Section's own
-        // Department/College scope tier (same "program"/"college"/
-        // "shared" scope resolveRoomScopeTier() in RecommendationService
-        // uses) is still allowed per spec ("do not block the move
-        // simply because the room belongs to another department"), but
-        // gets flagged so Reports/Room Grid can visually call it out,
-        // same convention overrideRoom() already uses for the Subjects
-        // tab's Room picker. Only re-evaluated when room_id actually
-        // changed in this request — an unrelated Day/Time-only move
-        // must never silently clear an override flag set earlier.
-        $roomIsManualOverride = $subject->room_is_manual_override;
-        if (array_key_exists('room_id', $validated) && $roomId) {
-            $subject->loadMissing('section.major.department');
-            $newRoom = Room::find($roomId);
-            $sectionDepartmentId = $subject->section?->major?->department_id;
-            $sectionCollegeId = $subject->section?->major?->department?->college_id;
-            $roomIsManualOverride = (bool) $newRoom
-                && $newRoom->department_id !== $sectionDepartmentId
-                && $newRoom->college_id !== $sectionCollegeId
-                && ($newRoom->department_id !== null || $newRoom->college_id !== null);
-        }
+                // CONCURRENCY HARDENING — Optimistic Concurrency
+                // Control (spec Section 3/4/23). Re-read under the
+                // same lock as the write below: if another request
+                // already saved a change to this Section's schedule
+                // since the caller's `expected_schedule_version` was
+                // loaded, abort with no write rather than silently
+                // overwriting it. Throwing here rolls the whole
+                // transaction back before any conflict check or
+                // update runs.
+                $this->conflictService->checkSectionVersion(
+                    $lockedSection,
+                    $request->filled('expected_schedule_version') ? (int) $request->input('expected_schedule_version') : null
+                );
 
-        $subject->update([
-            'faculty_id' => $facultyId,
-            'room_id' => $subject->subject->isPracticum() ? null : $roomId,
-            'days' => $subject->subject->isPracticum() ? null : ($days ?: null),
-            'start_time' => $subject->subject->isPracticum() ? null : $startTime,
-            'end_time' => $subject->subject->isPracticum() ? null : $endTime,
-            'capacity' => $capacity,
-            'status' => $status,
-            'room_is_manual_override' => $roomIsManualOverride,
-            // Persist the Registrar's confirmation so an acknowledged
-            // Capacity/Hours warning stays acknowledged (doesn't turn
-            // yellow again) the next time this page loads — see the
-            // 2026_08_13_120000 migration's docblock. Both simply
-            // mirror whatever was just confirmed/re-validated above;
-            // if this save didn't need a confirmation (no mismatch),
-            // the boolean falls back to false, which is correct too.
-            'capacity_confirmed' => $request->boolean('capacity_confirmed'),
-            'hours_confirmed' => $request->boolean('hours_confirmed'),
-            // A hand-edited row is no longer purely "Auto Generated" —
-            // untag it so Clear Generated Schedule / Regenerate never
-            // touch what the Registrar just chose themselves.
-            'is_auto_generated' => false,
-            'auto_generated_meta' => null,
-            'is_workload_override' => (bool) $workloadWarning,
-            'workload_override_by' => $workloadWarning ? $request->user()?->id : null,
-            // Room Grid "Move only <this section>" on a merged block —
-            // this row is being placed at a slot that may no longer
-            // match its former merge partner's, so the merge link is
-            // dropped WITHOUT touching the Faculty/Room/Days/Time this
-            // same update just set (unlike IrregularSectionMergeService::
-            // unmerge(), which wipes the row back to Draft/unscheduled —
-            // wrong here, since the row keeps a real, just-chosen slot).
-            // A no-op for a row that was never merged.
-            ...($request->boolean('clear_merge_link') ? [
-                'is_merged' => false,
-                'merged_into_section_subject_id' => null,
-            ] : []),
-        ]);
+                // Section / Faculty / Room / Time-overlap conflict checks all
+                // live in ScheduleConflictService — never duplicated here — so
+                // the manual workspace and the future Genetic Algorithm scheduler
+                // both validate against the exact same rules.
+                $conflictErrors = $this->conflictService->validate(
+                    [
+                        'section_id' => $subject->section_id,
+                        'faculty_id' => $facultyId,
+                        'room_id' => $roomId,
+                        'days' => $dayTokens,
+                        'start_time' => $startTime,
+                        'end_time' => $endTime,
+                    ],
+                    // Merge-aware — a merged row sharing its host's exact
+                    // Faculty/Room/Time is by design, never a conflict to
+                    // flag against itself. See ScheduleConflictService::
+                    // mergeExclusionIds().
+                    $this->conflictService->mergeExclusionIds($subject)
+                );
+
+                if (! empty($conflictErrors)) {
+                    throw new ScheduleConflictAbort($conflictErrors);
+                }
+
+                // Practicum/OJT subjects have no Room, Days, or Time — the
+                // row is complete the moment it exists (Faculty here is a
+                // Coordinator/Adviser, and is optional per
+                // resolvePracticum()'s docblock), so it's never held at
+                // Draft waiting on fields that will never be filled.
+                $status = 'Draft';
+                if ($subject->subject->isPracticum()) {
+                    $status = 'Scheduled';
+                } elseif ($facultyId && $roomId && ! empty($dayTokens) && $startTime && $endTime) {
+                    $status = 'Scheduled';
+                }
+
+                // Manual Override flag — a Room outside this Section's own
+                // Department/College scope tier (same "program"/"college"/
+                // "shared" scope resolveRoomScopeTier() in RecommendationService
+                // uses) is still allowed per spec ("do not block the move
+                // simply because the room belongs to another department"), but
+                // gets flagged so Reports/Room Grid can visually call it out,
+                // same convention overrideRoom() already uses for the Subjects
+                // tab's Room picker. Only re-evaluated when room_id actually
+                // changed in this request — an unrelated Day/Time-only move
+                // must never silently clear an override flag set earlier.
+                $roomIsManualOverride = $subject->room_is_manual_override;
+                if (array_key_exists('room_id', $validated) && $roomId) {
+                    $subject->loadMissing('section.major.department');
+                    $newRoom = Room::find($roomId);
+                    $sectionDepartmentId = $subject->section?->major?->department_id;
+                    $sectionCollegeId = $subject->section?->major?->department?->college_id;
+                    $roomIsManualOverride = (bool) $newRoom
+                        && $newRoom->department_id !== $sectionDepartmentId
+                        && $newRoom->college_id !== $sectionCollegeId
+                        && ($newRoom->department_id !== null || $newRoom->college_id !== null);
+                }
+
+                $subject->update([
+                    'faculty_id' => $facultyId,
+                    'room_id' => $subject->subject->isPracticum() ? null : $roomId,
+                    'days' => $subject->subject->isPracticum() ? null : ($days ?: null),
+                    'start_time' => $subject->subject->isPracticum() ? null : $startTime,
+                    'end_time' => $subject->subject->isPracticum() ? null : $endTime,
+                    'capacity' => $capacity,
+                    'status' => $status,
+                    'room_is_manual_override' => $roomIsManualOverride,
+                    // Persist the Registrar's confirmation so an acknowledged
+                    // Capacity/Hours warning stays acknowledged (doesn't turn
+                    // yellow again) the next time this page loads — see the
+                    // 2026_08_13_120000 migration's docblock. Both simply
+                    // mirror whatever was just confirmed/re-validated above;
+                    // if this save didn't need a confirmation (no mismatch),
+                    // the boolean falls back to false, which is correct too.
+                    'capacity_confirmed' => $request->boolean('capacity_confirmed'),
+                    'hours_confirmed' => $request->boolean('hours_confirmed'),
+                    // A hand-edited row is no longer purely "Auto Generated" —
+                    // untag it so Clear Generated Schedule / Regenerate never
+                    // touch what the Registrar just chose themselves.
+                    'is_auto_generated' => false,
+                    'auto_generated_meta' => null,
+                    'is_workload_override' => (bool) $workloadWarning,
+                    'workload_override_by' => $workloadWarning ? $request->user()?->id : null,
+                    // Room Grid "Move only <this section>" on a merged block —
+                    // this row is being placed at a slot that may no longer
+                    // match its former merge partner's, so the merge link is
+                    // dropped WITHOUT touching the Faculty/Room/Days/Time this
+                    // same update just set (unlike IrregularSectionMergeService::
+                    // unmerge(), which wipes the row back to Draft/unscheduled —
+                    // wrong here, since the row keeps a real, just-chosen slot).
+                    // A no-op for a row that was never merged.
+                    ...($request->boolean('clear_merge_link') ? [
+                        'is_merged' => false,
+                        'merged_into_section_subject_id' => null,
+                    ] : []),
+                ]);
+
+                // Only reached after a successful, conflict-free
+                // write — the version is never advanced on a rolled
+                // back transaction (spec Section 20).
+                $this->conflictService->bumpScheduleVersion($lockedSection);
+
+                return $subject;
+            });
+        } catch (ScheduleConflictAbort $abort) {
+            return response()->json(['errors' => $abort->errors], 422);
+        } catch (ScheduleVersionConflictException $conflict) {
+            return response()->json([
+                'message' => 'Schedule has changed since it was loaded. Please refresh the schedule and try again.',
+                'code' => 'SCHEDULE_VERSION_CONFLICT',
+                'current_version' => $conflict->currentVersion,
+            ], 409);
+        }
 
         return response()->json([
             'sectionSubject' => $subject->fresh(['subject', 'faculty', 'room']),
+            'schedule_version' => $subject->section()->value('schedule_version'),
             'message' => 'Schedule updated.',
         ]);
     }
@@ -711,6 +817,36 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $faculty = Faculty::query()->where('status', 'Active')->findOrFail($validated['faculty_id']);
 
+        // HARD CONFLICT CHECK — this endpoint previously wrote
+        // faculty_id straight to the row with no validation at all,
+        // so picking a faculty member from this dropdown could save a
+        // genuine double-booking (same faculty, overlapping Day/Time,
+        // different Section) with nothing to stop it. The Subjects
+        // tab happens to re-validate live when it renders and shows a
+        // red warning, but that was purely cosmetic — the bad row was
+        // already persisted, and the Room Grid (which does not
+        // re-validate) would render it with no warning at all. Run it
+        // through the exact same ScheduleConflictService the manual
+        // Save Schedule button and Auto Generate use, against this
+        // row's CURRENT Room/Days/Time, before ever touching the DB.
+        $dayTokens = array_values(array_filter(explode(',', (string) $subject->days)));
+
+        $conflictErrors = $this->conflictService->validate([
+            'section_id' => $subject->section_id,
+            'faculty_id' => $faculty->id,
+            'room_id' => $subject->room_id,
+            'days' => $dayTokens,
+            'start_time' => $subject->start_time,
+            'end_time' => $subject->end_time,
+        ], $this->conflictService->mergeExclusionIds($subject));
+
+        if (! empty($conflictErrors)) {
+            return response()->json([
+                'message' => $conflictErrors['faculty_id'] ?? reset($conflictErrors),
+                'errors' => $conflictErrors,
+            ], 422);
+        }
+
         $scored = $this->recommendationService->scoreArbitraryFaculty(
             $faculty,
             $subject->subject,
@@ -736,10 +872,40 @@ class SectionSubjectController extends Controller implements HasMiddleware
             $meta['overall_score'] = (int) round(($scored['score'] + $meta['room']['score'] + $meta['time']['score']) / 3);
         }
 
-        $subject->update([
-            'faculty_id' => $faculty->id,
-            'auto_generated_meta' => $meta,
-        ]);
+        try {
+            DB::transaction(function () use ($subject, $faculty, $meta) {
+                // Re-lock and re-check under the same convention as
+                // Save Schedule / Auto Generate (see ScheduleConflictService::
+                // lockResources()) so two overlapping override requests
+                // in flight at once can't both pass validate() above
+                // and both write.
+                $this->conflictService->lockResources($subject->room_id, $faculty->id, $subject->section_id);
+
+                $dayTokens = array_values(array_filter(explode(',', (string) $subject->days)));
+                $recheck = $this->conflictService->validate([
+                    'section_id' => $subject->section_id,
+                    'faculty_id' => $faculty->id,
+                    'room_id' => $subject->room_id,
+                    'days' => $dayTokens,
+                    'start_time' => $subject->start_time,
+                    'end_time' => $subject->end_time,
+                ], $this->conflictService->mergeExclusionIds($subject));
+
+                if (! empty($recheck)) {
+                    throw new ScheduleConflictAbort($recheck);
+                }
+
+                $subject->update([
+                    'faculty_id' => $faculty->id,
+                    'auto_generated_meta' => $meta,
+                ]);
+            });
+        } catch (ScheduleConflictAbort $abort) {
+            return response()->json([
+                'message' => $abort->errors['faculty_id'] ?? reset($abort->errors),
+                'errors' => $abort->errors,
+            ], 422);
+        }
 
         return response()->json([
             'section_subject_id' => $subject->id,
@@ -792,6 +958,31 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $room = Room::query()->where('status', 'Active')->findOrFail($validated['room_id']);
 
+        // HARD CONFLICT CHECK — same gap as overrideFaculty() above:
+        // this endpoint wrote room_id straight to the row with no
+        // validation, so picking a room here could save a genuine
+        // double-booking (same room, overlapping Day/Time, different
+        // Section) that the Room Grid would then render with no
+        // warning at all. See overrideFaculty()'s comment for the
+        // full explanation.
+        $dayTokens = array_values(array_filter(explode(',', (string) $subject->days)));
+
+        $conflictErrors = $this->conflictService->validate([
+            'section_id' => $subject->section_id,
+            'faculty_id' => $subject->faculty_id,
+            'room_id' => $room->id,
+            'days' => $dayTokens,
+            'start_time' => $subject->start_time,
+            'end_time' => $subject->end_time,
+        ], $this->conflictService->mergeExclusionIds($subject));
+
+        if (! empty($conflictErrors)) {
+            return response()->json([
+                'message' => $conflictErrors['room_id'] ?? reset($conflictErrors),
+                'errors' => $conflictErrors,
+            ], 422);
+        }
+
         $scored = $this->recommendationService->scoreArbitraryRoom(
             $room,
             $subject->subject,
@@ -819,14 +1010,40 @@ class SectionSubjectController extends Controller implements HasMiddleware
             $meta['overall_score'] = (int) round(($meta['faculty']['score'] + $scored['score'] + $meta['time']['score']) / 3);
         }
 
-        $subject->update([
-            'room_id' => $room->id,
-            'auto_generated_meta' => $meta,
-            // A changed Room may or may not still fit the Section's
-            // Capacity — re-flag rather than carrying over a
-            // confirmation that applied to the previous Room.
-            'capacity_confirmed' => false,
-        ]);
+        try {
+            DB::transaction(function () use ($subject, $room, $meta) {
+                $this->conflictService->lockResources($room->id, $subject->faculty_id, $subject->section_id);
+
+                $dayTokens = array_values(array_filter(explode(',', (string) $subject->days)));
+                $recheck = $this->conflictService->validate([
+                    'section_id' => $subject->section_id,
+                    'faculty_id' => $subject->faculty_id,
+                    'room_id' => $room->id,
+                    'days' => $dayTokens,
+                    'start_time' => $subject->start_time,
+                    'end_time' => $subject->end_time,
+                ], $this->conflictService->mergeExclusionIds($subject));
+
+                if (! empty($recheck)) {
+                    throw new ScheduleConflictAbort($recheck);
+                }
+
+                $subject->update([
+                    'room_id' => $room->id,
+                    'auto_generated_meta' => $meta,
+                    // A changed Room may or may not still fit the
+                    // Section's Capacity — re-flag rather than
+                    // carrying over a confirmation that applied to
+                    // the previous Room.
+                    'capacity_confirmed' => false,
+                ]);
+            });
+        } catch (ScheduleConflictAbort $abort) {
+            return response()->json([
+                'message' => $abort->errors['room_id'] ?? reset($abort->errors),
+                'errors' => $abort->errors,
+            ], 422);
+        }
 
         return response()->json([
             'section_subject_id' => $subject->id,
@@ -1391,13 +1608,35 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * batchUpdateSchedule(), which strip the is_auto_generated flag the
      * moment a row is actually saved by hand.
      */
-    public function autoGenerate(Section $section): JsonResponse
+    public function autoGenerate(Request $request, Section $section): JsonResponse
     {
-        $summary = $this->autoScheduleService->generate($section);
+        // CONCURRENCY HARDENING (spec Section 15) — optional
+        // `expected_schedule_version`: the Section's schedule_version
+        // the frontend had loaded right before clicking "Auto
+        // Generate". Rejected with 409 before any row is touched if
+        // stale — see AutoScheduleService::generate()'s docblock.
+        try {
+            $summary = $this->autoScheduleService->generate(
+                $section,
+                $request->filled('expected_schedule_version') ? (int) $request->input('expected_schedule_version') : null
+            );
+        } catch (ScheduleVersionConflictException $conflict) {
+            return response()->json([
+                'message' => 'Schedule has changed since it was loaded. Please refresh the schedule and try again.',
+                'code' => 'SCHEDULE_VERSION_CONFLICT',
+                'current_version' => $conflict->currentVersion,
+            ], 409);
+        }
 
         return response()->json([
             ...$summary,
             'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
+            // Every result row this run wrote carries this as its
+            // `generated_from_version` — the frontend should send it
+            // back as `expected_schedule_version` on the eventual
+            // "Save Schedule" / batchUpdateSchedule() submit that
+            // finalizes the review panel (spec Section 3/12).
+            'schedule_version' => $section->fresh()->schedule_version,
         ]);
     }
 
@@ -1413,6 +1652,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
         return response()->json([
             ...$summary,
             'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
+            'schedule_version' => $section->fresh()->schedule_version,
         ]);
     }
 
@@ -1431,6 +1671,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 ? "{$cleared} auto-generated ".($cleared === 1 ? 'schedule was' : 'schedules were')." cleared."
                 : 'No auto-generated schedules to clear.',
             'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
+            'schedule_version' => $section->fresh()->schedule_version,
         ]);
     }
 
@@ -1472,10 +1713,29 @@ class SectionSubjectController extends Controller implements HasMiddleware
         $errors = [];
         $workloadWarnings = [];
         $isAdministrator = (bool) $request->user()?->hasRole('Administrator');
+        $expectedVersion = $request->filled('expected_schedule_version')
+            ? (int) $request->input('expected_schedule_version')
+            : null;
 
         DB::beginTransaction();
 
         try {
+            // CONCURRENCY HARDENING — Optimistic Concurrency Control
+            // (spec Section 3/4/13/23), "Save Schedule" / "Accept All
+            // & Save". Locking the Section row FIRST (before any
+            // per-row Room/Faculty lock below) matches the fixed lock
+            // order ScheduleConflictService::lockResources() already
+            // documents (Room, Faculty, Section) is required
+            // everywhere else — re-locking the already-held Section
+            // row per row below is a cheap no-op, not a second
+            // distinct lock acquisition. One version check covers the
+            // whole batch: if the Section changed since this batch's
+            // `expected_schedule_version` was captured (another
+            // request already committed), abort before touching any
+            // row.
+            $lockedSection = Section::whereKey($section->id)->lockForUpdate()->first();
+            $this->conflictService->checkSectionVersion($lockedSection, $expectedVersion);
+
             foreach ($rows as $rowData) {
                 $subject = SectionSubject::query()->where('id', $rowData['id'])->lockForUpdate()->first();
                 $subject->loadMissing('subject');
@@ -1521,6 +1781,16 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 }
 
                 $dayTokens = array_filter(explode(',', (string) $days));
+
+                // Lock this row's Room/Faculty too (Section is
+                // already locked above) so a concurrent request
+                // writing to the SAME Room/Faculty from a different
+                // Section — which this row's own lockForUpdate() a
+                // few lines up can't catch — is forced to wait until
+                // this transaction commits or rolls back before its
+                // own conflict check can run. See
+                // ScheduleConflictService::lockResources()'s docblock.
+                $this->conflictService->lockResources($roomId, $facultyId, null);
 
                 // Same shared ScheduleConflictService the single-cell
                 // save uses above — kept identical so batch saves can
@@ -1627,7 +1897,21 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 ], 409);
             }
 
+            // Only reached once every row in the batch passed
+            // validation and was written — the version is never
+            // advanced on a rolled-back/partial batch (spec Section
+            // 20).
+            $this->conflictService->bumpScheduleVersion($lockedSection);
+
             DB::commit();
+        } catch (ScheduleVersionConflictException $conflict) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Schedule has changed since it was loaded. Please refresh the schedule and try again.',
+                'code' => 'SCHEDULE_VERSION_CONFLICT',
+                'current_version' => $conflict->currentVersion,
+            ], 409);
         } catch (\Throwable $e) {
             DB::rollBack();
 
@@ -1643,6 +1927,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         return response()->json([
             'sectionSubjects' => $fresh,
+            'schedule_version' => $lockedSection->fresh()->schedule_version,
             'message' => 'Schedule saved successfully.',
         ]);
     }
@@ -1695,20 +1980,36 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $section->loadMissing('major');
 
-        foreach ($subjectIds as $subjectId) {
-            $sectionSubject = SectionSubject::create([
-                'section_id' => $section->id,
-                'subject_id' => $subjectId,
-                'source' => 'Curriculum',
-                'capacity' => $section->estimated_students,
-            ]);
+        // CONCURRENCY HARDENING — bumping the Section's schedule_version
+        // here (same counter used by updateSchedule()/autoGenerate())
+        // is what lets the existing useSchedulePolling composable on
+        // every OTHER open tab detect this change. Without it, a
+        // second OIC/Registrar already viewing this Section's (empty)
+        // Subjects tab has no signal that subjects now exist here —
+        // the "Schedule Updated" banner simply never fires. See
+        // ScheduleConflictService::bumpScheduleVersion() docblock for
+        // why this must happen inside the same locked transaction as
+        // the writes it's meant to announce.
+        DB::transaction(function () use ($section, $subjectIds) {
+            $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
-            // EDP Code is minted the moment a subject is placed into the
-            // section — it doesn't wait for scheduling. No-op if the row
-            // somehow already has one.
-            $sectionSubject->setRelation('section', $section);
-            $this->edpCodeService->generateForSectionSubject($sectionSubject);
-        }
+            foreach ($subjectIds as $subjectId) {
+                $sectionSubject = SectionSubject::create([
+                    'section_id' => $section->id,
+                    'subject_id' => $subjectId,
+                    'source' => 'Curriculum',
+                    'capacity' => $section->estimated_students,
+                ]);
+
+                // EDP Code is minted the moment a subject is placed into the
+                // section — it doesn't wait for scheduling. No-op if the row
+                // somehow already has one.
+                $sectionSubject->setRelation('section', $section);
+                $this->edpCodeService->generateForSectionSubject($sectionSubject);
+            }
+
+            $this->conflictService->bumpScheduleVersion($lockedSection);
+        });
 
         $count = $subjectIds->count();
 
@@ -1765,26 +2066,40 @@ class SectionSubjectController extends Controller implements HasMiddleware
     {
         $validated = $request->validated();
 
-        foreach ($validated['subject_ids'] as $subjectId) {
-            $sectionSubject = SectionSubject::create([
-                'section_id' => $section->id,
-                'subject_id' => $subjectId,
-                'source' => $validated['source'],
-                // New subjects always start with an empty schedule slot.
-                // Faculty, Room, Days, and Time are assigned later by the
-                // scheduling engine — never automatically here. Capacity
-                // defaults to the Section's own Estimated Students unless
-                // the caller explicitly set one.
-                'capacity' => $validated['capacity'] ?? $section->estimated_students,
-                'status' => 'Draft',
-            ]);
+        // CONCURRENCY HARDENING — see the matching comment in
+        // generateCurriculumSubjects() above. Adding subjects manually
+        // (this exact action — an OIC populating a just-created,
+        // previously-empty Section) is the case that was silently
+        // invisible to any other tab already sitting on this Section's
+        // Subjects view: schedule_version never moved, so
+        // useSchedulePolling() had nothing to detect and the "No
+        // subjects assigned yet." view never learned it was stale.
+        DB::transaction(function () use ($section, $validated) {
+            $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
-            // EDP Code is minted the moment a subject is placed into the
-            // section — it doesn't wait for scheduling. No-op if the row
-            // somehow already has one.
-            $sectionSubject->setRelation('section', $section->loadMissing('major'));
-            $this->edpCodeService->generateForSectionSubject($sectionSubject);
-        }
+            foreach ($validated['subject_ids'] as $subjectId) {
+                $sectionSubject = SectionSubject::create([
+                    'section_id' => $section->id,
+                    'subject_id' => $subjectId,
+                    'source' => $validated['source'],
+                    // New subjects always start with an empty schedule slot.
+                    // Faculty, Room, Days, and Time are assigned later by the
+                    // scheduling engine — never automatically here. Capacity
+                    // defaults to the Section's own Estimated Students unless
+                    // the caller explicitly set one.
+                    'capacity' => $validated['capacity'] ?? $section->estimated_students,
+                    'status' => 'Draft',
+                ]);
+
+                // EDP Code is minted the moment a subject is placed into the
+                // section — it doesn't wait for scheduling. No-op if the row
+                // somehow already has one.
+                $sectionSubject->setRelation('section', $section->loadMissing('major'));
+                $this->edpCodeService->generateForSectionSubject($sectionSubject);
+            }
+
+            $this->conflictService->bumpScheduleVersion($lockedSection);
+        });
 
         $count = count($validated['subject_ids']);
 
@@ -1798,7 +2113,18 @@ class SectionSubjectController extends Controller implements HasMiddleware
      */
     public function destroy(Section $section, Subject $subject): RedirectResponse
     {
-        $section->sectionSubjects()->where('subject_id', $subject->id)->delete();
+        // CONCURRENCY HARDENING — same reasoning as store()/
+        // generateCurriculumSubjects(): removal must also bump
+        // schedule_version so any other tab already viewing this
+        // Section's subject list is told, via the existing polling
+        // banner, that what it's showing is now stale.
+        DB::transaction(function () use ($section, $subject) {
+            $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
+
+            $section->sectionSubjects()->where('subject_id', $subject->id)->delete();
+
+            $this->conflictService->bumpScheduleVersion($lockedSection);
+        });
 
         return back()->with('success', 'Subject removed from the section.');
     }

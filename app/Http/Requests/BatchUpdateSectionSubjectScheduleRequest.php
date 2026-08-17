@@ -58,6 +58,18 @@ class BatchUpdateSectionSubjectScheduleRequest extends FormRequest
             // for a Weekly Hours Mismatch (scheduled Days x Time
             // doesn't add up to the Subject's required weekly hours).
             'rows.*.hours_confirmed' => ['nullable', 'boolean'],
+            // CONCURRENCY HARDENING — Optimistic Concurrency Control.
+            // One version check for the whole batch: the Section's
+            // schedule_version the frontend last loaded (or that the
+            // Auto Schedule preview was generated from —
+            // `generated_from_version`). Compared against the CURRENT
+            // database version, under a row lock, inside the same
+            // transaction as the batch write — see
+            // SectionSubjectController::batchUpdateSchedule() and
+            // ScheduleConflictService::checkSectionVersion(). Optional
+            // for the same reason as
+            // UpdateSectionSubjectScheduleRequest::expected_schedule_version.
+            'expected_schedule_version' => ['sometimes', 'nullable', 'integer', 'min:0'],
         ];
     }
 

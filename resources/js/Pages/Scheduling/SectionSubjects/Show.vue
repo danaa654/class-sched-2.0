@@ -31,12 +31,19 @@ import TimeRecommendationSelector from '@/Components/Scheduling/TimeRecommendati
 import MergeRecommendationModal from '@/Components/Scheduling/MergeRecommendationModal.vue';
 import RoomGrid from '@/Components/Scheduling/RoomGrid.vue';
 import { useTheme } from '@/composables/useTheme';
+import { useSchedulePolling } from '@/composables/useSchedulePolling';
 
 const { theme } = useTheme();
 const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     section: { type: Object, required: true },
+    // CONCURRENCY HARDENING — this Section's schedule_version at the
+    // moment this page was loaded. Carried forward as
+    // `expected_schedule_version` on every scheduling write (Save
+    // Schedule / Accept All & Save) and used as the baseline for the
+    // real-time change-detection poller below.
+    scheduleVersion: { type: Number, default: 1 },
     // Every other Section this user can see for the same Academic
     // Year + Semester (Section::visibleTo() — same RBAC scope the
     // Sections list itself uses), powering the header's section
@@ -211,7 +218,12 @@ const stateFor = (rowId) => {
 
 /* --- Days --- */
 
-const dayOptions = [
+// Full reference list — every day the app knows about, in calendar
+// order. This is NOT what's offered in the dropdown; see dayOptions
+// below. Kept for formatDays()/orderedDayTokens, which need to know
+// the full display order regardless of which days are selectable
+// this School Year.
+const allDayDefinitions = [
     { label: 'Monday', value: 'Mon' },
     { label: 'Tuesday', value: 'Tue' },
     { label: 'Wednesday', value: 'Wed' },
@@ -220,15 +232,44 @@ const dayOptions = [
     { label: 'Saturday', value: 'Sat' },
 ];
 
+// ACADEMIC-CALENDAR-DRIVEN CLASS DAYS — the Days dropdown (and its
+// quick-pick presets below) must only ever offer days the active
+// School Year's Academic Calendar actually allows (schedulingWindow.
+// available_days, sourced server-side from SchoolYear::allowedDays()
+// — see SectionSubjectController::show()). Previously this list was
+// hardcoded to all 7 days, so e.g. Saturday stayed pickable in the
+// dropdown even when the active calendar was Mon–Fri only; the
+// server-side check still caught it on Save ("Sat is not an allowed
+// class day..."), but only after the Registrar had already picked it.
+// This keeps the dropdown itself in sync with that same source of
+// truth instead of just failing validation after the fact.
+const dayOptions = computed(() => {
+    const allowed = props.schedulingWindow?.available_days;
+    if (!Array.isArray(allowed) || allowed.length === 0) {
+        return allDayDefinitions;
+    }
+    return allDayDefinitions.filter((day) => allowed.includes(day.value));
+});
+
 // Quick-pick common combinations shown above the multi-select list.
 // Meetings/Week is capped at 2x (see MultiSelect's selectionLimit),
-// so only single- and double-day presets are offered here.
-const dayPresets = [
+// so only single- and double-day presets are offered here. Filtered
+// the same way as dayOptions above — a preset is only offered when
+// every day it contains is actually allowed this School Year (e.g.
+// "SAT" disappears entirely once Saturday isn't a class day).
+const allDayPresetDefinitions = [
     { label: 'MW', value: ['Mon', 'Wed'] },
     { label: 'TTH', value: ['Tue', 'Thu'] },
     { label: 'WF', value: ['Wed', 'Fri'] },
     { label: 'SAT', value: ['Sat'] },
 ];
+const dayPresets = computed(() => {
+    const allowed = props.schedulingWindow?.available_days;
+    if (!Array.isArray(allowed) || allowed.length === 0) {
+        return allDayPresetDefinitions;
+    }
+    return allDayPresetDefinitions.filter((preset) => preset.value.every((day) => allowed.includes(day)));
+});
 
 // Compact display like "MWF", "TTH", "SAT" instead of PrimeVue's
 // default comma/chip rendering.
@@ -512,14 +553,28 @@ const tableConflicts = computed(() => {
         // (rather than only on the server) is what lets the row
         // highlight and the Registrar confirm it up front instead of
         // hitting an opaque "Nothing saved" after clicking Save.
-        // Once the Registrar has confirmed a mismatch — either just
-        // now in this session (stateFor(...).hoursConfirmed) or
-        // previously, persisted on the row itself from a prior Save
-        // (row.hours_confirmed) — stop listing it as an open issue.
-        // It only reappears if Days/Start/End Time change again (see
-        // onDaysChange/onStartTimeChange/onEndTimeChange, which reset
-        // the local confirmation flag).
-        if (rowIsSchedulable(a) && !stateFor(a.id).hoursConfirmed && !a.hours_confirmed) {
+        //
+        // Confirmation is THIS-SESSION ONLY (stateFor(...).hoursConfirmed).
+        // A stale persisted `row.hours_confirmed=true` from a PAST save
+        // is never trusted here — see the ROOT-CAUSE FIX note below for
+        // why. It only reappears as unconfirmed if Days/Start/End Time
+        // change again this session (see onDaysChange/onStartTimeChange/
+        // onEndTimeChange, which reset the local confirmation flag).
+        // ROOT-CAUSE FIX — this used to also require `!a.hours_confirmed`
+        // (the PERSISTED flag from a prior save) before the mismatch was
+        // even added to tableConflicts. That let an old confirmation —
+        // saved back when this row's duration still matched the
+        // Subject's required hours — permanently hide a NEW mismatch
+        // (e.g. after the Subject's required hours were edited
+        // elsewhere), even on a row nobody touched this session. Unlike
+        // Capacity above (which always lists the current mismatch and
+        // only checks confirmation state later, via
+        // unconfirmedHoursRowIds/unconfirmedCapacityRowIds), Hours was
+        // the only one of the two withconfirmed-and-forgotten. Now it
+        // always reflects the CURRENT numbers — confirmation status
+        // (fresh, this-session only) is checked exactly once, later, by
+        // unconfirmedHoursRowIds — matching how Capacity already works.
+        if (rowIsSchedulable(a) && !stateFor(a.id).hoursConfirmed) {
             const required = weeklyContactHours(a) > 0 ? weeklyContactHours(a) : 3;
             const dayCount = a.days.length;
             const actual = Math.round(((minutesBetweenTimes(a.start_time, a.end_time) * dayCount) / 60) * 100) / 100;
@@ -858,6 +913,77 @@ const csrfToken = () => {
     return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
 };
 
+/* ------------------------------------------------------------------ */
+/* REAL-TIME SCHEDULE CHANGE DETECTION — lightweight polling.          */
+/*                                                                       */
+/* UX/early-warning layer only. Every 15s (paused/slowed while this     */
+/* tab is hidden), asks a tiny endpoint "has this Section's schedule    */
+/* changed?" and, if so, marks the page stale — a dismissible banner    */
+/* plus a disabled/"refresh first" state on Save Schedule / Accept All  */
+/* & Save. Never auto-reloads, never touches in-progress edits or the   */
+/* open Auto Schedule modal. The backend's own version check inside a   */
+/* locked transaction (HTTP 409 SCHEDULE_VERSION_CONFLICT) remains the  */
+/* only thing that actually blocks a stale write — see saveSchedule().  */
+/* ------------------------------------------------------------------ */
+
+const schedulePolling = useSchedulePolling({
+    sectionId: () => props.section.id,
+    initialVersion: () => props.scheduleVersion,
+    fetchVersion: async (sectionId) => {
+        const response = await fetch(route('scheduling.section-subjects.version', sectionId), {
+            headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) throw new Error('Version check failed');
+        return response.json();
+    },
+    intervalMs: 15000,
+});
+
+schedulePolling.start();
+
+// Header's "Refresh Schedule" action — re-fetches this Section's page
+// via Inertia (same route, so it's a lightweight partial reload of
+// props only) rather than a hard browser reload, then clears the
+// stale flag once the fresh props have landed. If the Registrar has
+// local unsaved edits (dirty rows, or the Auto Schedule review panel
+// still open), confirm first so nothing is silently discarded.
+const refreshingSchedule = ref(false);
+const refreshSchedule = () => {
+    const hasUnsavedWork = dirtyRowIds.value.size > 0 || autoSummaryVisible.value;
+
+    const doRefresh = () => {
+        refreshingSchedule.value = true;
+        router.reload({
+            onFinish: () => {
+                refreshingSchedule.value = false;
+                dirtyRowIds.value = new Set();
+                autoSummaryVisible.value = false;
+                autoSummary.value = null;
+                schedulePolling.acceptVersion(props.scheduleVersion);
+                schedulePolling.checkNow();
+                toast.add({ severity: 'info', summary: 'Refreshed', detail: 'Showing the latest schedule.', life: 3500 });
+            },
+        });
+    };
+
+    if (!hasUnsavedWork) {
+        doRefresh();
+        return;
+    }
+
+    Swal.fire({
+        icon: 'warning',
+        title: 'Refresh Schedule?',
+        text: 'Refreshing will discard your unsaved changes. Continue?',
+        showCancelButton: true,
+        confirmButtonText: 'Refresh',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#dc2626',
+    }).then((result) => {
+        if (result.isConfirmed) doRefresh();
+    });
+};
+
 // Section Subjects page top-level tab — "Subjects" (the existing
 // scheduling spreadsheet) vs "Room Grid" (spec: room-centric
 // drag-and-drop view of the exact same SectionSubject rows).
@@ -873,6 +999,18 @@ const onRoomGridRowUpdated = (fresh) => {
     if (row) {
         Object.assign(row, { ...fresh, days: toDaysArray(fresh.days) });
     }
+};
+
+// Room Grid's own writeSchedule() already handles a stale drag-drop
+// save (409 SCHEDULE_VERSION_CONFLICT) locally — this just makes sure
+// that also flips the page-wide stale banner + disables Save
+// Schedule, since a conflict discovered from the Room Grid tab means
+// the Subjects tab's data is equally out of date.
+const onScheduleStaleFromRoomGrid = (currentVersion) => {
+    if (typeof currentVersion === 'number') {
+        schedulePolling.backendVersion.value = currentVersion;
+    }
+    schedulePolling.isStale.value = true;
 };
 
 const dirtyRowIds = ref(new Set());
@@ -903,6 +1041,17 @@ const onDaysChange = (row, value) => {
     autoFillEndTime(row);
     clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
+    // BUG FIX — row.hours_confirmed is the PERSISTED flag loaded from
+    // the server (true if a prior save confirmed an Hours Mismatch at
+    // the OLD Days/Time). Only resetting the local session flag above
+    // left this stale, so tableConflicts()'s guard
+    // (`!stateFor(a.id).hoursConfirmed && !a.hours_confirmed`) kept
+    // treating an edited row as still-confirmed against hours that no
+    // longer apply — the Weekly Hours Mismatch warning silently never
+    // fired, and Save Schedule would fail server-side with no visible
+    // explanation. Must invalidate both flags together whenever Days
+    // or Time changes.
+    row.hours_confirmed = false;
 };
 const onStartTimeChange = (row, date) => {
     row.start_time = dateToTimeString(date);
@@ -910,12 +1059,14 @@ const onStartTimeChange = (row, date) => {
     autoFillEndTime(row);
     clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
+    row.hours_confirmed = false; // see onDaysChange's comment above
 };
 const onEndTimeChange = (row, date) => {
     row.end_time = dateToTimeString(date);
     markDirty(row, 'end_time');
     clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
+    row.hours_confirmed = false; // see onDaysChange's comment above
 };
 
 /* --- Save Schedule — validates every row client-side, then saves        */
@@ -957,6 +1108,22 @@ const validateRowsClientSide = () => {
 
 const saveSchedule = async () => {
     if (rows.value.length === 0) {
+        return;
+    }
+
+    // BLOCK STALE SAVES EARLY — the poller already told us the
+    // backend moved past what this page loaded. This is only an
+    // early warning (the transaction + version check below is still
+    // the real guard), but there's no point letting the Registrar
+    // fill out a Swal confirmation dialog for a save the server is
+    // about to reject with 409 anyway — send them to Refresh first.
+    if (schedulePolling.isStale.value) {
+        toast.add({
+            severity: 'warn',
+            summary: 'Schedule changed',
+            detail: 'Another user changed this schedule. Please refresh before saving.',
+            life: 6000,
+        });
         return;
     }
 
@@ -1062,7 +1229,11 @@ const saveSchedule = async () => {
                 Accept: 'application/json',
                 'X-XSRF-TOKEN': csrfToken(),
             },
-            body: JSON.stringify({ rows: buildPayload() }),
+            // CONCURRENCY HARDENING — the version this page last knew
+            // about. The backend re-checks this itself, under a row
+            // lock, inside the save transaction (the real guard); this
+            // is just what makes that check possible.
+            body: JSON.stringify({ rows: buildPayload(), expected_schedule_version: schedulePolling.currentVersion.value }),
         });
 
         return { response, data: await response.json() };
@@ -1070,6 +1241,29 @@ const saveSchedule = async () => {
 
     try {
         let { response, data } = await submit();
+
+        // SAVE CONFLICT RESPONSE (spec Section 13) — another user's
+        // save committed and bumped schedule_version after this page
+        // loaded (or since the last successful save/refresh). Nothing
+        // was written server-side (the whole transaction rolled
+        // back). Keep the Registrar's current UI/edits exactly as-is,
+        // mark the page stale so Save is blocked until they refresh,
+        // and surface it clearly instead of a generic error toast.
+        if (response.status === 409 && data.code === 'SCHEDULE_VERSION_CONFLICT') {
+            if (typeof data.current_version === 'number') {
+                schedulePolling.backendVersion.value = data.current_version;
+            }
+            schedulePolling.isStale.value = true;
+
+            toast.add({
+                severity: 'error',
+                summary: 'Save prevented',
+                detail: 'Another user changed this schedule while you were editing. Refresh to see the latest version, then re-apply your changes.',
+                life: 8000,
+            });
+            savingSchedule.value = false;
+            return;
+        }
 
         // FACULTY WORKLOAD VALIDATION — "Save Schedule Validation".
         // The server rejects with 409 and lists every faculty member
@@ -1138,6 +1332,14 @@ const saveSchedule = async () => {
             }
         });
         dirtyRowIds.value = new Set();
+
+        // SAVE SUCCESS — the backend incremented schedule_version by
+        // exactly 1 as part of this same transaction; adopt it as the
+        // new baseline so the next poll (and the next save) compares
+        // against it, not the version this page loaded with.
+        if (typeof data.schedule_version === 'number') {
+            schedulePolling.acceptVersion(data.schedule_version);
+        }
 
         toast.add({ severity: 'success', summary: 'Saved', detail: data.message ?? 'Schedule saved successfully.', life: 4000 });
     } catch (e) {
@@ -1314,14 +1516,40 @@ const runAutoGenerate = async () => {
     try {
         const response = await fetch(route('scheduling.section-subjects.auto-generate', props.section.id), {
             method: 'POST',
-            headers: { Accept: 'application/json', 'X-XSRF-TOKEN': csrfToken() },
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrfToken() },
+            // CONCURRENCY HARDENING — captured as `generated_from_version`
+            // server-side; if another user's change already landed since
+            // this page loaded, the backend rejects with 409 below
+            // instead of silently generating against stale data.
+            body: JSON.stringify({ expected_schedule_version: schedulePolling.currentVersion.value }),
         });
         const data = await response.json();
+
+        if (response.status === 409 && data.code === 'SCHEDULE_VERSION_CONFLICT') {
+            if (typeof data.current_version === 'number') schedulePolling.backendVersion.value = data.current_version;
+            schedulePolling.isStale.value = true;
+            toast.add({
+                severity: 'error',
+                summary: 'Schedule changed',
+                detail: 'Another user changed this schedule. Please refresh before running Auto Schedule.',
+                life: 7000,
+            });
+            return;
+        }
+
         if (!response.ok) throw new Error(data.message ?? 'Auto generate failed.');
 
         applyFreshRows(data.sectionSubjects ?? []);
         autoSummary.value = data;
         autoSummaryVisible.value = true;
+
+        // This action itself just wrote to the database and advanced
+        // schedule_version — adopt the new baseline immediately so the
+        // next poll doesn't mistake our OWN write for someone else's
+        // change and falsely lock out "Accept All & Save".
+        if (typeof data.schedule_version === 'number') {
+            schedulePolling.acceptVersion(data.schedule_version);
+        }
 
         toast.add({
             severity: data.scheduled === data.total ? 'success' : 'warn',
@@ -1342,13 +1570,31 @@ const regenerateAutoSchedule = async () => {
     try {
         const response = await fetch(route('scheduling.section-subjects.auto-generate.regenerate', props.section.id), {
             method: 'POST',
-            headers: { Accept: 'application/json', 'X-XSRF-TOKEN': csrfToken() },
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrfToken() },
+            body: JSON.stringify({ expected_schedule_version: schedulePolling.currentVersion.value }),
         });
         const data = await response.json();
+
+        if (response.status === 409 && data.code === 'SCHEDULE_VERSION_CONFLICT') {
+            if (typeof data.current_version === 'number') schedulePolling.backendVersion.value = data.current_version;
+            schedulePolling.isStale.value = true;
+            toast.add({
+                severity: 'error',
+                summary: 'Schedule changed',
+                detail: 'Another user changed this schedule. Please refresh before regenerating.',
+                life: 7000,
+            });
+            return;
+        }
+
         if (!response.ok) throw new Error(data.message ?? 'Regenerate failed.');
 
         applyFreshRows(data.sectionSubjects ?? []);
         autoSummary.value = data;
+
+        if (typeof data.schedule_version === 'number') {
+            schedulePolling.acceptVersion(data.schedule_version);
+        }
 
         toast.add({ severity: 'info', summary: 'Schedule Regenerated', detail: data.message, life: 6000 });
     } catch (e) {
@@ -1372,6 +1618,12 @@ const clearAutoSchedule = async () => {
         applyFreshRows(data.sectionSubjects ?? []);
         autoSummary.value = null;
         autoSummaryVisible.value = false;
+
+        // "Clear" also writes (reverts rows to empty) and bumps the
+        // version — same reasoning as runAutoGenerate() above.
+        if (typeof data.schedule_version === 'number') {
+            schedulePolling.acceptVersion(data.schedule_version);
+        }
 
         toast.add({ severity: 'info', summary: 'Cleared', detail: data.message, life: 5000 });
     } catch (e) {
@@ -1414,6 +1666,10 @@ const onAutoSummaryVisibleChange = async (visible) => {
         if (!response.ok) throw new Error(data.message ?? 'Clear failed.');
 
         applyFreshRows(data.sectionSubjects ?? []);
+
+        if (typeof data.schedule_version === 'number') {
+            schedulePolling.acceptVersion(data.schedule_version);
+        }
 
         toast.add({ severity: 'info', summary: 'Not Saved', detail: 'The generated schedule was discarded — nothing was saved.', life: 5000 });
     } catch (e) {
@@ -1731,6 +1987,34 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                 </Link>
             </div>
 
+            <!-- REAL-TIME SCHEDULE CHANGE DETECTION — non-blocking notice
+                 shown when polling detects another user changed this
+                 Section's schedule. Never auto-dismisses/auto-refreshes;
+                 the Registrar's current view and any unsaved edits stay
+                 exactly as they are until they choose to refresh. -->
+            <div
+                v-if="schedulePolling.isStale.value"
+                class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3"
+            >
+                <div class="flex items-start gap-2.5">
+                    <i class="pi pi-exclamation-triangle text-amber-500 mt-0.5"></i>
+                    <div>
+                        <p class="text-sm font-semibold text-amber-800">Schedule Updated</p>
+                        <p class="text-sm text-amber-700">
+                            Another user changed this schedule. Your current view may be outdated — refresh before saving.
+                        </p>
+                    </div>
+                </div>
+                <Button
+                    label="Refresh Schedule"
+                    icon="pi pi-refresh"
+                    size="small"
+                    severity="warn"
+                    :loading="refreshingSchedule"
+                    @click="refreshSchedule"
+                />
+            </div>
+
             <!-- Page Title -->
             <div class="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
@@ -1834,8 +2118,14 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         icon="pi pi-save"
                         severity="success"
                         :loading="savingSchedule"
-                        :disabled="rows.length === 0 || blockingConflictRowIds.size > 0"
-                        :title="blockingConflictRowIds.size > 0 ? 'Resolve the Scheduling Issues above before saving.' : undefined"
+                        :disabled="rows.length === 0 || blockingConflictRowIds.size > 0 || schedulePolling.isStale.value"
+                        :title="
+                            schedulePolling.isStale.value
+                                ? 'Schedule changed. Please refresh before saving.'
+                                : blockingConflictRowIds.size > 0
+                                  ? 'Resolve the Scheduling Issues above before saving.'
+                                  : undefined
+                        "
                         @click="saveSchedule"
                     />
                 </div>
@@ -1922,7 +2212,10 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         :rows="rows"
                         :active-faculty="activeFaculty"
                         :scheduling-window="schedulingWindow"
+                        :is-stale="schedulePolling.isStale.value"
+                        :expected-schedule-version="schedulePolling.currentVersion.value"
                         @row-updated="onRoomGridRowUpdated"
+                        @schedule-stale="onScheduleStaleFromRoomGrid"
                     />
                 </template>
             </Card>
@@ -2300,6 +2593,21 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                             </p>
                                         </div>
                                     </div>
+
+                                    <!-- Row-level errors — Hours Mismatch / Capacity. Unlike
+                                         Faculty/Room/Days/Time, these don't belong to one single
+                                         field, so they were previously set into stateFor(id).errors
+                                         by the server (batchUpdateSchedule()'s 'hours'/'capacity'
+                                         keys) but never actually rendered anywhere — a save could
+                                         fail for one of these reasons with the row highlighted and
+                                         NO visible explanation at all. Surfaced here as a banner
+                                         for the whole row instead. -->
+                                    <p v-if="stateFor(data.id).errors.hours" class="text-red-500 text-xs mt-1">
+                                        <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.hours }}
+                                    </p>
+                                    <p v-if="stateFor(data.id).errors.capacity" class="text-red-500 text-xs mt-1">
+                                        <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.capacity }}
+                                    </p>
                                 </div>
                             </template>
                         </Column>
@@ -2554,7 +2862,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 v-if="combo.is_sibling_pattern"
                                                 :value="`Matches ${combo.pattern_source?.donor_section_code ?? 'sibling section'}`"
                                                 severity="info"
-                                                icon="pi pi-copy"
+                                                icon="pi pi-sparkles"
                                             />
                                         </div>
                                         <div class="flex items-center gap-2 shrink-0">
@@ -2630,7 +2938,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     v-if="rec.is_sibling_pattern"
                                     value="Matches sibling section"
                                     severity="info"
-                                    icon="pi pi-copy"
+                                    icon="pi pi-sparkles"
                                     class="!text-[0.65rem] mt-1"
                                 />
                                 <Tag
@@ -2705,7 +3013,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     v-if="rec.is_sibling_pattern"
                                     value="Matches sibling section"
                                     severity="info"
-                                    icon="pi pi-copy"
+                                    icon="pi pi-sparkles"
                                     class="!text-[0.65rem] mt-1"
                                 />
                                 <ProgressBar
@@ -3025,6 +3333,20 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :draggable="false"
             :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
         >
+            <!-- Schedule changed while this Auto Schedule review panel was
+                 open (spec Section 9). "Accept All & Save" is already
+                 disabled for this; this just makes the reason visible
+                 inside the modal itself. -->
+            <div
+                v-if="schedulePolling.isStale.value"
+                class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 mb-4 flex items-start gap-2.5"
+            >
+                <i class="pi pi-exclamation-triangle text-amber-500 mt-0.5"></i>
+                <p class="text-sm text-amber-700">
+                    Schedule changed while Auto Schedule was being generated. Please refresh before accepting this schedule.
+                </p>
+            </div>
+
             <div v-if="autoSummary">
                 <div
                     class="rounded-xl border p-4 mb-4 flex items-center gap-3"
@@ -3057,13 +3379,6 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             </p>
                             <Tag v-if="resultHasHardConflict(result)" value="Scheduling Conflict" severity="danger" icon="pi pi-exclamation-triangle" class="!text-xs shrink-0" />
                             <Tag v-else-if="result.is_merged" value="Merged" severity="info" class="!text-xs shrink-0" />
-                            <Tag
-                                v-else-if="result.pattern_source"
-                                :value="`Copied from ${result.pattern_source.donor_section_code}`"
-                                severity="help"
-                                icon="pi pi-copy"
-                                class="!text-xs shrink-0"
-                            />
                         </div>
 
                         <!-- Hard conflict banner — names exactly which Section/Subject
@@ -3101,14 +3416,18 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         </div>
 
                         <div v-else>
-                            <!-- SIBLING SECTION PATTERN MATCHING — this assignment's
-                                 Faculty, Room, and duration were copied from another
-                                 section of the same cohort that already teaches this
-                                 exact subject; only the Day was changed. -->
-                            <p v-if="result.pattern_source" class="text-xs text-slate-500 mb-3">
-                                <i class="pi pi-info-circle mr-1"></i>
-                                Faculty, room, and duration copied from <span class="font-medium">{{ result.pattern_source.donor_section_code }}</span>'s existing schedule for this subject — only the day was changed to avoid conflicts.
-                            </p>
+                            <!-- SIBLING SECTION PATTERN MATCHING — this is a NEW,
+                                 independent ScheduleAssignment for THIS section; only
+                                 its Faculty/Room/duration PREFERENCE was based on
+                                 another section of the same cohort that already
+                                 teaches this exact subject, and the Day was
+                                 deliberately changed to avoid conflicting with that
+                                 other section's own booking. Nothing was copied or
+                                 moved from the donor — see SiblingSectionPatternService.
+                                 No badge/explanation shown here on purpose — end users
+                                 found "Based on <section>" confusing; result.pattern_source
+                                 is still available on the row for anyone who needs it
+                                 (e.g. future admin-facing diagnostics). -->
 
                             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <!-- Faculty — interactive recommendation selector (Prompt 8.11) -->
@@ -3184,7 +3503,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                      Faculty/Room conflict that rejected each one). -->
                                 <details v-if="item.sibling_pattern_diagnostics?.length" class="mt-2">
                                     <summary class="text-xs text-amber-700 cursor-pointer select-none">
-                                        <i class="pi pi-copy mr-1"></i>Why wasn't a sibling section's schedule copied?
+                                        <i class="pi pi-info-circle mr-1"></i>Why wasn't a sibling section's pattern used?
                                     </summary>
                                     <div class="mt-1.5 space-y-2 pl-1">
                                         <div
@@ -3243,7 +3562,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     icon="pi pi-check"
                     severity="success"
                     :loading="savingSchedule"
-                    :disabled="blockingConflictRowIds.size > 0"
+                    :disabled="blockingConflictRowIds.size > 0 || schedulePolling.isStale.value"
+                    :title="schedulePolling.isStale.value ? 'Schedule changed while Auto Schedule was being generated. Please refresh before accepting.' : undefined"
                     @click="acceptAutoSchedule"
                 />
             </template>

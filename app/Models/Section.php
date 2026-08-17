@@ -59,6 +59,14 @@ class Section extends Model
     {
         return [
             'estimated_students' => 'integer',
+            // CONCURRENCY HARDENING — optimistic-concurrency counter.
+            // Deliberately NOT in $fillable: it is only ever advanced
+            // by ScheduleConflictService::bumpScheduleVersion() inside
+            // a locked transaction, never via mass assignment from a
+            // controller/request. See the
+            // 2026_08_17_090000_add_schedule_version_to_sections_table
+            // migration for the full mechanism.
+            'schedule_version' => 'integer',
         ];
     }
 

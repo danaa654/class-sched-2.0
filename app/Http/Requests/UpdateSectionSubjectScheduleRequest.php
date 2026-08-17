@@ -103,6 +103,17 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             // schedule back to Draft) — the row keeps whatever slot this
             // same request just moved it to.
             'clear_merge_link' => ['sometimes', 'boolean'],
+            // CONCURRENCY HARDENING — Optimistic Concurrency Control.
+            // The Section's schedule_version the frontend last loaded
+            // (returned by show()/updateSchedule()/moveRoomGridAssignment()
+            // responses). Compared against the CURRENT database
+            // version, under a row lock, inside the same transaction
+            // as the write — see
+            // ScheduleConflictService::checkSectionVersion(). Optional:
+            // omitting it simply skips version checking for this
+            // request rather than failing it, so older/partial
+            // payloads keep working exactly as before.
+            'expected_schedule_version' => ['sometimes', 'nullable', 'integer', 'min:0'],
         ];
     }
 
