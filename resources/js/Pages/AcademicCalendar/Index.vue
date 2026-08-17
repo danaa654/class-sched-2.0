@@ -17,6 +17,7 @@ import Select from 'primevue/select';
 import FloatLabel from 'primevue/floatlabel';
 import Toast from 'primevue/toast';
 import Checkbox from 'primevue/checkbox';
+import Popover from 'primevue/popover';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -303,29 +304,51 @@ const onRestoreAcademicTerm = (academicTerm) => {
     });
 };
 
-// Archive is only offered for Inactive terms — an Active term must be
-// switched to Inactive first (or superseded by making another term
-// Active, which auto-flips it per AcademicTerm::booted()), and an
-// already-Archived term has nothing left to do. The controller
-// re-checks this same rule server-side, so this is a UI guard only.
+// Archive ("End Semester") is only offered for Inactive terms — an
+// Active term must be switched to Inactive first (or superseded by
+// making another term Active, which auto-flips it per AcademicTerm::
+// booted()), and an already-Archived term has nothing left to do.
+//
+// END SEMESTER GATE: the controller independently blocks this unless
+// every Section under the term is finalized (or the term has none at
+// all) — see AcademicTermController::archive(). That's the real
+// enforcement; the confirmation copy here is just a heads-up. The
+// blocking-section list, when the archive is rejected, comes back as
+// errors.status and is shown in a follow-up alert rather than a
+// generic toast, so the Admin/Registrar sees exactly which sections
+// to go finalize first.
 const onArchiveAcademicTerm = (academicTerm) => {
     Swal.fire({
-        title: 'Archive this academic term?',
-        text: `${academicTerm.school_year?.name ?? ''} - ${academicTerm.semester?.name ?? ''}`,
+        title: 'End this semester?',
+        html: `Archiving <strong>${academicTerm.school_year?.name ?? ''} - ${academicTerm.semester?.name ?? ''}</strong> marks it as historical. Every section under this term must already be finalized — sections still open will block this.`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#D97706',
         cancelButtonColor: '#64748B',
-        confirmButtonText: 'Yes, archive it',
+        confirmButtonText: 'Yes, end semester',
     }).then((result) => {
         if (result.isConfirmed) {
             router.put(route('academic-terms.archive', academicTerm.id), {}, {
                 preserveScroll: true,
                 preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't end this semester yet",
+                        text: errors.status ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#D97706',
+                        confirmButtonText: 'Got it',
+                    });
+                },
             });
         }
     });
 };
+// Help popover — explains the End Semester/Archive finalization
+// requirement in place, same pattern as the Section Subjects
+// workspace's own "How this page works" info icon.
+const helpPopover = ref(null);
+const toggleHelp = (event) => helpPopover.value?.toggle(event);
 </script>
 
 <template>
@@ -341,11 +364,43 @@ const onArchiveAcademicTerm = (academicTerm) => {
         <div class="max-w-7xl mx-auto w-full">
             <!-- Page Title -->
             <div class="mb-6">
-                <h1 class="text-2xl font-bold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Academic Calendar</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
+                    Academic Calendar
+                    <Button
+                        icon="pi pi-info-circle"
+                        text
+                        rounded
+                        size="small"
+                        severity="secondary"
+                        class="!p-1.5 !text-slate-400"
+                        aria-label="How End Semester works"
+                        title="How End Semester works"
+                        @click="toggleHelp"
+                    />
+                </h1>
                 <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage academic terms — School Year, Semester, and Scheduling Preferences all in one place.
                 </p>
             </div>
+
+            <Popover ref="helpPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
+                <div class="w-80 max-w-[85vw] text-sm text-slate-600 leading-relaxed space-y-2">
+                    <p>
+                        <strong>Active</strong> is the term currently used for day-to-day scheduling — only one term
+                        can be Active at a time. Switch it to <strong>Inactive</strong> once its semester is over and
+                        you're ready to close it out.
+                    </p>
+                    <p>
+                        <strong>End Semester</strong> (the archive action, shown only on Inactive terms) marks a term
+                        as historical. It's blocked unless every section under that term has been finalized first —
+                        if any aren't, you'll see exactly which sections still need finalizing.
+                    </p>
+                    <p>
+                        An Admin/Registrar can still unlock and correct a section even after its term has been
+                        archived — archiving doesn't take that away.
+                    </p>
+                </div>
+            </Popover>
 
             <!-- Academic Terms -->
             <Card
@@ -465,7 +520,8 @@ const onArchiveAcademicTerm = (academicTerm) => {
                                             rounded
                                             severity="warn"
                                             size="small"
-                                            aria-label="Archive"
+                                            aria-label="End Semester"
+                                            title="End Semester — archive this term (requires every section to be finalized)"
                                             @click="onArchiveAcademicTerm(data)"
                                         />
                                         <Button

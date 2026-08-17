@@ -125,24 +125,50 @@ class AcademicTermController extends Controller
     }
 
     /**
-     * Archive the specified academic term.
+     * Archive the specified academic term — the "End Semester" action.
      *
      * Only an Inactive term may be archived — an Active term must be
      * switched to Inactive first (or superseded by making a different
      * term Active, which auto-flips it via AcademicTerm::booted()).
-     * This is a pure status flip: it never touches, migrates, or
-     * cascades to Sections, Curriculum, or any other data tied to the
-     * term's School Year/Semester.
      *
-     * The frontend only shows the Archive action for Inactive terms,
-     * but that's a UI convenience, not enforcement, so the same rule
-     * is re-checked here against a direct request.
+     * END SEMESTER GATE: every Section belonging to this term
+     * (matchingSectionsQuery() — same School Year + Semester
+     * resolution the Sections list and Dashboard already use) must be
+     * finalized first. A term with NO Sections at all is allowed
+     * through — there's nothing to protect, and blocking an
+     * empty/unused term just creates needless friction. This is a
+     * real backend gate, not just a UI hint: even a scripted/direct
+     * request to this endpoint is stopped here. Beyond that gate,
+     * archiving is still a pure status flip on the term itself — it
+     * never touches, migrates, or cascades to the Sections
+     * (finalization already happened section-by-section as the
+     * precondition, so there's nothing left to write onto them here).
+     *
+     * The frontend only shows the Archive/"End Semester" action for
+     * Inactive terms with every Section finalized, but that's a UI
+     * convenience, not enforcement, so both rules are re-checked here
+     * against a direct request.
      */
     public function archive(AcademicTerm $academicTerm): RedirectResponse
     {
         if ($academicTerm->status !== 'Inactive') {
             throw ValidationException::withMessages([
                 'status' => 'Only an Inactive academic term can be archived.',
+            ]);
+        }
+
+        // The unfinalized Sections are named explicitly (not just
+        // counted) so the Admin/Registrar can jump straight to
+        // finishing them instead of hunting through the Sections list.
+        $unfinalizedSectionCodes = $academicTerm->matchingSectionsQuery()
+            ->where('is_finalized', false)
+            ->orderBy('section_code')
+            ->pluck('section_code');
+
+        if ($unfinalizedSectionCodes->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'status' => "This term can't be archived yet — the following sections still need to be finalized first: "
+                    .$unfinalizedSectionCodes->implode(', ').'.',
             ]);
         }
 
