@@ -22,6 +22,7 @@ import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Menu from 'primevue/menu';
 import Toast from 'primevue/toast';
+import InfoPopover from '@/Components/InfoPopover.vue';
 
 const props = defineProps({
     section: { type: Object, required: true },
@@ -418,8 +419,19 @@ const onAddManual = () => {
             </div>
 
             <div class="mb-6">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
                     {{ section.section_code }} — {{ section.section_name }}
+                    <InfoPopover
+                        title="Subject Assignment Workspace"
+                        :paragraphs="[
+                            'Assign Faculty, Room, Days, and Time for this section\'s subjects directly in the table.',
+                        ]"
+                        :bullets="[
+                            'Each field saves automatically as soon as it\'s changed — there is no separate Save button.',
+                            'The server still validates room, faculty, and time conflicts on every change; a Conflict status means one of those checks failed.',
+                            'Faculty options are filtered to those qualified to teach each subject.',
+                        ]"
+                    />
                 </h1>
                 <p class="mt-1 text-slate-500">
                     Assign Faculty, Room, and Time directly in the table. Changes save automatically.
@@ -652,7 +664,20 @@ const onAddManual = () => {
                         </Column>
 
                         <!-- Status -->
-                        <Column header="Status" style="width: 8rem">
+                        <Column style="width: 8rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Status
+                                    <InfoPopover
+                                        title="Row Status"
+                                        :bullets="[
+                                            'Scheduled — Faculty, Room, Days, and Time are all set with no conflicts.',
+                                            'Conflict — the server detected an overlap with another schedule; review and change the flagged field.',
+                                        ]"
+                                        width="w-64"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <Tag :value="data.status" :severity="statusSeverity(data.status)" />
                             </template>

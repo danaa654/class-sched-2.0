@@ -30,6 +30,7 @@ import RoomRecommendationSelector from '@/Components/Scheduling/RoomRecommendati
 import TimeRecommendationSelector from '@/Components/Scheduling/TimeRecommendationSelector.vue';
 import MergeRecommendationModal from '@/Components/Scheduling/MergeRecommendationModal.vue';
 import RoomGrid from '@/Components/Scheduling/RoomGrid.vue';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 import { useSchedulePolling } from '@/composables/useSchedulePolling';
 
@@ -2102,12 +2103,19 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </Select>
                 </div>
                 <Popover ref="helpPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
-                    <p class="w-80 max-w-[85vw] text-sm text-slate-600 leading-relaxed">
-                        Build this section's subject list and assign Faculty, Room, Days, and Time directly in the
-                        table, or click "Auto Generate Schedule" to let the recommendation engine propose the best
-                        Faculty, Room, and Time for every unscheduled subject. Review the result, then click
-                        "Save Schedule" to save everything at once.
-                    </p>
+                    <div class="w-80 max-w-[85vw] text-sm text-slate-600 leading-relaxed space-y-2">
+                        <p class="font-semibold text-[#1E293B]">Section Subjects</p>
+                        <p>
+                            Build this section's subject list and assign Faculty, Room, Days, and Time directly in
+                            the table, or let the recommendation engine do it for you.
+                        </p>
+                        <ul class="list-disc space-y-1 pl-4">
+                            <li>"Auto Generate Schedule" proposes Faculty, Room, and Time for every unscheduled subject — review before saving.</li>
+                            <li>"Save Schedule" persists everything at once; the server validates room, faculty, section, and time conflicts before committing.</li>
+                            <li>⚡ Auto tags mark rows assigned by the recommendation engine, not yet saved.</li>
+                            <li>🔒 Finalized sections are locked from editing — only Admin/Registrar can unlock them.</li>
+                        </ul>
+                    </div>
                 </Popover>
                 <div class="flex items-center gap-3 shrink-0">
                     <span v-if="hasUnsavedChanges" class="text-sm text-amber-600 font-medium whitespace-nowrap">
@@ -2234,6 +2242,16 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                 >
                     Room Grid
                 </button>
+                <InfoPopover
+                    title="Room Grid"
+                    :paragraphs="['Displays room usage by day and time for this section\'s scheduled subjects.']"
+                    :bullets="[
+                        'View scheduled classes and identify room availability at a glance.',
+                        'Detect overlapping room assignments before they become conflicts.',
+                        'Changes made here still go through the same server-side conflict validation as the Subjects table.',
+                    ]"
+                    width="w-72"
+                />
             </div>
 
             <!-- Room Grid tab -->

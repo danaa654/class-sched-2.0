@@ -22,6 +22,7 @@ import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import Tag from 'primevue/tag';
 import Message from 'primevue/message';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -251,7 +252,22 @@ const onUpdateAccount = () => {
 
         <div class="max-w-6xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <div class="mb-6">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Settings</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Settings
+                    <InfoPopover
+                        title="Settings"
+                        :paragraphs="[
+                            'System-wide configuration that controls how scheduling behaves — not the data itself (Faculty, Rooms, Subjects, Sections, and Curriculum each have their own pages).',
+                        ]"
+                        :bullets="[
+                            'Academic — the daily class window, lunch break, and available scheduling days used by every section.',
+                            'Meeting Frequency — how many times per week each subject type meets by default (e.g. lectures 2x/week, labs 1x/week).',
+                            'Auto Schedule — rules the recommendation engine follows when proposing Faculty, Room, and Time.',
+                            'Irregular Scheduling — controls for merging irregular section subjects into compatible regular sections.',
+                            'Changing these settings affects future scheduling; it does not retroactively change schedules already saved.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500 max-w-3xl">
                     System-wide configuration. Faculty, Rooms, Subjects, Sections, Programs, Colleges and the
                     Curriculum keep their own dedicated pages — Settings only controls how the system behaves.

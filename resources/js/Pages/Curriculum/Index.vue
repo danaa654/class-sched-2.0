@@ -18,6 +18,7 @@ import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import FloatLabel from 'primevue/floatlabel';
 import Toast from 'primevue/toast';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -285,7 +286,20 @@ const onRestore = (curriculum) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Curriculum</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Curriculum
+                    <InfoPopover
+                        title="Curriculum"
+                        :paragraphs="[
+                            'A Curriculum is the academic plan for a Major — which Subjects are offered, in which year and semester, for a given school-year range.',
+                        ]"
+                        :bullets="[
+                            'Sections pull their required Subjects from the Curriculum assigned to their Major and year level.',
+                            'A Major can have more than one Curriculum version across different school years.',
+                            'Removing a Subject from a Curriculum does not remove it from Sections already scheduled under an older version.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">
                     Manage the academic plans (subjects offered per Major) used across school years.
                 </p>

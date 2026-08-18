@@ -16,6 +16,7 @@ import Column from 'primevue/column';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -251,7 +252,21 @@ const fullName = (faculty) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Faculty Master</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Faculty Master
+                    <InfoPopover
+                        title="Faculty Master"
+                        :paragraphs="[
+                            'The master roster of faculty members available for teaching assignments across the institution.',
+                        ]"
+                        :bullets="[
+                            'Max Teaching Units caps how many units a faculty member can be assigned per term; Teaching Load shows current usage against that cap.',
+                            'Faculty with no College are treated as General Education Faculty and can be assigned across colleges.',
+                            'Inactive faculty stay in the system for history but are not offered when assigning new teaching loads.',
+                            'Use the view icon to manage a faculty member\'s teaching qualifications, availability, and workload details.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">
                     Manage faculty members available for teaching assignments.
                 </p>
@@ -353,7 +368,24 @@ const fullName = (faculty) => {
                                 {{ data.max_teaching_units }}
                             </template>
                         </Column>
-                        <Column header="Teaching Load" style="width: 11rem">
+                        <Column style="width: 11rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Teaching Load
+                                    <InfoPopover
+                                        title="Teaching Load"
+                                        :paragraphs="[
+                                            'How many units this faculty member is currently assigned against their Max Teaching Units cap.',
+                                        ]"
+                                        :bullets="[
+                                            '🟢 Green — comfortably under the cap.',
+                                            '🟡 Yellow — nearing the cap.',
+                                            '🔴 Red — at or over the cap; new assignments may be blocked or require override.',
+                                        ]"
+                                        width="w-64"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <div v-if="data.workload" class="flex items-center gap-1.5">
                                     <span>
@@ -365,7 +397,20 @@ const fullName = (faculty) => {
                                 </div>
                             </template>
                         </Column>
-                        <Column header="Status" style="width: 9rem">
+                        <Column style="width: 9rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Status
+                                    <InfoPopover
+                                        title="Faculty Status"
+                                        :bullets="[
+                                            'Active — available for new teaching assignments.',
+                                            'Inactive — kept for historical records; not offered for new assignments.',
+                                        ]"
+                                        width="w-64"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <Tag
                                     :value="data.status"

@@ -24,6 +24,7 @@ import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Toast from 'primevue/toast';
 import ProgressBar from 'primevue/progressbar';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -409,7 +410,20 @@ const placementStatusSeverity = (status) => {
             <!-- Page Title -->
             <div class="mb-6 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">{{ fullName }}</h1>
+                    <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                        {{ fullName }}
+                        <InfoPopover
+                            title="Faculty Details"
+                            :paragraphs="[
+                                'Manage this faculty member\'s profile, teaching qualifications, weekly availability, and current teaching workload.',
+                            ]"
+                            :bullets="[
+                                'Teaching Qualifications control which subjects this faculty member can be assigned to when scheduling.',
+                                'Availability limits which days/times the scheduling engine may assign this faculty member — it will never schedule outside these hours.',
+                                'Workload shows units currently assigned against the Max Teaching Units cap set on the Information tab.',
+                            ]"
+                        />
+                    </h1>
                     <p class="mt-1 text-slate-500">
                         {{ faculty.faculty_id }} &middot; {{ faculty.college?.name || '—' }} &middot;
                         {{ faculty.employment_type }}

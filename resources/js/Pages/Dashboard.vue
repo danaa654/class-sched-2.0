@@ -6,6 +6,7 @@ import KpiCard from '@/Components/Dashboard/KpiCard.vue';
 import SchedulingProgressCard from '@/Components/Dashboard/SchedulingProgressCard.vue';
 import ConflictPanel from '@/Components/Dashboard/ConflictPanel.vue';
 import QuickActions from '@/Components/Dashboard/QuickActions.vue';
+import InfoPopover from '@/Components/InfoPopover.vue';
 
 const props = defineProps({
     roles: {
@@ -104,7 +105,20 @@ const roleLabel = computed(() => props.roles.join(', ') || 'No role assigned');
                 :class="isDark ? 'bg-[#0B1220]/90' : 'bg-white/90'"
             >
                 <div>
-                    <h1 class="text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Welcome, {{ user.name }}</h1>
+                    <h1 class="text-xl font-bold flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
+                        Welcome, {{ user.name }}
+                        <InfoPopover
+                            title="Dashboard"
+                            :paragraphs="[
+                                'A quick overview of scheduling status scoped to your role — summary counts, scheduling progress, and any conflicts that need attention.',
+                            ]"
+                            :bullets="[
+                                'The KPI cards reflect the active academic term shown at the top right.',
+                                'Conflicts listed here are visual indicators only — the server always re-validates before anything is saved.',
+                                'What you see is scoped to your role: a Dean/OIC sees only their college\'s data.',
+                            ]"
+                        />
+                    </h1>
                     <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                         <span class="font-semibold" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'">{{ roleLabel }}</span>
                         <span v-if="scope.label"> — {{ scope.label }}</span>

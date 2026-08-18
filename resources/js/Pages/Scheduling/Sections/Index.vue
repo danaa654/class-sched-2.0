@@ -16,6 +16,7 @@ import Column from 'primevue/column';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -800,7 +801,21 @@ const onUnlockSection = (section) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Sections</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Sections
+                    <InfoPopover
+                        title="Sections"
+                        :paragraphs="[
+                            'Academic sections (blocks of students) used when building schedules for the selected academic term.',
+                        ]"
+                        :bullets="[
+                            'Irregular sections don\'t follow the standard curriculum flow and may need subjects merged in from a regular section.',
+                            'Scheduling status tracks how many of a section\'s subjects have been assigned a room, faculty, and time.',
+                            '🔒 A finalized section\'s schedule is locked from normal editing — only Admin/Registrar can unlock it.',
+                            'Click a row to open that section\'s subjects and manage its schedule.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">
                     Manage academic sections used for class scheduling.
                 </p>
@@ -923,7 +938,21 @@ const onUnlockSection = (section) => {
                                 {{ data.estimated_students }}
                             </template>
                         </Column>
-                        <Column header="Status" style="width: 9rem">
+                        <Column style="width: 9rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Status
+                                    <InfoPopover
+                                        title="Section Status"
+                                        :bullets="[
+                                            'Active — currently used for scheduling.',
+                                            'Inactive — kept for historical records.',
+                                            '🔒 Lock icon — this section is finalized; Admin/Registrar can unlock it to make corrections.',
+                                        ]"
+                                        width="w-64"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <div class="flex items-center gap-1.5">
                                     <Tag
@@ -938,7 +967,22 @@ const onUnlockSection = (section) => {
                                 </div>
                             </template>
                         </Column>
-                        <Column header="Scheduling" style="width: 11rem">
+                        <Column style="width: 11rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Scheduling
+                                    <InfoPopover
+                                        title="Scheduling Status"
+                                        :bullets="[
+                                            'No Subjects Yet — the section has no subjects assigned from the curriculum.',
+                                            'Not Scheduled — subjects exist but none have a room, faculty, or time yet.',
+                                            'Partially Scheduled — some subjects are scheduled, others still need it.',
+                                            'Fully Scheduled — every subject has a complete schedule.',
+                                        ]"
+                                        width="w-72"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <Tag
                                     v-if="data.total_subjects_count === 0"

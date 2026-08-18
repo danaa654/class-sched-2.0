@@ -8,6 +8,7 @@ import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Tag from 'primevue/tag';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -155,7 +156,20 @@ const activeFiltersLabel = computed(() => {
         <div :class="isDark ? 'dark-scope' : ''">
         <div class="flex items-center justify-between no-print">
             <div>
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Reports</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Reports
+                    <InfoPopover
+                        title="Reports"
+                        :paragraphs="[
+                            'Generate read-only reports on scheduling, faculty load, room usage, and sections for a given academic term.',
+                        ]"
+                        :bullets="[
+                            'Choose a Term (or Academic Year + Semester) and a Report Type, then click \'Generate Report\'.',
+                            'Some report types reveal extra filters — e.g. Faculty or Room — once selected.',
+                            'Use Print or Export Excel to save a generated report; reports themselves are not saved in the system.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">Generate and view academic scheduling reports.</p>
             </div>
         </div>

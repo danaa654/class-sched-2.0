@@ -18,6 +18,7 @@ import FloatLabel from 'primevue/floatlabel';
 import Toast from 'primevue/toast';
 import Checkbox from 'primevue/checkbox';
 import Popover from 'primevue/popover';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -348,7 +349,6 @@ const onArchiveAcademicTerm = (academicTerm) => {
 // requirement in place, same pattern as the Section Subjects
 // workspace's own "How this page works" info icon.
 const helpPopover = ref(null);
-const toggleHelp = (event) => helpPopover.value?.toggle(event);
 </script>
 
 <template>
@@ -366,16 +366,18 @@ const toggleHelp = (event) => helpPopover.value?.toggle(event);
             <div class="mb-6">
                 <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     Academic Calendar
-                    <Button
-                        icon="pi pi-info-circle"
-                        text
-                        rounded
-                        size="small"
-                        severity="secondary"
-                        class="!p-1.5 !text-slate-400"
-                        aria-label="How End Semester works"
-                        title="How End Semester works"
-                        @click="toggleHelp"
+                    <InfoPopover
+                        title="Academic Calendar"
+                        :paragraphs="[
+                            'Manages the school\'s academic terms — School Year, Semester, and Scheduling Preferences — used by the scheduling system.',
+                        ]"
+                        :bullets="[
+                            'Only one academic term can be Active at a time.',
+                            'Active terms are used for day-to-day scheduling.',
+                            'Inactive terms are historical/closed terms.',
+                            'A term can only be archived (End Semester) after all its sections are finalized.',
+                            'Admin/Registrar can unlock a finalized section when corrections are required.',
+                        ]"
                     />
                 </h1>
                 <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">

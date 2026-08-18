@@ -21,6 +21,7 @@ import Dialog from 'primevue/dialog';
 import Select from 'primevue/select';
 import FloatLabel from 'primevue/floatlabel';
 import Toast from 'primevue/toast';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -522,7 +523,20 @@ const onRestoreMajor = (major) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-6">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Academic Structure</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Academic Structure
+                    <InfoPopover
+                        title="Academic Structure"
+                        :paragraphs="[
+                            'Defines the institution\'s Colleges, Departments, and Majors — the organizational hierarchy the rest of CLASSLY is built on.',
+                        ]"
+                        :bullets="[
+                            'Colleges group Departments; Departments group Majors.',
+                            'These records are referenced throughout the system — Subjects, Sections, and Faculty are all tied back to a College/Major.',
+                            'Renaming or removing an entry here can affect any Subjects, Sections, or Faculty already linked to it.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">
                     Manage colleges, departments, and majors.
                 </p>

@@ -17,6 +17,8 @@ import Column from 'primevue/column';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import Popover from 'primevue/popover';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -299,7 +301,20 @@ const onDeleteSubject = (subject) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Subjects</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Subjects
+                    <InfoPopover
+                        title="Subjects"
+                        :paragraphs="[
+                            'The master list of every subject the institution offers — code, title, category, unit load, and lecture/lab hour split.',
+                        ]"
+                        :bullets="[
+                            'Subjects created here become available when building section schedules.',
+                             'Required Hours, when set, is checked against a section\'s scheduled lecture/lab hours.',
+                            'Deleting a subject only affects future scheduling — it does not remove it from sections that already use it.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">
                     Manage the master list of all subjects offered by the institution.
                 </p>

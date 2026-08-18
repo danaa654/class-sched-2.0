@@ -25,6 +25,7 @@ import TabPanels from 'primevue/tabpanels';
 import TabPanel from 'primevue/tabpanel';
 import Menu from 'primevue/menu';
 import Swal from 'sweetalert2';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -389,7 +390,20 @@ const onUpdateAccount = () => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">User Management</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
+                    User Management
+                    <InfoPopover
+                        title="User Management"
+                        :paragraphs="[
+                            'Manages system accounts and role assignments — who can log in to CLASSLY and what they\'re allowed to do.',
+                        ]"
+                        :bullets="[
+                            'A user\'s role (Admin, Registrar, Dean/OIC, Faculty, etc.) determines which pages and actions they can access.',
+                            'Deactivating an account blocks login without deleting their records or history.',
+                            'College-scoped roles (e.g. Dean) only see and manage data for their assigned college.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage system accounts and role assignments.
                 </p>

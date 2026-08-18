@@ -16,6 +16,7 @@ import Column from 'primevue/column';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -262,7 +263,19 @@ const onDeleteSection = (section) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Sections</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Sections
+                    <InfoPopover
+                        title="Sections"
+                        :paragraphs="[
+                            'Academic sections (blocks of students) used when building schedules for the selected academic term.',
+                        ]"
+                        :bullets="[
+                            'Click a row, or the book icon, to open that section\'s Subject Assignment workspace and manage its schedule.',
+                            'Inactive sections are kept for records but are not offered when scheduling new classes.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">
                     Manage academic sections used for class scheduling.
                 </p>

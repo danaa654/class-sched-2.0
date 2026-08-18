@@ -18,6 +18,7 @@ import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
 import ProgressBar from 'primevue/progressbar';
 import RoomRecommendedSubjects from '@/Components/Scheduling/RoomRecommendedSubjects.vue';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -385,7 +386,20 @@ const closeSchedule = () => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Rooms</h1>
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                    Rooms
+                    <InfoPopover
+                        title="Rooms"
+                        :paragraphs="[
+                            'The master list of classrooms, laboratories, and other scheduling facilities available to the scheduling engine.',
+                        ]"
+                        :bullets="[
+                            'Utilization shows scheduled hours against each room\'s weekly capacity — click it to view the full room schedule.',
+                            'Availability reflects current bookings; a room can show open seats but still be flagged for a capacity or scheduling conflict.',
+                            'Inactive rooms are kept for records but are not offered when scheduling new classes.',
+                        ]"
+                    />
+                </h1>
                 <p class="mt-1 text-slate-500">
                     Manage classrooms, laboratories, and other scheduling facilities.
                 </p>
@@ -581,7 +595,19 @@ const closeSchedule = () => {
                                 {{ data.capacity }}
                             </template>
                         </Column>
-                        <Column header="Utilization" style="width: 14rem">
+                        <Column style="width: 14rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Utilization
+                                    <InfoPopover
+                                        title="Utilization"
+                                        :paragraphs="[
+                                            'Weekly scheduled hours against this room\'s maximum available hours. Click a row\'s bar to open the full room schedule.',
+                                        ]"
+                                        width="w-64"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <button
                                     type="button"
@@ -609,7 +635,22 @@ const closeSchedule = () => {
                                 </button>
                             </template>
                         </Column>
-                        <Column header="Availability" style="width: 12rem">
+                        <Column style="width: 12rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Availability
+                                    <InfoPopover
+                                        title="Availability"
+                                        :bullets="[
+                                            'Available — open slots remain this week.',
+                                            'Fully Booked — no open slots remain, but no conflicts.',
+                                            'Overbooked / Conflict — two or more classes overlap in this room; must be resolved before saving further schedules.',
+                                            'Seats available is based on capacity minus peak scheduled enrollment.',
+                                        ]"
+                                        width="w-72"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <Tag
                                     :value="data.utilization?.availability ?? '—'"
