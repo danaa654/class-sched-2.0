@@ -1283,11 +1283,11 @@ const removeAssignment = async () => {
             <div>
                 <span class="relative w-full block">
                     <i class="pi pi-search absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                    <InputText v-model="roomSearch" placeholder="Search rooms" class="w-full !pl-8 !text-xs !py-1.5" />
+                    <InputText v-model="roomSearch" placeholder="Search rooms" class="neu-inset w-full !rounded-lg !border-none !pl-8 !text-xs !py-1.5" />
                 </span>
             </div>
 
-            <div>
+            <div class="neu-inset rounded-xl p-2.5">
                 <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Recommended Rooms</p>
                 <div class="flex items-center gap-3 text-[9px] text-slate-400 mb-1.5">
                     <span class="flex items-center gap-1"><span class="inline-block h-1.5 w-1.5 rounded-full bg-sky-400"></span>Lecture</span>
@@ -1314,7 +1314,7 @@ const removeAssignment = async () => {
                 </ul>
             </div>
 
-            <div v-if="roomSearch && searchResults.length">
+            <div v-if="roomSearch && searchResults.length" class="neu-inset rounded-xl p-2.5">
                 <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Other / Shared Rooms</p>
                 <ul class="space-y-1">
                     <li
@@ -1339,7 +1339,7 @@ const removeAssignment = async () => {
 
         <!-- MAIN AREA: Selected room's weekly timetable -->
         <div class="flex-1 min-w-0">
-            <div v-if="!selectedRoom" class="h-64 flex items-center justify-center text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl">
+            <div v-if="!selectedRoom" class="h-64 flex items-center justify-center text-slate-400 text-sm neu-inset rounded-xl">
                 Select a room on the left to view and schedule its weekly timetable.
             </div>
             <div v-else>
@@ -1471,7 +1471,7 @@ const removeAssignment = async () => {
         </div>
 
         <!-- RIGHT SIDEBAR: Draggable unscheduled subjects for this section -->
-        <div class="w-full lg:w-40 shrink-0">
+        <div class="w-full lg:w-40 shrink-0 neu-inset rounded-xl p-2.5">
             <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Unscheduled Subjects</p>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-slate-400 mb-1.5">
                 <span class="flex items-center gap-1"><span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>Major</span>

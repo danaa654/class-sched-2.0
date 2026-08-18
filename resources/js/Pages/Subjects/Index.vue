@@ -301,7 +301,7 @@ const onDeleteSubject = (subject) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     Subjects
                     <InfoPopover
                         title="Subjects"
@@ -315,22 +315,27 @@ const onDeleteSubject = (subject) => {
                         ]"
                     />
                 </h1>
-                <p class="mt-1 text-slate-500">
+                <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage the master list of all subjects offered by the institution.
                 </p>
             </div>
 
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
                     <!-- Top Toolbar -->
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                         <template #start>
                             <span class="relative w-full sm:w-80">
-                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                 <InputText
                                     v-model="search"
                                     placeholder="Search by code, title, category or major"
-                                    class="w-full !pl-9"
+                                    class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                    :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                 />
                             </span>
                         </template>
@@ -339,7 +344,8 @@ const onDeleteSubject = (subject) => {
                                 <Button
                                     icon="pi pi-refresh"
                                     severity="secondary"
-                                    outlined
+                                    text
+                                    class="neu-icon-well !rounded-full"
                                     :loading="loading"
                                     @click="onRefresh"
                                     aria-label="Refresh"
@@ -354,7 +360,8 @@ const onDeleteSubject = (subject) => {
                         :value="subjects.data"
                         :loading="loading"
                         dataKey="id"
-                        class="rounded-xl overflow-hidden"
+                        class="neu-inset neu-table rounded-xl overflow-hidden"
+                        :class="isDark ? 'neu-table-dark' : ''"
                         stripedRows
                         responsiveLayout="scroll"
                         lazy
@@ -366,8 +373,8 @@ const onDeleteSubject = (subject) => {
                     >
                         <template #empty>
                             <div class="text-center py-10">
-                                <p class="text-slate-500 font-medium">No subjects found.</p>
-                                <p class="text-slate-400 text-sm mt-1">
+                                <p class="font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-500'">No subjects found.</p>
+                                <p class="text-sm mt-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                                     Click "Add Subject" to create your first subject.
                                 </p>
                                 <Button
@@ -396,7 +403,7 @@ const onDeleteSubject = (subject) => {
                                     <i class="pi pi-map-marker text-[10px]"></i>
                                     Practicum / OJT
                                 </span>
-                                <span v-else class="text-slate-500 text-sm">Regular</span>
+                                <span v-else class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Regular</span>
                             </template>
                         </Column>
                         <Column header="College" style="width: 8rem">
@@ -459,12 +466,13 @@ const onDeleteSubject = (subject) => {
                                         @click="onDeleteSubject(data)"
                                     />
                                 </div>
-                                <span v-else class="text-slate-400 text-sm">—</span>
+                                <span v-else class="text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'">—</span>
                             </template>
                         </Column>
                     </DataTable>
                 </template>
             </Card>
+            </div>
         </div>
 
         <!-- Add Subject Dialog -->
@@ -472,16 +480,21 @@ const onDeleteSubject = (subject) => {
             v-model:visible="addSubjectVisible"
             modal
             :header="editingSubject ? 'Edit Subject' : 'Add Subject'"
-            :style="{ width: '700px' }"
+            :style="{ width: '700px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeAddSubject"
         >
-            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveSubject">
+            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 neu-form" @submit.prevent="onSaveSubject">
                 <!-- Subject Code -->
                 <div class="flex flex-col gap-1">
-                    <label for="subject_code" class="text-sm font-medium text-slate-700">
+                    <label for="subject_code" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Subject Code <span class="text-red-500">*</span>
                     </label>
                     <InputText
@@ -498,7 +511,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Subject Title -->
                 <div class="flex flex-col gap-1">
-                    <label for="subject_title" class="text-sm font-medium text-slate-700">
+                    <label for="subject_title" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Subject Title <span class="text-red-500">*</span>
                     </label>
                     <InputText
@@ -515,7 +528,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Category -->
                 <div class="flex flex-col gap-1">
-                    <label for="category" class="text-sm font-medium text-slate-700">
+                    <label for="category" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Category <span class="text-red-500">*</span>
                     </label>
                     <Select
@@ -534,7 +547,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Subject Type (delivery type) -->
                 <div class="flex flex-col gap-1">
-                    <label for="subject_type" class="text-sm font-medium text-slate-700">
+                    <label for="subject_type" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Subject Type <span class="text-red-500">*</span>
                     </label>
                     <Select
@@ -557,7 +570,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- College -->
                 <div class="flex flex-col gap-1">
-                    <label for="college_id" class="text-sm font-medium text-slate-700">
+                    <label for="college_id" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         College
                         <span v-if="subjectForm.category === 'Major'" class="text-red-500">*</span>
                     </label>
@@ -583,7 +596,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Applicable Major(s) -->
                 <div class="flex flex-col gap-1 sm:col-span-2">
-                    <label for="major_ids" class="text-sm font-medium text-slate-700">
+                    <label for="major_ids" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Applicable Major(s)
                         <span v-if="subjectForm.category === 'Major'" class="text-red-500">*</span>
                     </label>
@@ -619,7 +632,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Units -->
                 <div class="flex flex-col gap-1">
-                    <label for="units" class="text-sm font-medium text-slate-700">
+                    <label for="units" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Units <span class="text-red-500">*</span>
                     </label>
                     <InputNumber
@@ -639,7 +652,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Status -->
                 <div class="flex flex-col gap-1">
-                    <label for="is_active" class="text-sm font-medium text-slate-700">
+                    <label for="is_active" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Status <span class="text-red-500">*</span>
                     </label>
                     <Select
@@ -659,7 +672,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Lecture Hours (Regular subjects only) -->
                 <div v-if="!isPracticum" class="flex flex-col gap-1">
-                    <label for="lecture_hours" class="text-sm font-medium text-slate-700">
+                    <label for="lecture_hours" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Lecture Hours <span class="text-red-500">*</span>
                     </label>
                     <InputNumber
@@ -679,7 +692,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Laboratory Hours (Regular subjects only) -->
                 <div v-if="!isPracticum" class="flex flex-col gap-1">
-                    <label for="laboratory_hours" class="text-sm font-medium text-slate-700">
+                    <label for="laboratory_hours" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Laboratory Hours <span class="text-red-500">*</span>
                     </label>
                     <InputNumber
@@ -699,7 +712,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Required Hours (Practicum/OJT only) -->
                 <div v-if="isPracticum" class="flex flex-col gap-1">
-                    <label for="required_hours" class="text-sm font-medium text-slate-700">
+                    <label for="required_hours" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Required Hours <span class="text-red-500">*</span>
                     </label>
                     <InputNumber
@@ -720,7 +733,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Deployment Type (Practicum/OJT only) -->
                 <div v-if="isPracticum" class="flex flex-col gap-1">
-                    <label for="deployment_type" class="text-sm font-medium text-slate-700">
+                    <label for="deployment_type" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Deployment Type <span class="text-red-500">*</span>
                     </label>
                     <Select
@@ -740,7 +753,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Deployment / Remarks (Practicum/OJT only) -->
                 <div v-if="isPracticum" class="flex flex-col gap-1 sm:col-span-2">
-                    <label for="deployment_remarks" class="text-sm font-medium text-slate-700">
+                    <label for="deployment_remarks" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Remarks / Deployment Notes
                     </label>
                     <Textarea
@@ -758,7 +771,7 @@ const onDeleteSubject = (subject) => {
 
                 <!-- Description -->
                 <div class="flex flex-col gap-1 sm:col-span-2">
-                    <label for="description" class="text-sm font-medium text-slate-700">Description</label>
+                    <label for="description" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Description</label>
                     <Textarea
                         id="description"
                         v-model="subjectForm.description"

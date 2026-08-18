@@ -1,7 +1,6 @@
 <script setup>
 import { Link, usePage } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
-import Button from 'primevue/button';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
 import NotificationBell from '@/Components/NotificationBell.vue';
 import AmbientBackground from '@/Components/AmbientBackground.vue';
@@ -104,11 +103,11 @@ const isActive = (routeName) => {
     <div class="relative min-h-screen overflow-hidden transition-colors duration-300" :class="isDark ? 'bg-[#0B1120]' : 'bg-[#F8FAFC]'">
         <AmbientBackground :is-dark="isDark" />
         <!-- Top Navigation Bar -->
-        <header class="h-16 w-full bg-[#0B1849] shadow flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30">
+        <header class="neu-navy-surface h-16 w-full flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30 shadow-[0_4px_12px_rgba(0,0,0,0.35)]">
             <div class="flex items-center gap-4">
                 <button
                     type="button"
-                    class="text-slate-300 hover:text-white text-xl leading-none"
+                    class="neu-navy-raised flex h-9 w-9 items-center justify-center rounded-full text-slate-300 hover:text-white text-lg leading-none"
                     @click="sidebarOpen = !sidebarOpen"
                 >
                     ☰
@@ -117,40 +116,36 @@ const isActive = (routeName) => {
                 <span class="text-xl font-bold tracking-tight text-white">CLASSLY</span>
             </div>
 
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-5">
                 <span
                     v-if="activeAcademicTermLabel"
-                    class="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-emerald-300 border border-white/10"
+                    class="neu-navy-inset hidden sm:inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-emerald-300"
                     title="Currently Active Academic Term"
                 >
                     <i class="pi pi-calendar text-[11px]"></i>
                     {{ activeAcademicTermLabel }}
                 </span>
-                <NotificationBell v-if="user" />
-                <ThemeToggle />
-                <span v-if="user" class="text-sm text-slate-300">
-                    {{ user.name }}
+                <span class="neu-navy-raised flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
+                    <NotificationBell v-if="user" />
                 </span>
-                <Link :href="route('logout')" method="post" as="button">
-                    <Button label="Logout" severity="secondary" outlined size="small" />
-                </Link>
+                <ThemeToggle />
             </div>
         </header>
 
         <!-- Left Sidebar -->
         <aside
-            class="fixed top-16 left-0 bottom-0 bg-[#0B1849] text-slate-200 overflow-hidden transition-all duration-200 z-20"
+            class="neu-navy-surface fixed top-16 left-0 bottom-0 flex flex-col text-slate-200 overflow-hidden transition-all duration-200 z-20 shadow-[4px_0_12px_rgba(0,0,0,0.25)]"
             :class="sidebarOpen ? 'w-[200px]' : 'w-0 overflow-hidden'"
         >
-            <nav class="h-full overflow-y-auto py-3 px-2 space-y-0.5 w-[200px] text-[13px] sidebar-scroll">
+            <nav class="flex-1 overflow-y-auto py-3 px-2 space-y-0.5 w-[200px] text-[13px] sidebar-scroll">
                 <Link
                     v-for="item in menuItems"
                     :key="item.label"
                     :href="route(item.route)"
-                    class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
+                    class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all"
                     :class="isActive(item.route)
-                        ? 'bg-[#2563EB] text-white'
-                        : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                        ? 'neu-navy-active text-white'
+                        : 'text-slate-300 hover:neu-navy-raised hover:text-white'"
                 >
                     <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
                     <span>{{ item.label }}</span>
@@ -165,10 +160,10 @@ const isActive = (routeName) => {
                         v-for="item in userManagementItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all"
                         :class="isActive(item.route)
-                            ? 'bg-[#2563EB] text-white'
-                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                            ? 'neu-navy-active text-white'
+                            : 'text-slate-300 hover:neu-navy-raised hover:text-white'"
                     >
                         <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
                         <span>{{ item.label }}</span>
@@ -184,10 +179,10 @@ const isActive = (routeName) => {
                         v-for="item in academicSetupItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all"
                         :class="isActive(item.route)
-                            ? 'bg-[#2563EB] text-white'
-                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                            ? 'neu-navy-active text-white'
+                            : 'text-slate-300 hover:neu-navy-raised hover:text-white'"
                     >
                         <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
                         <span>{{ item.label }}</span>
@@ -203,10 +198,10 @@ const isActive = (routeName) => {
                         v-for="item in resourceManagementItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all"
                         :class="isActive(item.route)
-                            ? 'bg-[#2563EB] text-white'
-                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                            ? 'neu-navy-active text-white'
+                            : 'text-slate-300 hover:neu-navy-raised hover:text-white'"
                     >
                         <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
                         <span>{{ item.label }}</span>
@@ -222,10 +217,10 @@ const isActive = (routeName) => {
                         v-for="item in schedulingItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all"
                         :class="isActive(item.route)
-                            ? 'bg-[#2563EB] text-white'
-                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                            ? 'neu-navy-active text-white'
+                            : 'text-slate-300 hover:neu-navy-raised hover:text-white'"
                     >
                         <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
                         <span>{{ item.label }}</span>
@@ -241,10 +236,10 @@ const isActive = (routeName) => {
                         v-for="item in reportsItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all"
                         :class="isActive(item.route)
-                            ? 'bg-[#2563EB] text-white'
-                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                            ? 'neu-navy-active text-white'
+                            : 'text-slate-300 hover:neu-navy-raised hover:text-white'"
                     >
                         <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
                         <span>{{ item.label }}</span>
@@ -260,16 +255,38 @@ const isActive = (routeName) => {
                         v-for="item in systemItems"
                         :key="item.label"
                         :href="route(item.route)"
-                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-colors"
+                        class="flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all"
                         :class="isActive(item.route)
-                            ? 'bg-[#2563EB] text-white'
-                            : 'text-slate-300 hover:bg-white/5 hover:text-white'"
+                            ? 'neu-navy-active text-white'
+                            : 'text-slate-300 hover:neu-navy-raised hover:text-white'"
                     >
                         <i :class="item.icon" class="text-[14px] w-4 text-center opacity-90"></i>
                         <span>{{ item.label }}</span>
                     </Link>
                 </div>
             </nav>
+
+            <!-- User / Logout footer -->
+            <div v-if="user" class="w-[200px] shrink-0 px-2 pb-3 pt-2">
+                <div class="neu-navy-inset neu-user-card flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-all duration-200">
+                    <span class="neu-navy-raised flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white">
+                        {{ user.name?.charAt(0)?.toUpperCase() }}
+                    </span>
+                    <div class="min-w-0 flex-1">
+                        <p class="truncate text-[13px] font-semibold text-white">{{ user.name }}</p>
+                        <p v-if="authRoles.length" class="truncate text-[11px] text-slate-400">{{ authRoles.join(', ') }}</p>
+                    </div>
+                </div>
+                <Link
+                    :href="route('logout')"
+                    method="post"
+                    as="button"
+                    class="neu-navy-raised neu-logout-btn mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium text-slate-300 transition-all duration-200 hover:text-white"
+                >
+                    <i class="pi pi-sign-out text-[12px]"></i>
+                    <span>Logout</span>
+                </Link>
+            </div>
         </aside>
 
         <!-- Main Content -->
@@ -293,5 +310,22 @@ const isActive = (routeName) => {
 }
 .sidebar-scroll::-webkit-scrollbar {
     display: none; /* Chrome/Safari/Edge Chromium */
+}
+
+/* Sidebar footer hover glows */
+.neu-user-card:hover {
+    box-shadow:
+        inset 3px 3px 7px var(--neu-navy-shadow-2),
+        inset -2px -2px 6px var(--neu-navy-shadow-1),
+        0 0 12px 1px rgba(16, 185, 129, 0.45);
+}
+
+.neu-logout-btn:hover {
+    background: linear-gradient(145deg, #ef4444, #dc2626);
+    box-shadow:
+        4px 4px 10px rgba(0, 0, 0, 0.5),
+        -3px -3px 8px rgba(255, 255, 255, 0.05),
+        0 0 14px 1px rgba(239, 68, 68, 0.55);
+    color: #ffffff;
 }
 </style>

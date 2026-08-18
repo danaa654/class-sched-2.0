@@ -68,8 +68,8 @@ const submitForgot = () => {
 
 const inputClass = computed(() =>
     props.isDark
-        ? '!border-white/15 !bg-white/[0.06] !text-white placeholder:!text-slate-500'
-        : '!border-slate-900/10 !bg-white/70 !text-[#1E293B] placeholder:!text-slate-400'
+        ? '!text-white placeholder:!text-slate-500'
+        : '!text-[#1E293B] placeholder:!text-slate-400'
 );
 </script>
 
@@ -78,17 +78,17 @@ const inputClass = computed(() =>
         <div class="auth-flip-card" :class="{ 'is-flipped': flipped }">
             <!-- Front face: Login -->
             <div class="auth-flip-face auth-flip-face--front">
-                <div class="neon-frame rounded-3xl p-[1.5px]">
+                <div class="neu-card neu-spotlight rounded-3xl">
                     <div
-                        class="auth-card-face-inner rounded-[22px] p-8 backdrop-blur-2xl transition-colors duration-300"
-                        :class="isDark ? 'bg-[#0B1220]/90' : 'bg-white/90'"
+                        class="auth-card-face-inner rounded-3xl p-8 transition-colors duration-300"
                     >
                         <div class="mb-6 flex flex-col items-center text-center">
-                            <img
-                                src="/logo.png"
-                                alt="CLASSLY"
-                                class="mb-4 h-16 w-16 drop-shadow-[0_0_20px_rgba(37,99,235,0.55)]"
-                            />
+                            <span
+                                class="neu-inset neu-glow mb-4 flex h-24 w-24 items-center justify-center rounded-full"
+                                :style="{ '--neu-glow-color': isDark ? 'rgba(56, 189, 248, 0.35)' : 'rgba(37, 99, 235, 0.3)' }"
+                            >
+                                <img src="/logo.png" alt="CLASSLY" class="h-14 w-14" />
+                            </span>
                             <h1 class="text-2xl font-extrabold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">CLASSLY</h1>
                             <p class="mt-1 text-sm font-medium text-[#2563EB]" :class="isDark && '!text-[#5B9CFF]'">
                                 Class Scheduling and Management System
@@ -128,7 +128,7 @@ const inputClass = computed(() =>
                                     type="email"
                                     autocomplete="username"
                                     :autofocus="!flipped"
-                                    :class="['w-full', inputClass]"
+                                    :class="['w-full neu-inset !rounded-xl !border-none', inputClass]"
                                     :invalid="!!loginForm.errors.email"
                                     placeholder="you@classly.local"
                                 />
@@ -142,7 +142,7 @@ const inputClass = computed(() =>
                                     :feedback="false"
                                     toggleMask
                                     autocomplete="current-password"
-                                    :inputClass="['w-full', inputClass]"
+                                    :inputClass="['w-full neu-inset !rounded-xl !border-none', inputClass]"
                                     class="w-full"
                                     :invalid="!!loginForm.errors.password"
                                     placeholder="••••••••"
@@ -181,17 +181,17 @@ const inputClass = computed(() =>
 
             <!-- Back face: Forgot password -->
             <div class="auth-flip-face auth-flip-face--back">
-                <div class="neon-frame rounded-3xl p-[1.5px]">
+                <div class="neu-card neu-spotlight rounded-3xl">
                     <div
-                        class="auth-card-face-inner rounded-[22px] p-8 backdrop-blur-2xl transition-colors duration-300"
-                        :class="isDark ? 'bg-[#0B1220]/90' : 'bg-white/90'"
+                        class="auth-card-face-inner rounded-3xl p-8 transition-colors duration-300"
                     >
                         <div class="mb-6 flex flex-col items-center text-center">
-                            <img
-                                src="/logo.png"
-                                alt="CLASSLY"
-                                class="mb-4 h-16 w-16 drop-shadow-[0_0_20px_rgba(37,99,235,0.55)]"
-                            />
+                            <span
+                                class="neu-inset neu-glow mb-4 flex h-24 w-24 items-center justify-center rounded-full"
+                                :style="{ '--neu-glow-color': isDark ? 'rgba(56, 189, 248, 0.35)' : 'rgba(37, 99, 235, 0.3)' }"
+                            >
+                                <img src="/logo.png" alt="CLASSLY" class="h-14 w-14" />
+                            </span>
                             <h1 class="text-2xl font-extrabold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">CLASSLY</h1>
                             <p class="mt-1 text-sm font-medium text-[#2563EB]" :class="isDark && '!text-[#5B9CFF]'">
                                 Class Scheduling and Management System
@@ -222,7 +222,7 @@ const inputClass = computed(() =>
                                     type="email"
                                     autocomplete="username"
                                     :autofocus="flipped"
-                                    :class="['w-full', inputClass]"
+                                    :class="['w-full neu-inset !rounded-xl !border-none', inputClass]"
                                     :invalid="!!forgotForm.errors.email"
                                     placeholder="you@classly.local"
                                 />

@@ -250,7 +250,7 @@ const onUpdateAccount = () => {
     <AppLayout>
         <Toast />
 
-        <div class="max-w-6xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
+        <div class="max-w-6xl mx-auto w-full neu-form" :class="isDark ? 'dark-scope' : ''">
             <div class="mb-6">
                 <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
                     Settings
@@ -291,7 +291,8 @@ const onUpdateAccount = () => {
                 <TabPanels>
                     <!-- ============================== GENERAL ============================== -->
                     <TabPanel v-if="has('general')" value="general">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">General</h2>
                                 <p class="text-sm text-slate-500 mb-6">School identity shown across the system.</p>
@@ -324,8 +325,8 @@ const onUpdateAccount = () => {
                                 <Divider class="!my-6" />
 
                                 <div class="flex flex-col sm:flex-row sm:items-center gap-5">
-                                    <img v-if="settings['general.school_logo_path']" :src="settings['general.school_logo_path']" class="h-16 w-16 object-cover rounded-xl border border-slate-100 shrink-0" alt="Current logo" />
-                                    <div class="h-16 w-16 rounded-xl border border-dashed border-slate-200 flex items-center justify-center text-slate-300 shrink-0" v-else>
+                                    <img v-if="settings['general.school_logo_path']" :src="settings['general.school_logo_path']" class="h-16 w-16 object-cover rounded-xl neu-inset shrink-0" alt="Current logo" />
+                                    <div class="neu-inset h-16 w-16 rounded-xl flex items-center justify-center text-slate-300 shrink-0" v-else>
                                         <i class="pi pi-image text-xl"></i>
                                     </div>
                                     <div class="flex-1">
@@ -340,11 +341,13 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== ACADEMIC ============================== -->
                     <TabPanel v-if="has('academic')" value="academic">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Academic Defaults</h2>
                                 <p class="text-sm text-slate-500 mb-5">
@@ -369,8 +372,10 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
 
-                        <Card v-if="schoolYear" class="!rounded-2xl border border-slate-100 shadow-sm mt-5">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300 mt-5" v-if="schoolYear">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <div class="flex items-center justify-between mb-1">
                                     <h2 class="text-lg font-bold text-[#1E293B]">Scheduling Window &amp; Calendar</h2>
@@ -391,11 +396,13 @@ const onUpdateAccount = () => {
                                 <Button as="a" :href="route('academic-calendar')" label="Open Academic Calendar" icon="pi pi-external-link" text class="!mt-4 !px-0" />
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== MEETING FREQUENCY ============================== -->
                     <TabPanel v-if="has('meeting')" value="meeting">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Subject Meeting Frequency</h2>
                                 <p class="text-sm text-slate-500 mb-5">
@@ -425,11 +432,13 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== FACULTY & WORKLOAD ============================== -->
                     <TabPanel v-if="has('workload')" value="workload">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Faculty &amp; Workload</h2>
                                 <p class="text-sm text-slate-500 mb-5">
@@ -465,11 +474,13 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== ROOMS ============================== -->
                     <TabPanel v-if="has('rooms')" value="rooms">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Rooms</h2>
                                 <p class="text-sm text-slate-500 mb-5">
@@ -485,7 +496,7 @@ const onUpdateAccount = () => {
 
                                 <label class="text-sm text-slate-600 font-medium mb-2 block">Room Recommendation Priority (top = highest priority)</label>
                                 <ul class="space-y-2">
-                                    <li v-for="(key, index) in roomsForm.priority_order" :key="key" class="flex items-center justify-between border border-slate-100 rounded-lg px-3 py-2">
+                                    <li v-for="(key, index) in roomsForm.priority_order" :key="key" class="neu-inset flex items-center justify-between rounded-xl px-3 py-2">
                                         <span class="text-sm">{{ index + 1 }}. {{ roomPriorityLabels[key] }}</span>
                                         <div class="flex gap-1" v-if="canEdit('rooms')">
                                             <Button icon="pi pi-arrow-up" text size="small" :disabled="index === 0" @click="moveRoomPriority(index, -1)" />
@@ -499,11 +510,13 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== AUTO SCHEDULE / AI ============================== -->
                     <TabPanel v-if="has('autoschedule')" value="autoschedule">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Auto Schedule / AI</h2>
                                 <p class="text-sm text-slate-500 mb-2">
@@ -534,7 +547,7 @@ const onUpdateAccount = () => {
 
                                     <label class="text-sm text-slate-600 font-medium mb-2 block">Optimization Priorities <Tag severity="secondary" value="SOFT PREFERENCE" class="!text-[10px]" /></label>
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                        <div v-for="(label, key) in priorityLabels" :key="key" class="flex items-center justify-between border border-slate-100 rounded-lg px-3 py-2">
+                                        <div v-for="(label, key) in priorityLabels" :key="key" class="neu-inset flex items-center justify-between rounded-xl px-3 py-2">
                                             <span class="text-sm">{{ label }}</span>
                                             <Select v-model="autoScheduleForm.priorities[key]" :options="priorityLevels" optionLabel="label" optionValue="value" class="!w-28" />
                                         </div>
@@ -546,11 +559,13 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== IRREGULAR SCHEDULING ============================== -->
                     <TabPanel v-if="has('irregular')" value="irregular">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Irregular Scheduling</h2>
                                 <Message severity="warn" :closable="false" class="mb-4 !text-sm">
@@ -580,11 +595,13 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== NOTIFICATIONS ============================== -->
                     <TabPanel v-if="has('notifications')" value="notifications">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Notifications</h2>
                                 <p class="text-sm text-slate-500 mb-5">Controls which in-app warnings/notifications are shown.</p>
@@ -602,11 +619,13 @@ const onUpdateAccount = () => {
                                 </div>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== SYSTEM ============================== -->
                     <TabPanel v-if="has('system') && system" value="system">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">System / Maintenance</h2>
                                 <p class="text-sm text-slate-500 mb-5">Visible to Administrators only.</p>
@@ -624,11 +643,13 @@ const onUpdateAccount = () => {
                                 <Button label="Refresh Configuration Cache" icon="pi pi-refresh" severity="secondary" outlined :loading="refreshingCache" @click="refreshCache" />
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- ============================== MANAGE ACCOUNT ============================== -->
                     <TabPanel v-if="!isAdministrator" value="account">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm max-w-2xl">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300 max-w-2xl">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <h2 class="text-lg font-bold text-[#1E293B] mb-1">Manage Account</h2>
                                 <p class="text-sm text-slate-500 mb-5">Update your own profile and change your password.</p>
@@ -685,6 +706,7 @@ const onUpdateAccount = () => {
                                 </form>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
                 </TabPanels>
             </Tabs>
@@ -730,7 +752,6 @@ const onUpdateAccount = () => {
 .dark-scope :deep(.border-dashed) { border-color: rgba(255, 255, 255, 0.2) !important; }
 .dark-scope :deep(.text-slate-300) { color: #475569 !important; }
 
-.dark-scope :deep(.p-card) { background: #141B33 !important; color: #F8FAFC !important; }
 .dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
 .dark-scope :deep(.p-card .p-card-content) { background: transparent !important; }
 
@@ -739,18 +760,10 @@ const onUpdateAccount = () => {
 .dark-scope :deep(.p-dialog-content) { background: #0F1730 !important; color: #F8FAFC !important; }
 .dark-scope :deep(.p-dialog-footer) { background: #0F1730 !important; border-top: 1px solid rgba(255, 255, 255, 0.1) !important; }
 
-.dark-scope :deep(.p-inputtext),
-.dark-scope :deep(.p-password-input),
-.dark-scope :deep(.p-select),
-.dark-scope :deep(.p-multiselect),
-.dark-scope :deep(.p-inputnumber-input),
-.dark-scope :deep(.p-textarea) {
-    background: rgba(255, 255, 255, 0.06) !important;
-    border-color: rgba(255, 255, 255, 0.18) !important;
-    color: #F8FAFC !important;
-}
-.dark-scope :deep(.p-select-label),
-.dark-scope :deep(.p-multiselect-label) { color: #F8FAFC !important; }
+/* Field backgrounds/borders themselves are handled by the shared
+   ".neu-form" rules in app.css (inset pressed-in wells, light + dark) —
+   only the teleported Select/Multiselect overlay panel needs its own
+   dark treatment here since it renders outside this component. */
 .dark-scope :deep(.p-select-overlay),
 .dark-scope :deep(.p-multiselect-overlay) { background: #141B33 !important; border-color: rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
 .dark-scope :deep(.p-select-option),
@@ -760,9 +773,12 @@ const onUpdateAccount = () => {
 
 /* FloatLabel variant="on" keeps the label permanently floated, cutting
    through the input's top border — its background must always match
-   the surface behind it (the card), not just on focus, or it renders
-   as a mismatched opaque chip like the one in the earlier screenshot. */
-.dark-scope :deep(.p-floatlabel-on label) { background: #141B33 !important; color: #94A3B8 !important; }
+   the surface behind it (the neu-card panel), not just on focus, or it
+   renders as a mismatched opaque chip. */
+:deep(.p-floatlabel-on label) { background: var(--neu-card-light); }
+:deep(.p-floatlabel-on:has(input:focus) label),
+:deep(.p-floatlabel-on:has(.p-inputwrapper-focus) label) { color: #2563EB !important; }
+.dark-scope :deep(.p-floatlabel-on label) { background: var(--neu-card-dark) !important; color: #94A3B8 !important; }
 .dark-scope :deep(.p-floatlabel-on:has(input:focus) label),
 .dark-scope :deep(.p-floatlabel-on:has(.p-inputwrapper-focus) label) { color: #60A5FA !important; }
 

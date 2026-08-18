@@ -2159,35 +2159,41 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             </div>
 
             <!-- Section Information -->
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm mb-6">
+            <div class="neu-card rounded-2xl mb-6 transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6">
-                        <div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                        <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Major</p>
                             <p class="mt-1 text-slate-800 font-medium">{{ section.major?.name || '—' }}</p>
                         </div>
-                        <div>
+                        <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Curriculum</p>
                             <p class="mt-1 text-slate-800 font-medium">{{ section.curriculum?.code || '—' }}</p>
                         </div>
-                        <div>
+                        <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Academic Year</p>
                             <p class="mt-1 text-slate-800 font-medium">{{ section.academic_year }}</p>
                         </div>
-                        <div>
+                        <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Year Level</p>
                             <p class="mt-1 text-slate-800 font-medium">{{ section.year_level }}</p>
                         </div>
-                        <div>
+                        <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Est. Students</p>
                             <p class="mt-1 text-slate-800 font-medium">{{ section.estimated_students }}</p>
                         </div>
                     </div>
                 </template>
             </Card>
+            </div>
 
             <!-- Scheduling Issues panel — real-time, recomputed on every edit -->
-            <Card v-if="tableConflicts.length > 0" class="!rounded-2xl border border-red-200 bg-red-50/60 shadow-sm mb-6">
+            <div v-if="tableConflicts.length > 0" class="neu-card rounded-2xl mb-6 transition-colors duration-300" :class="isDark ? '' : '!bg-red-50/60'">
+            <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none">
                 <template #content>
                     <div class="flex items-center gap-2 mb-3">
                         <i class="pi pi-exclamation-triangle text-red-500"></i>
@@ -2198,7 +2204,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         <li
                             v-for="(conflict, index) in tableConflicts"
                             :key="index"
-                            class="text-sm bg-white rounded-lg border border-red-100 px-3 py-2 flex items-start gap-2"
+                            class="text-sm neu-inset rounded-lg px-3 py-2 flex items-start gap-2"
                         >
                             <Tag
                                 :value="conflict.label"
@@ -2210,6 +2216,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </ul>
                 </template>
             </Card>
+            </div>
 
             <!-- SECTION-LEVEL SCHEDULE FINALIZATION — visible lock banner.
                  Backed up server-side by SectionFinalizedException on every
@@ -2255,7 +2262,11 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             </div>
 
             <!-- Room Grid tab -->
-            <Card v-show="pageTab === 'room-grid'" class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div v-show="pageTab === 'room-grid'" class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
                     <RoomGrid
                         :section="section"
@@ -2269,18 +2280,24 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     />
                 </template>
             </Card>
+            </div>
 
             <!-- Subjects / Scheduling table -->
-            <Card v-show="pageTab === 'subjects'" class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div v-show="pageTab === 'subjects'" class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
-                    <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
+                    <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3 neu-form">
                         <template #start>
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                 <InputText
                                     v-model="search"
                                     placeholder="Search by code, title or category"
-                                    class="w-full !pl-9"
+                                    class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                    :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                 />
                             </span>
                         </template>
@@ -2289,7 +2306,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                 <Button
                                     icon="pi pi-refresh"
                                     severity="secondary"
-                                    outlined
+                                    text
+                                    class="neu-icon-well !rounded-full"
                                     :loading="loading"
                                     @click="onRefresh"
                                     aria-label="Refresh"
@@ -2310,7 +2328,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         :value="rows"
                         :loading="loading"
                         dataKey="id"
-                        class="rounded-xl overflow-hidden schedule-table"
+                        class="neu-inset neu-table rounded-xl overflow-hidden schedule-table"
+                        :class="isDark ? 'neu-table-dark' : ''"
                         :rowClass="
                             (row) =>
                                 rowIsInConflict(row)
@@ -2849,6 +2868,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </Popover>
                 </template>
             </Card>
+            </div>
         </div>
 
         <!-- Smart Schedule Recommendation Drawer (Prompt 8.7) -->
@@ -3230,10 +3250,15 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :style="{ width: '760px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeAddDialog"
         >
-            <Tabs v-model:value="activeTab">
+            <Tabs v-model:value="activeTab" class="neu-form">
                 <TabList>
                     <Tab value="curriculum">Load From Curriculum</Tab>
                     <Tab value="manual">Manual Selection</Tab>
@@ -3407,7 +3432,12 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :style="{ width: '860px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
         >
             <!-- Schedule changed while this Auto Schedule review panel was
                  open (spec Section 9). "Accept All & Save" is already
@@ -3425,8 +3455,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
             <div v-if="autoSummary">
                 <div
-                    class="rounded-xl border p-4 mb-4 flex items-center gap-3"
-                    :class="autoSummary.scheduled === autoSummary.total ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'"
+                    class="rounded-xl neu-inset p-4 mb-4 flex items-center gap-3"
                 >
                     <i
                         class="pi text-2xl"
@@ -3446,8 +3475,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     <div
                         v-for="result in autoSummary.results"
                         :key="result.section_subject_id"
-                        class="border rounded-xl p-4"
-                        :class="resultHasHardConflict(result) ? 'border-red-300 bg-red-50' : 'border-slate-200'"
+                        class="rounded-xl p-4"
+                        :class="resultHasHardConflict(result) ? 'border border-red-300 bg-red-50' : 'neu-inset'"
                     >
                         <div class="flex items-start justify-between gap-3 mb-3">
                             <p class="font-semibold text-slate-800">

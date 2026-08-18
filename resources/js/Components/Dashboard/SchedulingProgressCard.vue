@@ -41,10 +41,9 @@ const cardPt = computed(() => ({
 </script>
 
 <template>
-    <div class="neon-frame-static rounded-2xl p-[1.5px]">
+    <div class="neu-card rounded-2xl">
         <Card
-            class="!rounded-[15px] transition-colors duration-300"
-            :class="isDark ? '!bg-[#0B1220]/90' : '!bg-white/90'"
+            class="!rounded-2xl !bg-transparent transition-colors duration-300"
             :pt="cardPt"
         >
         <template #title>
@@ -61,27 +60,27 @@ const cardPt = computed(() => ({
             <ProgressBar
                 :value="progress.overall_percent"
                 :showValue="false"
-                class="mb-6 h-2.5"
+                class="neu-inset mb-6 h-2.5 !bg-transparent"
                 :pt="{
-                    root: { class: isDark ? '!bg-white/10' : '' },
+                    root: { class: '!bg-transparent' },
                     value: { class: barColorClass },
                 }"
             />
 
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div class="rounded-xl border p-4" :class="isDark ? 'border-white/10' : 'border-slate-100'">
+                <div class="neu-inset rounded-xl p-4">
                     <p class="text-xs font-semibold tracking-wide uppercase" :class="isDark ? 'text-slate-400' : 'text-slate-400'">Sections Scheduled</p>
                     <p class="mt-1 text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                         {{ progress.sections_scheduled }} <span class="text-sm font-medium" :class="isDark ? 'text-slate-500' : 'text-slate-400'">/ {{ progress.sections_total }}</span>
                     </p>
                 </div>
-                <div class="rounded-xl border p-4" :class="isDark ? 'border-white/10' : 'border-slate-100'">
+                <div class="neu-inset rounded-xl p-4">
                     <p class="text-xs font-semibold tracking-wide uppercase" :class="isDark ? 'text-slate-400' : 'text-slate-400'">Faculty Assigned</p>
                     <p class="mt-1 text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                         {{ progress.faculty_assigned }} <span class="text-sm font-medium" :class="isDark ? 'text-slate-500' : 'text-slate-400'">/ {{ progress.total_subjects }}</span>
                     </p>
                 </div>
-                <div class="rounded-xl border p-4" :class="isDark ? 'border-white/10' : 'border-slate-100'">
+                <div class="neu-inset rounded-xl p-4">
                     <p class="text-xs font-semibold tracking-wide uppercase" :class="isDark ? 'text-slate-400' : 'text-slate-400'">Rooms Assigned</p>
                     <p class="mt-1 text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                         {{ progress.rooms_assigned }} <span class="text-sm font-medium" :class="isDark ? 'text-slate-500' : 'text-slate-400'">/ {{ progress.total_subjects }}</span>

@@ -99,10 +99,9 @@ const roleLabel = computed(() => props.roles.join(', ') || 'No role assigned');
         </Link>
 
         <!-- 1. Header -->
-        <div class="neon-frame-static mb-6 rounded-2xl p-[1.5px]">
+        <div class="neu-card neu-spotlight mb-6 rounded-2xl">
             <div
-                class="flex flex-col gap-4 rounded-[15px] p-6 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between"
-                :class="isDark ? 'bg-[#0B1220]/90' : 'bg-white/90'"
+                class="flex flex-col gap-4 rounded-2xl p-6 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between"
             >
                 <div>
                     <h1 class="text-xl font-bold flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
@@ -132,8 +131,8 @@ const roleLabel = computed(() => props.roles.join(', ') || 'No role assigned');
                 </div>
                 <div
                     v-if="activeAcademicTermLabel"
-                    class="flex items-center gap-2 self-start rounded-full border px-4 py-2 sm:self-auto"
-                    :class="isDark ? 'border-emerald-400/25 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'"
+                    class="neu-inset neu-glow flex items-center gap-2 self-start rounded-full px-4 py-2 sm:self-auto"
+                    :style="{ '--neu-glow-color': isDark ? 'rgba(52, 211, 153, 0.2)' : 'rgba(16, 185, 129, 0.2)' }"
                 >
                     <span class="relative flex h-2.5 w-2.5">
                         <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>

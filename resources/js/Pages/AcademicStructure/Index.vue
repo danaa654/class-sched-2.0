@@ -523,7 +523,7 @@ const onRestoreMajor = (major) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-6">
-                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     Academic Structure
                     <InfoPopover
                         title="Academic Structure"
@@ -537,7 +537,7 @@ const onRestoreMajor = (major) => {
                         ]"
                     />
                 </h1>
-                <p class="mt-1 text-slate-500">
+                <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage colleges, departments, and majors.
                 </p>
             </div>
@@ -553,17 +553,22 @@ const onRestoreMajor = (major) => {
                 <TabPanels>
                     <!-- Colleges -->
                     <TabPanel value="colleges">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-4">
+                        <div class="neu-card rounded-2xl transition-colors duration-300 mt-4">
+                        <Card
+                            class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                            :pt="{ body: { class: '!bg-transparent' } }"
+                        >
                             <template #content>
                                 <!-- Top Toolbar -->
                                 <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                                     <template #start>
                                         <span class="relative w-full sm:w-80">
-                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
                                                 v-model="collegeSearch"
                                                 placeholder="Search by code, name or short name"
-                                                class="w-full !pl-9"
+                                                class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                                :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                             />
                                         </span>
                                     </template>
@@ -572,7 +577,8 @@ const onRestoreMajor = (major) => {
                                             <Button
                                                 icon="pi pi-refresh"
                                                 severity="secondary"
-                                                outlined
+                                                text
+                                                class="neu-icon-well !rounded-full"
                                                 :loading="collegeLoading"
                                                 @click="onRefreshColleges"
                                                 aria-label="Refresh"
@@ -587,7 +593,8 @@ const onRestoreMajor = (major) => {
                                     :value="colleges.data"
                                     :loading="collegeLoading"
                                     dataKey="id"
-                                    class="rounded-xl overflow-hidden"
+                                    class="neu-inset neu-table rounded-xl overflow-hidden"
+                                    :class="isDark ? 'neu-table-dark' : ''"
                                     stripedRows
                                     responsiveLayout="scroll"
                                     lazy
@@ -665,21 +672,27 @@ const onRestoreMajor = (major) => {
                                 </DataTable>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- Departments -->
                     <TabPanel value="departments">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-4">
+                        <div class="neu-card rounded-2xl transition-colors duration-300 mt-4">
+                        <Card
+                            class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                            :pt="{ body: { class: '!bg-transparent' } }"
+                        >
                             <template #content>
                                 <!-- Top Toolbar -->
                                 <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                                     <template #start>
                                         <span class="relative w-full sm:w-80">
-                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
                                                 v-model="departmentSearch"
                                                 placeholder="Search by code, name, short name or college"
-                                                class="w-full !pl-9"
+                                                class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                                :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                             />
                                         </span>
                                     </template>
@@ -688,7 +701,8 @@ const onRestoreMajor = (major) => {
                                             <Button
                                                 icon="pi pi-refresh"
                                                 severity="secondary"
-                                                outlined
+                                                text
+                                                class="neu-icon-well !rounded-full"
                                                 :loading="departmentLoading"
                                                 @click="onRefreshDepartments"
                                                 aria-label="Refresh"
@@ -703,7 +717,8 @@ const onRestoreMajor = (major) => {
                                     :value="departments.data"
                                     :loading="departmentLoading"
                                     dataKey="id"
-                                    class="rounded-xl overflow-hidden"
+                                    class="neu-inset neu-table rounded-xl overflow-hidden"
+                                    :class="isDark ? 'neu-table-dark' : ''"
                                     stripedRows
                                     responsiveLayout="scroll"
                                     lazy
@@ -786,21 +801,27 @@ const onRestoreMajor = (major) => {
                                 </DataTable>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- Majors -->
                     <TabPanel value="majors">
-                        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-4">
+                        <div class="neu-card rounded-2xl transition-colors duration-300 mt-4">
+                        <Card
+                            class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                            :pt="{ body: { class: '!bg-transparent' } }"
+                        >
                             <template #content>
                                 <!-- Top Toolbar -->
                                 <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                                     <template #start>
                                         <span class="relative w-full sm:w-80">
-                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
                                                 v-model="majorSearch"
                                                 placeholder="Search by code, name, department or college"
-                                                class="w-full !pl-9"
+                                                class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                                :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                             />
                                         </span>
                                     </template>
@@ -809,7 +830,8 @@ const onRestoreMajor = (major) => {
                                             <Button
                                                 icon="pi pi-refresh"
                                                 severity="secondary"
-                                                outlined
+                                                text
+                                                class="neu-icon-well !rounded-full"
                                                 :loading="majorLoading"
                                                 @click="onRefreshMajors"
                                                 aria-label="Refresh"
@@ -824,7 +846,8 @@ const onRestoreMajor = (major) => {
                                     :value="majors.data"
                                     :loading="majorLoading"
                                     dataKey="id"
-                                    class="rounded-xl overflow-hidden"
+                                    class="neu-inset neu-table rounded-xl overflow-hidden"
+                                    :class="isDark ? 'neu-table-dark' : ''"
                                     stripedRows
                                     responsiveLayout="scroll"
                                     lazy
@@ -908,6 +931,7 @@ const onRestoreMajor = (major) => {
                                 </DataTable>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
                 </TabPanels>
             </Tabs>
@@ -917,10 +941,15 @@ const onRestoreMajor = (major) => {
         <Dialog
             v-model:visible="collegeDialogVisible"
             modal
-            :style="{ width: '600px' }"
+            :style="{ width: '600px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
         >
             <template #header>
                 <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
@@ -928,7 +957,7 @@ const onRestoreMajor = (major) => {
                 </span>
             </template>
 
-            <form class="pt-2" autocomplete="off" @submit.prevent="onSaveCollege">
+            <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onSaveCollege">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <FloatLabel variant="on">
                         <InputText
@@ -1016,10 +1045,15 @@ const onRestoreMajor = (major) => {
         <Dialog
             v-model:visible="departmentDialogVisible"
             modal
-            :style="{ width: '600px' }"
+            :style="{ width: '600px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
         >
             <template #header>
                 <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
@@ -1027,7 +1061,7 @@ const onRestoreMajor = (major) => {
                 </span>
             </template>
 
-            <form class="pt-2" autocomplete="off" @submit.prevent="onSaveDepartment">
+            <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onSaveDepartment">
                 <div class="grid grid-cols-1 gap-5">
                     <FloatLabel variant="on">
                         <Select
@@ -1132,10 +1166,15 @@ const onRestoreMajor = (major) => {
         <Dialog
             v-model:visible="majorDialogVisible"
             modal
-            :style="{ width: '600px' }"
+            :style="{ width: '600px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
         >
             <template #header>
                 <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
@@ -1143,7 +1182,7 @@ const onRestoreMajor = (major) => {
                 </span>
             </template>
 
-            <form class="pt-2" autocomplete="off" @submit.prevent="onSaveMajor">
+            <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onSaveMajor">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <FloatLabel variant="on">
                         <Select

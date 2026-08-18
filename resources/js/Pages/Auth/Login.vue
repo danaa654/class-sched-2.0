@@ -20,8 +20,8 @@ const isDark = computed(() => theme.value === 'dark');
     <Head title="Login" />
 
     <div
-        class="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-16 transition-colors duration-300"
-        :class="isDark ? 'bg-[#080D1A] text-white' : 'bg-gradient-to-br from-[#EEF2FF] via-[#F8FAFC] to-[#E0E7FF] text-[#1E293B]'"
+        class="neu-surface relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-16 transition-colors duration-300"
+        :class="isDark ? 'text-white' : 'text-[#1E293B]'"
     >
         <AmbientBackground :is-dark="isDark" />
 

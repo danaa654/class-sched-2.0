@@ -407,27 +407,27 @@ const closeSchedule = () => {
 
             <!-- Room Usage Summary Cards -->
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
-                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                <div class="neu-card rounded-xl p-4 transition-colors duration-300">
                     <p class="text-xs font-medium text-slate-500">Total Rooms</p>
                     <p class="text-2xl font-bold text-[#1E293B] mt-1">{{ summary.total_rooms }}</p>
                 </div>
-                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                <div class="neu-card rounded-xl p-4 transition-colors duration-300">
                     <p class="text-xs font-medium text-slate-500">Active Rooms</p>
                     <p class="text-2xl font-bold text-[#1E293B] mt-1">{{ summary.active_rooms }}</p>
                 </div>
-                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                <div class="neu-card rounded-xl p-4 transition-colors duration-300">
                     <p class="text-xs font-medium text-slate-500">Available Rooms</p>
                     <p class="text-2xl font-bold text-emerald-600 mt-1">{{ summary.available_rooms }}</p>
                 </div>
-                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                <div class="neu-card rounded-xl p-4 transition-colors duration-300">
                     <p class="text-xs font-medium text-slate-500">Fully Booked</p>
                     <p class="text-2xl font-bold text-amber-600 mt-1">{{ summary.fully_booked_rooms }}</p>
                 </div>
-                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                <div class="neu-card rounded-xl p-4 transition-colors duration-300">
                     <p class="text-xs font-medium text-slate-500">Avg. Utilization</p>
                     <p class="text-2xl font-bold text-[#1E293B] mt-1">{{ summary.average_utilization }}%</p>
                 </div>
-                <div class="rounded-xl border border-slate-100 bg-white shadow-sm p-4">
+                <div class="neu-card rounded-xl p-4 transition-colors duration-300">
                     <p class="text-xs font-medium text-slate-500">Conflicts</p>
                     <p class="text-2xl font-bold" :class="summary.rooms_with_conflicts > 0 ? 'text-red-600' : 'text-[#1E293B]'">
                         {{ summary.rooms_with_conflicts }}
@@ -435,17 +435,22 @@ const closeSchedule = () => {
                 </div>
             </div>
 
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
                     <!-- Top Toolbar -->
-                    <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
+                    <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3 neu-form">
                         <template #start>
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                 <InputText
                                     v-model="search"
                                     placeholder="Search by code, name, building or type"
-                                    class="w-full !pl-9"
+                                    class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                    :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                 />
                             </span>
                         </template>
@@ -454,7 +459,8 @@ const closeSchedule = () => {
                                 <Button
                                     icon="pi pi-refresh"
                                     severity="secondary"
-                                    outlined
+                                    text
+                                    class="neu-icon-well !rounded-full"
                                     :loading="loading"
                                     @click="onRefresh"
                                     aria-label="Refresh"
@@ -479,7 +485,7 @@ const closeSchedule = () => {
                     </div>
 
                     <!-- Advanced Filters -->
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4 neu-form">
                         <Select
                             v-model="building"
                             :options="buildings"
@@ -539,7 +545,8 @@ const closeSchedule = () => {
                         :value="rooms.data"
                         :loading="loading"
                         dataKey="id"
-                        class="rounded-xl overflow-hidden"
+                        class="neu-inset neu-table rounded-xl overflow-hidden"
+                        :class="isDark ? 'neu-table-dark' : ''"
                         stripedRows
                         responsiveLayout="scroll"
                         lazy
@@ -715,6 +722,7 @@ const closeSchedule = () => {
                     </DataTable>
                 </template>
             </Card>
+            </div>
         </div>
 
         <!-- Add Room Dialog -->
@@ -725,10 +733,15 @@ const closeSchedule = () => {
             :style="{ width: '700px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeAddRoom"
         >
-            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveRoom">
+            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 neu-form" @submit.prevent="onSaveRoom">
                 <!-- Room Code -->
                 <div class="flex flex-col gap-1">
                     <label for="room_code" class="text-sm font-medium text-slate-700">
@@ -940,7 +953,12 @@ const closeSchedule = () => {
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
             :contentStyle="{ maxHeight: '70vh', overflowY: 'auto' }"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeSchedule"
         >
             <div v-if="scheduleLoading" class="py-16 text-center text-slate-400">
@@ -951,19 +969,19 @@ const closeSchedule = () => {
             <div v-else-if="scheduleRoom && scheduleSummary" class="space-y-5">
                 <!-- Room info -->
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                    <div>
+                    <div class="neu-inset rounded-xl p-3">
                         <p class="text-xs text-slate-400">Room Type</p>
                         <p class="font-medium text-slate-700">{{ scheduleRoom.room_type }}</p>
                     </div>
-                    <div>
+                    <div class="neu-inset rounded-xl p-3">
                         <p class="text-xs text-slate-400">Capacity</p>
                         <p class="font-medium text-slate-700">{{ scheduleRoom.capacity }}</p>
                     </div>
-                    <div>
+                    <div class="neu-inset rounded-xl p-3">
                         <p class="text-xs text-slate-400">College</p>
                         <p class="font-medium text-slate-700">{{ scheduleRoom.college?.name ?? 'All Colleges' }}</p>
                     </div>
-                    <div>
+                    <div class="neu-inset rounded-xl p-3">
                         <p class="text-xs text-slate-400">Program</p>
                         <p class="font-medium text-slate-700">{{ scheduleRoom.department?.name ?? 'All Programs' }}</p>
                     </div>
@@ -983,7 +1001,7 @@ const closeSchedule = () => {
                 </div>
 
                 <!-- Utilization -->
-                <div class="rounded-xl border border-slate-100 p-4">
+                <div class="rounded-xl p-4 neu-inset">
                     <div class="flex items-center justify-between mb-1">
                         <span class="text-sm font-medium text-slate-600">
                             {{ scheduleSummary.scheduled_hours }} / {{ scheduleSummary.max_hours }} hrs weekly
@@ -1004,7 +1022,7 @@ const closeSchedule = () => {
                         <div
                             v-for="(day, name) in scheduleSummary.by_day"
                             :key="name"
-                            class="rounded-lg border border-slate-100 p-2 text-center"
+                            class="neu-inset rounded-lg p-2 text-center"
                         >
                             <p class="text-xs text-slate-500">{{ name }}</p>
                             <p class="text-sm font-bold text-slate-700">{{ day.utilization_percent }}%</p>
@@ -1016,14 +1034,15 @@ const closeSchedule = () => {
                 <div>
                     <p class="text-sm font-semibold text-slate-700 mb-2">Weekly Timetable</p>
                     <div class="space-y-3 max-h-80 overflow-y-auto pr-1">
-                        <div v-for="(day, name) in scheduleTimetable" :key="name" class="rounded-lg border border-slate-100 p-3">
+                        <div v-for="(day, name) in scheduleTimetable" :key="name" class="neu-inset rounded-lg p-3">
                             <p class="text-xs font-semibold text-slate-500 mb-2">{{ name }}</p>
 
                             <div v-if="day.booked.length" class="space-y-1 mb-2">
                                 <div
                                     v-for="slot in day.booked"
                                     :key="slot.section_subject_id"
-                                    class="flex items-center justify-between text-xs bg-slate-50 rounded px-2 py-1"
+                                    class="flex items-center justify-between text-xs rounded px-2 py-1"
+                                    :class="isDark ? 'bg-white/5' : 'bg-white'"
                                 >
                                     <span class="font-medium text-slate-700">{{ formatTime12h(slot.start_time) }}–{{ formatTime12h(slot.end_time) }}</span>
                                     <span class="text-slate-600">{{ slot.subject }} · {{ slot.section }}</span>
@@ -1046,7 +1065,7 @@ const closeSchedule = () => {
                 </div>
 
                 <!-- Recommended Subjects -->
-                <div class="rounded-xl border border-slate-100 p-4">
+                <div class="rounded-xl p-4 neu-inset">
                     <RoomRecommendedSubjects ref="roomRecommendedSubjectsRef" :room="scheduleRoom" />
                 </div>
             </div>

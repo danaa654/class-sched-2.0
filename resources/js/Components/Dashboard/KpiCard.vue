@@ -6,6 +6,10 @@ import { computed } from 'vue';
 // Scheduled Subjects, ...). Kept generic/reusable so future widgets
 // (College Progress, Faculty Workload, Room Utilization) can drop in
 // more of these without a new component each time.
+//
+// Neumorphic (soft UI) styling: the card is "extruded" from the same
+// background color as the page (see .neu-card in app.css), with a
+// pressed-in icon well and a colored accent glow behind the icon.
 const props = defineProps({
     label: { type: String, required: true },
     value: { type: [String, Number], required: true },
@@ -23,72 +27,69 @@ const props = defineProps({
     isDark: { type: Boolean, default: false },
 });
 
+// Accent (icon + glow) color per KPI type. Kept separate from the neu
+// surface color so the icon well still reads as "pressed in" while the
+// icon itself pops with the app's existing accent palette.
 const colorClasses = {
     blue: {
-        bg: 'bg-blue-50',
         icon: 'text-blue-600',
-        bgDark: 'bg-blue-500/15',
         iconDark: 'text-blue-400',
+        glow: 'rgba(37, 99, 235, 0.35)',
+        glowDark: 'rgba(56, 189, 248, 0.35)',
     },
     emerald: {
-        bg: 'bg-emerald-50',
         icon: 'text-emerald-600',
-        bgDark: 'bg-emerald-500/15',
         iconDark: 'text-emerald-400',
+        glow: 'rgba(16, 185, 129, 0.35)',
+        glowDark: 'rgba(52, 211, 153, 0.35)',
     },
     amber: {
-        bg: 'bg-amber-50',
         icon: 'text-amber-600',
-        bgDark: 'bg-amber-500/15',
         iconDark: 'text-amber-400',
+        glow: 'rgba(217, 119, 6, 0.35)',
+        glowDark: 'rgba(251, 191, 36, 0.35)',
     },
     violet: {
-        bg: 'bg-violet-50',
         icon: 'text-violet-600',
-        bgDark: 'bg-violet-500/15',
         iconDark: 'text-violet-400',
+        glow: 'rgba(124, 58, 237, 0.35)',
+        glowDark: 'rgba(167, 139, 250, 0.35)',
     },
 };
 
 const classes = computed(() => colorClasses[props.color] ?? colorClasses.blue);
 const isClickable = computed(() => !!props.href);
+const glowStyle = computed(() => ({
+    '--neu-glow-color': props.isDark ? classes.value.glowDark : classes.value.glow,
+}));
 </script>
 
 <template>
-    <div class="neon-frame-static rounded-2xl p-[1.5px]">
-        <component
-            :is="isClickable ? Link : 'div'"
-            :href="isClickable ? route(href) : undefined"
-            class="flex items-center gap-4 rounded-[15px] p-5 transition-colors duration-300"
-            :class="[
-                isDark
-                    ? 'bg-[#0B1220]/90'
-                    : 'bg-white/90',
-                isClickable
-                    ? (isDark ? 'hover:bg-[#0B1220]/75 cursor-pointer' : 'hover:bg-white/70 cursor-pointer')
-                    : '',
-            ]"
+    <component
+        :is="isClickable ? Link : 'div'"
+        :href="isClickable ? route(href) : undefined"
+        class="neu-card flex items-center gap-4 rounded-2xl p-5 transition-colors duration-300"
+        :class="isClickable ? 'neu-card--clickable cursor-pointer' : ''"
+    >
+        <span
+            class="neu-icon-well neu-glow flex h-12 w-12 flex-none items-center justify-center rounded-xl"
+            :style="glowStyle"
         >
-            <span
-                class="flex h-12 w-12 flex-none items-center justify-center rounded-xl"
-                :class="isDark ? classes.bgDark : classes.bg"
+            <i :class="['pi', icon, 'text-xl', isDark ? classes.iconDark : classes.icon]"></i>
+        </span>
+        <div class="min-w-0">
+            <p
+                class="text-xs font-semibold tracking-wide uppercase"
+                :class="isDark ? 'text-slate-400' : 'text-slate-400'"
             >
-                <i :class="['pi', icon, 'text-xl', isDark ? classes.iconDark : classes.icon]"></i>
-            </span>
-            <div class="min-w-0">
-                <p
-                    class="text-xs font-semibold tracking-wide uppercase"
-                    :class="isDark ? 'text-slate-400' : 'text-slate-400'"
-                >
-                    {{ label }}
-                </p>
-                <p
-                    class="mt-0.5 text-2xl font-bold"
-                    :class="isDark ? 'text-white' : 'text-[#1E293B]'"
-                >
-                    {{ value }}<span v-if="valueSuffix" class="text-base font-semibold" :class="isDark ? 'text-slate-500' : 'text-slate-400'"> {{ valueSuffix }}</span>
-                </p>
-            </div>
-        </component>
-    </div>
+                {{ label }}
+            </p>
+            <p
+                class="mt-0.5 text-2xl font-bold"
+                :class="isDark ? 'text-white' : 'text-[#1E293B]'"
+            >
+                {{ value }}<span v-if="valueSuffix" class="text-base font-semibold" :class="isDark ? 'text-slate-500' : 'text-slate-400'"> {{ valueSuffix }}</span>
+            </p>
+        </div>
+    </component>
 </template>

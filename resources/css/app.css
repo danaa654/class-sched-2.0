@@ -410,6 +410,101 @@ html.dark ::-webkit-scrollbar-thumb {
     transform: none !important;
 }
 
+/* Dark mode: the flat black drop-shadow above is invisible against the
+   navy surfaces, so swap it for a neon glow tinted to the button's own
+   severity color instead (default/primary blue, success green, danger
+   red, warn amber, info cyan, help purple, secondary/contrast neutral). */
+.dark .p-button:not(.p-button-text):not(.p-button-link) {
+    box-shadow:
+        0 3px 0 rgba(0, 0, 0, 0.35),
+        0 0 14px 1px rgba(37, 99, 235, 0.45) !important;
+}
+.dark .p-button:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    box-shadow:
+        0 4px 0 rgba(0, 0, 0, 0.35),
+        0 0 20px 3px rgba(37, 99, 235, 0.65) !important;
+}
+.dark .p-button:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.35),
+        0 0 10px 1px rgba(37, 99, 235, 0.45) !important;
+}
+.dark .p-button:not(.p-button-text):not(.p-button-link):disabled {
+    box-shadow: none !important;
+}
+
+.dark .p-button-success:not(.p-button-text):not(.p-button-link) {
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(34, 197, 94, 0.5) !important;
+}
+.dark .p-button-success:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(34, 197, 94, 0.7) !important;
+}
+.dark .p-button-success:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(34, 197, 94, 0.5) !important;
+}
+
+.dark .p-button-danger:not(.p-button-text):not(.p-button-link) {
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(239, 68, 68, 0.5) !important;
+}
+.dark .p-button-danger:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(239, 68, 68, 0.7) !important;
+}
+.dark .p-button-danger:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(239, 68, 68, 0.5) !important;
+}
+
+.dark .p-button-warn:not(.p-button-text):not(.p-button-link) {
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(245, 158, 11, 0.5) !important;
+}
+.dark .p-button-warn:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(245, 158, 11, 0.7) !important;
+}
+.dark .p-button-warn:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(245, 158, 11, 0.5) !important;
+}
+
+.dark .p-button-info:not(.p-button-text):not(.p-button-link) {
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(6, 182, 212, 0.5) !important;
+}
+.dark .p-button-info:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(6, 182, 212, 0.7) !important;
+}
+.dark .p-button-info:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(6, 182, 212, 0.5) !important;
+}
+
+.dark .p-button-help:not(.p-button-text):not(.p-button-link) {
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(168, 85, 247, 0.5) !important;
+}
+.dark .p-button-help:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(168, 85, 247, 0.7) !important;
+}
+.dark .p-button-help:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(168, 85, 247, 0.5) !important;
+}
+
+.dark .p-button-secondary:not(.p-button-text):not(.p-button-link),
+.dark .p-button-contrast:not(.p-button-text):not(.p-button-link) {
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 12px 1px rgba(148, 163, 184, 0.35) !important;
+}
+.dark .p-button-secondary:not(.p-button-text):not(.p-button-link):not(:disabled):hover,
+.dark .p-button-contrast:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 18px 2px rgba(148, 163, 184, 0.5) !important;
+}
+.dark .p-button-secondary:not(.p-button-text):not(.p-button-link):not(:disabled):active,
+.dark .p-button-contrast:not(.p-button-text):not(.p-button-link):not(:disabled):active {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(148, 163, 184, 0.35) !important;
+}
+
+/* Dark mode outlined buttons get a soft matching glow too, since their
+   shadow was even fainter than the filled variant's. */
+.dark .p-button.p-button-outlined {
+    box-shadow: 0 0 10px 1px rgba(148, 163, 184, 0.3) !important;
+}
+.dark .p-button.p-button-outlined:not(:disabled):hover {
+    box-shadow: 0 0 16px 2px rgba(148, 163, 184, 0.5) !important;
+}
+
 /* Outlined buttons: same rounding + lift, lighter shadow so the border still reads */
 .p-button.p-button-outlined {
     border-radius: 10px !important;
@@ -431,4 +526,603 @@ html.dark ::-webkit-scrollbar-thumb {
 .p-button.p-button-text,
 .p-button.p-button-link {
     border-radius: 8px !important;
+}
+/* =========================================================================
+   Neumorphism (soft UI) utilities
+   Opt-in, scoped design layer for decorative surfaces (dashboard cards,
+   stat widgets, toggles). NOT intended for dense functional UI like
+   Master Grid, tables, or forms, where the low element/background
+   contrast neumorphism produces would hurt readability.
+
+   Usage: add `.neu-surface` (or `.dark .neu-surface` is automatic via
+   the `.dark` root class already toggled by useTheme.js) to a container,
+   then `.neu-card`, `.neu-inset`, `.neu-icon-well` on children.
+
+   Visibility note: pure textbook neumorphism (card color === page color,
+   definition from shadow alone) reads as too flat/low-contrast in
+   practice — see the reference screenshots. Two adjustments fix that
+   without abandoning the soft-UI look:
+     1. The card is a shade lighter than the page it sits on (light mode)
+        or a shade lighter/bluer than the page (dark mode), so there's a
+        real luminance step for the eye to catch even before the shadow
+        renders.
+     2. Shadows are noticeably stronger (bigger blur/spread, higher
+        opacity) than a "purist" neumorphic spec calls for, plus a hairline
+        top highlight for a crisp edge.
+   ========================================================================= */
+
+:root {
+    --neu-bg-light: #F8FAFC;
+    --neu-card-light: #FDFBF6;
+    --neu-inset-light: #F7F4ED;
+    --neu-shadow-light-1: rgba(255, 253, 247, 0.9);
+    --neu-shadow-light-2: rgba(100, 116, 139, 0.55);
+    --neu-inset-shadow-light: rgba(100, 116, 139, 0.5);
+    --neu-border-light: rgba(255, 253, 247, 0.9);
+
+    --neu-bg-dark: #0B1120;
+    --neu-card-dark: #141D33;
+    --neu-inset-dark: #070A14;
+    --neu-shadow-dark-1: rgba(255, 255, 255, 0.06);
+    --neu-shadow-dark-2: rgba(0, 0, 0, 0.75);
+    --neu-border-dark: rgba(255, 255, 255, 0.06);
+}
+
+.neu-surface {
+    background: var(--neu-bg-light);
+}
+
+.dark .neu-surface {
+    background: var(--neu-bg-dark);
+}
+
+/* Raised / extruded card */
+.neu-card {
+    background: var(--neu-card-light);
+    border: 1px solid var(--neu-border-light);
+    box-shadow:
+        0 18px 40px -12px rgba(30, 41, 59, 0.28),
+        0 4px 12px rgba(30, 41, 59, 0.10),
+        12px 12px 28px var(--neu-shadow-light-2),
+        -10px -10px 24px var(--neu-shadow-light-1);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.dark .neu-card {
+    background: var(--neu-card-dark);
+    border-color: var(--neu-border-dark);
+    box-shadow:
+        10px 10px 24px var(--neu-shadow-dark-2),
+        -8px -8px 20px var(--neu-shadow-dark-1);
+}
+
+.neu-card--clickable:hover {
+    box-shadow:
+        13px 13px 26px var(--neu-shadow-light-2),
+        -13px -13px 26px var(--neu-shadow-light-1);
+    transform: translateY(-2px);
+}
+
+.dark .neu-card--clickable:hover {
+    box-shadow:
+        13px 13px 28px var(--neu-shadow-dark-2),
+        -10px -10px 24px var(--neu-shadow-dark-1);
+    transform: translateY(-2px);
+}
+
+.neu-card--clickable:active {
+    transform: translateY(0);
+    box-shadow:
+        5px 5px 10px var(--neu-shadow-light-2),
+        -5px -5px 10px var(--neu-shadow-light-1);
+}
+
+.dark .neu-card--clickable:active {
+    box-shadow:
+        5px 5px 12px var(--neu-shadow-dark-2),
+        -4px -4px 10px var(--neu-shadow-dark-1);
+}
+
+/* Pressed-in / inset surface (icon wells, progress track, active toggle) */
+.neu-inset {
+    background: var(--neu-inset-light);
+    box-shadow:
+        inset 5px 5px 10px var(--neu-inset-shadow-light),
+        inset -5px -5px 10px var(--neu-shadow-light-1);
+}
+
+.dark .neu-inset {
+    background: var(--neu-inset-dark);
+    box-shadow:
+        inset 5px 5px 11px var(--neu-shadow-dark-2),
+        inset -4px -4px 10px var(--neu-shadow-dark-1);
+}
+
+/* PrimeVue InputText/Textarea ship their own `.p-inputtext` box-shadow rule at
+   the same specificity as `.neu-inset`, injected after app.css, so it wins the
+   tie on plain `.neu-inset` and the field renders flat. Target the component
+   class directly (higher specificity) so the inset shadow always applies,
+   including on focus where PrimeVue swaps in its own focus-ring shadow. */
+.p-inputtext.neu-inset,
+.p-inputtext.neu-inset:enabled:focus,
+.p-inputtext.neu-inset:enabled:hover {
+    box-shadow:
+        inset 5px 5px 10px var(--neu-inset-shadow-light),
+        inset -5px -5px 10px var(--neu-shadow-light-1) !important;
+}
+
+.dark .p-inputtext.neu-inset,
+.dark .p-inputtext.neu-inset:enabled:focus,
+.dark .p-inputtext.neu-inset:enabled:hover {
+    box-shadow:
+        inset 5px 5px 11px var(--neu-shadow-dark-2),
+        inset -4px -4px 10px var(--neu-shadow-dark-1) !important;
+}
+
+/* Academic Term form fields (Start/End Year, Semester, Status, Remarks,
+   Class Start/End Time): give them the same pressed-in look as the search
+   box, and in dark mode make them match the search box's near-black fill
+   instead of the default white PrimeVue skin. */
+.academic-term-form .p-inputtext,
+.academic-term-form .p-inputnumber-input,
+.academic-term-form .p-select {
+    background: #FFFFFF !important;
+    border-color: transparent !important;
+    box-shadow:
+        inset 5px 5px 10px var(--neu-inset-shadow-light),
+        inset -5px -5px 10px var(--neu-shadow-light-1) !important;
+}
+
+.academic-term-form .p-inputtext:enabled:focus,
+.academic-term-form .p-inputnumber-input:enabled:focus,
+.academic-term-form .p-select:not(.p-disabled).p-focus {
+    box-shadow:
+        inset 5px 5px 10px var(--neu-inset-shadow-light),
+        inset -5px -5px 10px var(--neu-shadow-light-1) !important;
+}
+
+.dark .academic-term-form .p-inputtext,
+.dark .academic-term-form .p-inputnumber-input,
+.dark .academic-term-form .p-select {
+    background: var(--neu-inset-dark) !important;
+    border-color: transparent !important;
+    color: #fff !important;
+    box-shadow:
+        inset 5px 5px 11px var(--neu-shadow-dark-2),
+        inset -4px -4px 10px var(--neu-shadow-dark-1) !important;
+}
+
+.dark .academic-term-form .p-inputtext:enabled:focus,
+.dark .academic-term-form .p-inputnumber-input:enabled:focus,
+.dark .academic-term-form .p-select:not(.p-disabled).p-focus {
+    box-shadow:
+        inset 5px 5px 11px var(--neu-shadow-dark-2),
+        inset -4px -4px 10px var(--neu-shadow-dark-1) !important;
+}
+
+.dark .academic-term-form .p-inputtext::placeholder,
+.dark .academic-term-form .p-inputnumber-input::placeholder {
+    color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.dark .academic-term-form .p-select .p-select-label {
+    color: #fff !important;
+}
+
+.dark .academic-term-form .p-select .p-select-label.p-select-label-empty {
+    color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.dark .academic-term-form .p-select .p-select-dropdown-icon {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Generic reusable version of the Academic Term form treatment above, for
+   applying the same "white inset field, black inset in dark mode" look to
+   forms elsewhere in the app (e.g. Users, Faculty, Rooms). Wrap the form
+   or its container with class="neu-form". */
+.neu-form .p-inputtext,
+.neu-form .p-inputnumber-input,
+.neu-form .p-select,
+.neu-form .p-password-input,
+.neu-form .p-multiselect,
+.neu-form .p-textarea {
+    background: #FFFFFF !important;
+    border-color: transparent !important;
+    box-shadow:
+        inset 5px 5px 10px var(--neu-inset-shadow-light),
+        inset -5px -5px 10px var(--neu-shadow-light-1) !important;
+}
+
+.neu-form .p-inputtext:enabled:focus,
+.neu-form .p-inputnumber-input:enabled:focus,
+.neu-form .p-select:not(.p-disabled).p-focus,
+.neu-form .p-password-input:enabled:focus,
+.neu-form .p-multiselect:not(.p-disabled).p-focus,
+.neu-form .p-textarea:enabled:focus {
+    box-shadow:
+        inset 5px 5px 10px var(--neu-inset-shadow-light),
+        inset -5px -5px 10px var(--neu-shadow-light-1) !important;
+}
+
+.dark .neu-form .p-inputtext,
+.dark .neu-form .p-inputnumber-input,
+.dark .neu-form .p-select,
+.dark .neu-form .p-password-input,
+.dark .neu-form .p-multiselect,
+.dark .neu-form .p-textarea {
+    background: var(--neu-inset-dark) !important;
+    border-color: transparent !important;
+    color: #fff !important;
+    box-shadow:
+        inset 5px 5px 11px var(--neu-shadow-dark-2),
+        inset -4px -4px 10px var(--neu-shadow-dark-1) !important;
+}
+
+.dark .neu-form .p-inputtext:enabled:focus,
+.dark .neu-form .p-inputnumber-input:enabled:focus,
+.dark .neu-form .p-select:not(.p-disabled).p-focus,
+.dark .neu-form .p-password-input:enabled:focus,
+.dark .neu-form .p-multiselect:not(.p-disabled).p-focus,
+.dark .neu-form .p-textarea:enabled:focus {
+    box-shadow:
+        inset 5px 5px 11px var(--neu-shadow-dark-2),
+        inset -4px -4px 10px var(--neu-shadow-dark-1) !important;
+}
+
+.dark .neu-form .p-inputtext::placeholder,
+.dark .neu-form .p-inputnumber-input::placeholder,
+.dark .neu-form .p-textarea::placeholder {
+    color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.dark .neu-form .p-select .p-select-label,
+.dark .neu-form .p-multiselect .p-multiselect-label {
+    color: #fff !important;
+}
+
+.dark .neu-form .p-select .p-select-label.p-select-label-empty,
+.dark .neu-form .p-multiselect .p-multiselect-label.p-multiselect-label-empty {
+    color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.dark .neu-form .p-select .p-select-dropdown-icon,
+.dark .neu-form .p-multiselect .p-multiselect-dropdown-icon {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Global neumorphic dropdown overlays                                 */
+/* ------------------------------------------------------------------ */
+/* PrimeVue teleports Select / MultiSelect / AutoComplete / CascadeSelect
+   panels straight to <body>, outside every page's own scoped <style>.
+   Styling them here — once, globally — means every dropdown across the
+   entire app (Sections, Rooms, Reports, Settings, Faculty, Users, ...)
+   automatically gets the same "floating neu-card" look instead of a
+   flat white box, with zero changes needed on individual pages.
+
+   Light mode needs no extra specificity: pages only add a conditional
+   "dark-scope" class to the overlay's `pt`, so in light mode nothing
+   else targets `.p-select-overlay` and this base rule applies cleanly.
+   Dark mode uses the "html.dark" prefix so it reliably outranks the
+   equal-specificity `.p-select-overlay.dark-scope` rules still present
+   on some older pages (both are 2 classes; adding the `html` type
+   selector gives this rule one more specificity point). */
+.p-select-overlay,
+.p-multiselect-overlay,
+.p-autocomplete-overlay,
+.p-cascadeselect-overlay,
+.p-treeselect-overlay {
+    border-radius: 1rem !important;
+    border: 1px solid var(--neu-border-light) !important;
+    background: var(--neu-card-light) !important;
+    box-shadow:
+        12px 12px 28px var(--neu-shadow-light-2),
+        -10px -10px 24px var(--neu-shadow-light-1) !important;
+    padding: 0.4rem !important;
+    overflow: hidden;
+}
+
+html.dark .p-select-overlay,
+html.dark .p-multiselect-overlay,
+html.dark .p-autocomplete-overlay,
+html.dark .p-cascadeselect-overlay,
+html.dark .p-treeselect-overlay {
+    background: var(--neu-card-dark) !important;
+    border-color: var(--neu-border-dark) !important;
+    box-shadow:
+        10px 10px 24px var(--neu-shadow-dark-2),
+        -8px -8px 20px var(--neu-shadow-dark-1) !important;
+    color: #F8FAFC !important;
+}
+
+/* List container + individual options — rounded rows with breathing
+   room instead of edge-to-edge flat rows. */
+.p-select-list,
+.p-multiselect-list,
+.p-autocomplete-list,
+.p-cascadeselect-list {
+    padding: 0.15rem !important;
+}
+.p-select-option,
+.p-multiselect-option,
+.p-autocomplete-option,
+.p-cascadeselect-option {
+    border-radius: 0.65rem !important;
+    margin: 1px 0;
+}
+.p-select-option-group {
+    border-radius: 0.65rem !important;
+}
+
+html.dark .p-select-option:not(.p-select-option-selected),
+html.dark .p-multiselect-option:not(.p-multiselect-option-selected),
+html.dark .p-autocomplete-option,
+html.dark .p-cascadeselect-option:not(.p-cascadeselect-option-selected) {
+    color: #E2E8F0 !important;
+}
+html.dark .p-select-option:not(.p-select-option-selected):hover,
+html.dark .p-multiselect-option:not(.p-multiselect-option-selected):hover,
+html.dark .p-autocomplete-option:hover,
+html.dark .p-cascadeselect-option:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+html.dark .p-select-option-group {
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: #94A3B8 !important;
+}
+
+/* Selected option row: PrimeVue's default is a pale mint background
+   with light text, so in both themes the label is nearly unreadable.
+   Give it a solid accent background with white text instead. */
+/* Selected dropdown option — the most robust fix: PrimeVue's own
+   generated stylesheet consumes these custom properties directly via
+   var(), and (being injected by the JS theme system) it can load
+   after our stylesheet and win plain selector fights outright even
+   with !important. Redefining the tokens changes what PrimeVue's own
+   rule resolves to, sidestepping the specificity/order fight entirely.
+   Light mode keeps the library default (readable dark text on mint);
+   dark mode's default reused those same light-mode values, which is
+   why the selected row was unreadable there — pale text on a pale
+   green fill against a dark backdrop. */
+html.dark {
+    --p-list-option-selected-background: #2563EB;
+    --p-list-option-selected-color: #ffffff;
+    --p-list-option-selected-focus-background: #3B82F6;
+    --p-list-option-selected-focus-color: #ffffff;
+}
+
+/* Belt-and-suspenders: also override via plain selectors in case a
+   given build's markup doesn't route through those exact tokens. */
+.p-select-option-selected,
+.p-multiselect-option-selected,
+.p-cascadeselect-option-selected {
+    background: #2563EB !important;
+    color: #ffffff !important;
+}
+.p-select-option-selected:hover,
+.p-multiselect-option-selected:hover,
+.p-cascadeselect-option-selected:hover {
+    background: #1D4ED8 !important;
+    color: #ffffff !important;
+}
+html.dark .p-select-option-selected,
+html.dark .p-multiselect-option-selected,
+html.dark .p-cascadeselect-option-selected {
+    background: #2563EB !important;
+    color: #ffffff !important;
+}
+html.dark .p-select-option-selected:hover,
+html.dark .p-multiselect-option-selected:hover,
+html.dark .p-cascadeselect-option-selected:hover {
+    background: #3B82F6 !important;
+    color: #ffffff !important;
+}
+html.dark .p-select-empty-message,
+html.dark .p-multiselect-empty-message,
+html.dark .p-autocomplete-empty-message {
+    color: #94A3B8 !important;
+}
+
+/* Filter box inside searchable dropdowns — inset well, matching the
+   ".neu-form" field treatment used elsewhere. */
+.p-select-filter-container,
+.p-multiselect-filter-container,
+.p-autocomplete-filter-container {
+    padding: 0.35rem 0.35rem 0.5rem !important;
+}
+.p-select-filter,
+.p-multiselect-filter {
+    border-radius: 0.65rem !important;
+    background: #FFFFFF !important;
+    border-color: transparent !important;
+    box-shadow:
+        inset 4px 4px 8px var(--neu-inset-shadow-light),
+        inset -4px -4px 8px var(--neu-shadow-light-1) !important;
+}
+html.dark .p-select-filter,
+html.dark .p-multiselect-filter {
+    background: var(--neu-inset-dark) !important;
+    color: #F8FAFC !important;
+    box-shadow:
+        inset 4px 4px 9px var(--neu-shadow-dark-2),
+        inset -3px -3px 8px var(--neu-shadow-dark-1) !important;
+}
+
+/* Reusable dark-mode DataTable treatment (search box row-shadow, striped
+   fix, forced dark states) for any page — apply class="neu-table-dark" to
+   the DataTable when isDark is true. */
+.neu-table-dark :deep(.p-datatable-table) {
+    background: transparent;
+}
+.neu-table-dark :deep(.p-datatable-thead > tr > th) {
+    background: rgba(255, 255, 255, 0.04);
+    color: #cbd5e1;
+    border-color: rgba(255, 255, 255, 0.1);
+}
+.neu-table-dark :deep(.p-datatable-tbody > tr) {
+    background: transparent !important;
+    color: #e2e8f0 !important;
+}
+.neu-table-dark :deep(.p-datatable-tbody > tr:nth-child(even)) {
+    background: rgba(255, 255, 255, 0.045) !important;
+    color: #e2e8f0 !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 2px 6px rgba(0, 0, 0, 0.35) !important;
+    position: relative;
+}
+.neu-table-dark :deep(.p-datatable-tbody > tr > td) {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: transparent !important;
+    color: inherit !important;
+}
+.neu-table-dark :deep(.p-datatable-tbody > tr:hover),
+.neu-table-dark :deep(.p-datatable-tbody > tr:focus-within),
+.neu-table-dark :deep(.p-datatable-tbody > tr.p-datatable-row-focus) {
+    background: rgba(255, 255, 255, 0.09) !important;
+    color: #e2e8f0 !important;
+}
+.neu-table-dark :deep(.p-datatable-tbody > tr:hover > td),
+.neu-table-dark :deep(.p-datatable-tbody > tr:focus-within > td),
+.neu-table-dark :deep(.p-datatable-tbody > tr.p-datatable-row-focus > td) {
+    background: transparent !important;
+    color: inherit !important;
+}
+.neu-table-dark :deep(.p-paginator) {
+    background: transparent;
+    color: #cbd5e1;
+}
+.neu-table :deep(.p-datatable-tbody > tr:nth-child(even)) {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.6),
+        0 2px 6px rgba(30, 41, 59, 0.08);
+    position: relative;
+}
+
+/* Small icon well inside a neu-card, e.g. KPI icon badge */
+.neu-icon-well {
+    background: var(--neu-inset-light);
+    box-shadow:
+        inset 3px 3px 6px var(--neu-inset-shadow-light),
+        inset -3px -3px 6px var(--neu-shadow-light-1);
+}
+
+.dark .neu-icon-well {
+    background: var(--neu-inset-dark);
+    box-shadow:
+        inset 3px 3px 7px var(--neu-shadow-dark-2),
+        inset -3px -3px 7px var(--neu-shadow-dark-1);
+}
+
+/* Accent glow for a colored element sitting on a dark neu surface
+   (mirrors the reference screenshots' glowing toggle/CTA look).
+   Pass --neu-glow-color from inline style or a utility if needed. */
+.neu-glow {
+    box-shadow: 0 0 18px 2px var(--neu-glow-color, rgba(37, 99, 235, 0.45));
+}
+
+/* Soft ambient "spotlight" behind a hero card (login card, dashboard
+   welcome banner) — a large, very blurred colored glow sitting behind
+   the card via ::before, so the card reads as lit from above rather
+   than just sitting flat on the page. Needs `position: relative` on
+   the card, which `.neu-card` doesn't set by default (most usages are
+   in-flow grid items) — add `relative` alongside this class. */
+.neu-spotlight {
+    position: relative;
+    isolation: isolate;
+}
+
+.neu-spotlight::before {
+    content: '';
+    position: absolute;
+    inset: -40px -40px auto -40px;
+    height: 220px;
+    background: radial-gradient(ellipse at center, rgba(37, 99, 235, 0.16), transparent 70%);
+    filter: blur(10px);
+    z-index: -1;
+    pointer-events: none;
+}
+
+.dark .neu-spotlight::before {
+    background: radial-gradient(ellipse at center, rgba(56, 189, 248, 0.22), transparent 70%);
+}
+
+/* Toggle switch track, neumorphic style */
+.neu-toggle-track {
+    background: var(--neu-inset-light);
+    box-shadow:
+        inset 4px 4px 8px var(--neu-inset-shadow-light),
+        inset -4px -4px 8px var(--neu-shadow-light-1);
+    transition: box-shadow 0.2s ease;
+}
+
+.dark .neu-toggle-track {
+    background: var(--neu-inset-dark);
+    box-shadow:
+        inset 4px 4px 9px var(--neu-shadow-dark-2),
+        inset -4px -4px 9px var(--neu-shadow-dark-1);
+}
+
+.neu-toggle-thumb {
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
+}
+
+/* =========================================================================
+   Neumorphism — navy chrome variant (header + sidebar)
+   The header/sidebar keep their brand navy color in both light and dark
+   mode, so this is a single fixed-color token set (not toggled by
+   `.dark`), separate from the light/dark content-area tokens above.
+   Same visibility fix as above: raised elements are a shade lighter
+   than the navy base instead of matching it exactly.
+   ========================================================================= */
+
+:root {
+    --neu-navy-bg: #0B1849;
+    --neu-navy-raised-bg: #14225E;
+    --neu-navy-shadow-1: rgba(255, 255, 255, 0.08);
+    --neu-navy-shadow-2: rgba(0, 0, 0, 0.65);
+}
+
+.neu-navy-surface {
+    background: var(--neu-navy-bg);
+}
+
+/* Raised chip/button on navy (icon buttons, nav items on hover) */
+.neu-navy-raised {
+    background: var(--neu-navy-raised-bg);
+    box-shadow:
+        4px 4px 9px var(--neu-navy-shadow-2),
+        -3px -3px 8px var(--neu-navy-shadow-1);
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.neu-navy-raised:hover {
+    box-shadow:
+        5px 5px 12px var(--neu-navy-shadow-2),
+        -4px -4px 10px var(--neu-navy-shadow-1);
+}
+
+.neu-navy-raised:active {
+    box-shadow:
+        inset 2px 2px 5px var(--neu-navy-shadow-2),
+        inset -2px -2px 5px var(--neu-navy-shadow-1);
+}
+
+/* Pressed-in well on navy (academic term pill, active nav item track) */
+.neu-navy-inset {
+    background: #071235;
+    box-shadow:
+        inset 3px 3px 7px var(--neu-navy-shadow-2),
+        inset -2px -2px 6px var(--neu-navy-shadow-1);
+}
+
+/* Active nav item: keeps the brand blue fill (so current page is still
+   unambiguous), with a soft glow instead of a hard block edge. */
+.neu-navy-active {
+    background: #2563EB;
+    box-shadow:
+        2px 2px 6px var(--neu-navy-shadow-2),
+        0 0 14px 1px rgba(37, 99, 235, 0.45);
 }

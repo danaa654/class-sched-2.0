@@ -418,19 +418,22 @@ const onUpdateAccount = () => {
                 <TabPanels>
                     <!-- Users Tab -->
                     <TabPanel value="users">
+                        <div class="neu-card rounded-2xl transition-colors duration-300">
                         <Card
-                            :pt="{ root: { class: ['app-glass-card', 'max-w-full', isDark ? 'is-dark' : 'is-light'] } }"
+                            class="!rounded-2xl !bg-transparent !border-0 !shadow-none max-w-full"
+                            :pt="{ body: { class: '!bg-transparent' } }"
                         >
                             <template #content>
                                 <!-- Top Toolbar -->
                                 <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4">
                                     <template #start>
                                         <span class="relative w-full sm:w-80">
-                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
                                                 v-model="search"
                                                 placeholder="Search by employee ID, name or email"
-                                                class="w-full !pl-9"
+                                                class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                                :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                             />
                                         </span>
                                     </template>
@@ -442,7 +445,8 @@ const onUpdateAccount = () => {
                                 <!-- Users Table -->
                                 <DataTable
                                     :value="users"
-                                    class="rounded-xl overflow-hidden"
+                                    class="neu-inset neu-table rounded-xl overflow-hidden"
+                                    :class="isDark ? 'neu-table-dark' : ''"
                                     stripedRows
                                     responsiveLayout="scroll"
                                     :globalFilterFields="['employeeId', 'fullName', 'email']"
@@ -495,12 +499,15 @@ const onUpdateAccount = () => {
                                 </DataTable>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
 
                     <!-- Manage Account Tab (Administrator only) -->
                     <TabPanel v-if="isAdministrator" value="account">
+                        <div class="neu-card rounded-2xl transition-colors duration-300">
                         <Card
-                            :pt="{ root: { class: ['app-glass-card', 'max-w-2xl', isDark ? 'is-dark' : 'is-light'] } }"
+                            class="!rounded-2xl !bg-transparent !border-0 !shadow-none max-w-2xl"
+                            :pt="{ body: { class: '!bg-transparent' } }"
                         >
                             <template #content>
                                 <h2 class="text-lg font-bold mb-1" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Manage Account</h2>
@@ -508,7 +515,7 @@ const onUpdateAccount = () => {
                                     Update your own Administrator profile and password.
                                 </p>
 
-                                <form class="pt-1" autocomplete="off" @submit.prevent="onUpdateAccount">
+                                <form class="pt-1 neu-form" autocomplete="off" @submit.prevent="onUpdateAccount">
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                         <FloatLabel variant="on">
                                             <InputText
@@ -615,6 +622,7 @@ const onUpdateAccount = () => {
                                 </form>
                             </template>
                         </Card>
+                        </div>
                     </TabPanel>
                 </TabPanels>
             </Tabs>
@@ -624,16 +632,21 @@ const onUpdateAccount = () => {
         <Dialog
             v-model:visible="addUserVisible"
             modal
-            :style="{ width: '800px' }"
+            :style="{ width: '800px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: ['app-glass-dialog', isDark ? 'is-dark dark-scope' : 'is-light'] } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
         >
             <template #header>
                 <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Create System User</span>
             </template>
 
-            <form class="pt-2" autocomplete="off" @submit.prevent="onCreateUser">
+            <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onCreateUser">
                 <!-- Employee ID / Role -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <FloatLabel variant="on">
@@ -857,16 +870,21 @@ const onUpdateAccount = () => {
         <Dialog
             v-model:visible="editUserVisible"
             modal
-            :style="{ width: '800px' }"
+            :style="{ width: '800px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: ['app-glass-dialog', isDark ? 'is-dark dark-scope' : 'is-light'] } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
         >
             <template #header>
                 <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Edit System User</span>
             </template>
 
-            <form class="pt-2" autocomplete="off" @submit.prevent="onUpdateUser">
+            <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onUpdateUser">
                 <!-- Employee ID / Role -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <FloatLabel variant="on">

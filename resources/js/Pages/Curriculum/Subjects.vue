@@ -190,28 +190,28 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
     <AppLayout>
         <template #header>
-            <span class="text-lg font-semibold text-[#1E293B]">Curriculum</span>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Curriculum</span>
         </template>
 
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Breadcrumb -->
-            <div class="mb-4 flex items-center gap-2 text-sm text-slate-500">
-                <Link :href="route('curriculums')" class="hover:text-[#1E293B] hover:underline">Curriculum</Link>
+            <div class="mb-4 flex items-center gap-2 text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                <Link :href="route('curriculums')" class="hover:underline" :class="isDark ? 'hover:text-white' : 'hover:text-[#1E293B]'">Curriculum</Link>
                 <i class="pi pi-angle-right text-xs"></i>
-                <span class="text-slate-700 font-medium">
+                <span class="font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">
                     {{ curriculum.name }} ({{ curriculum.start_year }}–{{ curriculum.end_year }})
                 </span>
                 <i class="pi pi-angle-right text-xs"></i>
-                <span class="text-slate-700 font-medium">Subjects</span>
+                <span class="font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">Subjects</span>
             </div>
 
             <!-- Page Title -->
             <div class="mb-8 flex items-start justify-between gap-4 flex-wrap">
                 <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">
+                    <h1 class="text-2xl font-bold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                         {{ curriculum.name }}
                     </h1>
-                    <p class="mt-1 text-slate-500">
+                    <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                         {{ curriculum.major?.name || 'No Major' }} · {{ curriculum.start_year }}–{{ curriculum.end_year }} ·
                         Manage the subjects that make up this curriculum, arranged by Year Level and Semester.
                     </p>
@@ -225,13 +225,17 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                 />
             </div>
 
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
                     <!-- Top Toolbar -->
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                         <template #start>
-                            <div class="flex items-center gap-2">
-                                <span class="text-sm text-slate-500">Group by</span>
+                            <div class="flex items-center gap-2 neu-form">
+                                <span class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Group by</span>
                                 <Select
                                     v-model="sortBy"
                                     :options="sortByOptions"
@@ -250,22 +254,22 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     <!-- Grouped Subject Sections -->
                     <div class="flex flex-col gap-8">
                         <div v-for="section in groupedSections" :key="section.label">
-                            <h2 class="text-lg font-bold text-[#1E293B] mb-3 pb-2 border-b border-slate-200">
+                            <h2 class="text-lg font-bold mb-3 pb-2 border-b" :class="isDark ? 'text-white border-white/10' : 'text-[#1E293B] border-slate-200'">
                                 {{ section.label }}
                             </h2>
 
                             <div v-for="sub in section.subsections" :key="sub.label" class="mb-6 last:mb-0">
-                                <h3 class="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2 pl-1">
+                                <h3 class="text-sm font-semibold uppercase tracking-wide mb-2 pl-1" :class="isDark ? 'text-slate-400' : 'text-slate-600'">
                                     {{ sub.label }}
                                 </h3>
 
-                                <div v-if="sub.rows.length === 0" class="text-sm text-slate-400 italic pl-1 py-3">
+                                <div v-if="sub.rows.length === 0" class="text-sm italic pl-1 py-3" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                                     No subjects added yet.
                                 </div>
 
-                                <div v-else class="overflow-x-auto rounded-xl border border-slate-100">
+                                <div v-else class="overflow-x-auto rounded-xl neu-inset" :class="isDark ? '' : 'border border-slate-100'" :style="isDark ? {} : { backgroundColor: '#F7F4ED' }">
                                     <table class="w-full text-sm">
-                                        <thead class="bg-slate-50 text-slate-500 text-left">
+                                        <thead class="text-left" :class="isDark ? 'bg-white/5 text-slate-400' : 'bg-slate-50 text-slate-500'">
                                             <tr>
                                                 <th class="px-4 py-2 font-medium">Code</th>
                                                 <th class="px-4 py-2 font-medium">Title</th>
@@ -279,12 +283,12 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 <th class="px-4 py-2 font-medium text-right">Actions</th>
                                             </tr>
                                         </thead>
-                                        <tbody class="divide-y divide-slate-100">
-                                            <tr v-for="row in sub.rows" :key="row.id" class="hover:bg-slate-50">
-                                                <td class="px-4 py-2 font-medium text-[#1E293B]">
+                                        <tbody class="divide-y" :class="isDark ? 'divide-white/10' : 'divide-slate-100'">
+                                            <tr v-for="row in sub.rows" :key="row.id" :class="isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'">
+                                                <td class="px-4 py-2 font-medium" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                                                     {{ row.subject?.subject_code }}
                                                 </td>
-                                                <td class="px-4 py-2">{{ row.subject?.subject_title }}</td>
+                                                <td class="px-4 py-2" :class="isDark ? 'text-slate-200' : 'text-slate-700'">{{ row.subject?.subject_title }}</td>
                                                 <td class="px-4 py-2">
                                                     <Tag
                                                         :value="row.subject?.category"
@@ -299,9 +303,9 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                         <i class="pi pi-map-marker text-[10px]"></i>
                                                         Practicum / OJT
                                                     </span>
-                                                    <span v-else class="text-slate-500 text-sm">Regular</span>
+                                                    <span v-else class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Regular</span>
                                                 </td>
-                                                <td class="px-4 py-2 text-center">{{ row.subject?.units }}</td>
+                                                <td class="px-4 py-2 text-center" :class="isDark ? 'text-slate-200' : 'text-slate-700'">{{ row.subject?.units }}</td>
                                                 <td class="px-4 py-2 text-center">
                                                     {{ row.subject?.subject_type === 'practicum' ? '—' : row.subject?.lecture_hours }}
                                                 </td>
@@ -312,10 +316,10 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     {{ row.subject?.subject_type === 'practicum' ? (row.subject?.required_hours ?? '—') : '—' }}
                                                 </td>
                                                 <td class="px-4 py-2">
-                                                    <span v-if="row.prerequisite" class="text-slate-700">
+                                                    <span v-if="row.prerequisite" :class="isDark ? 'text-slate-200' : 'text-slate-700'">
                                                         {{ row.prerequisite.subject_code }}
                                                     </span>
-                                                    <span v-else class="text-slate-400">—</span>
+                                                    <span v-else :class="isDark ? 'text-slate-500' : 'text-slate-400'">—</span>
                                                 </td>
                                                 <td class="px-4 py-2">
                                                     <div class="flex gap-1 justify-end">
@@ -348,6 +352,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </div>
                 </template>
             </Card>
+            </div>
         </div>
 
         <!-- Add / Edit Subject Dialog -->
@@ -356,13 +361,19 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :header="editingItem ? 'Edit Curriculum Subject' : 'Add Subject'"
             modal
             class="w-full max-w-lg"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :style="isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeDialog"
         >
-            <div class="flex flex-col gap-4">
+            <div class="flex flex-col gap-4 neu-form">
                 <!-- Curriculum (read only) -->
                 <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">Curriculum</label>
+                    <label class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Curriculum</label>
                     <InputText
                         :modelValue="`${curriculum.name} (${curriculum.start_year}–${curriculum.end_year})`"
                         readonly
@@ -373,7 +384,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
                 <!-- Subject -->
                 <div class="flex flex-col gap-1">
-                    <label for="subject_id" class="text-sm font-medium text-slate-700">
+                    <label for="subject_id" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Subject <span class="text-red-500">*</span>
                     </label>
                     <Select
@@ -397,7 +408,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                 <!-- Year Level / Semester -->
                 <div class="grid grid-cols-2 gap-4">
                     <div class="flex flex-col gap-1">
-                        <label for="year_level" class="text-sm font-medium text-slate-700">
+                        <label for="year_level" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                             Year Level <span class="text-red-500">*</span>
                         </label>
                         <Select
@@ -417,7 +428,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </div>
 
                     <div class="flex flex-col gap-1">
-                        <label for="semester" class="text-sm font-medium text-slate-700">
+                        <label for="semester" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                             Semester <span class="text-red-500">*</span>
                         </label>
                         <Select
@@ -439,7 +450,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
                 <!-- Prerequisite -->
                 <div class="flex flex-col gap-1">
-                    <label for="prerequisite_subject_id" class="text-sm font-medium text-slate-700">
+                    <label for="prerequisite_subject_id" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Prerequisite
                     </label>
                     <Select
@@ -463,7 +474,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
                 <!-- Remarks -->
                 <div class="flex flex-col gap-1">
-                    <label for="remarks" class="text-sm font-medium text-slate-700">Remarks</label>
+                    <label for="remarks" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Remarks</label>
                     <Textarea
                         id="remarks"
                         v-model="form.remarks"

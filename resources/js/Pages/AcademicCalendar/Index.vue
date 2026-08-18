@@ -405,11 +405,11 @@ const helpPopover = ref(null);
             </Popover>
 
             <!-- Academic Terms -->
-            <Card
-                class="!rounded-2xl border shadow-sm transition-colors duration-300"
-                :class="isDark ? '!border-white/10 !bg-white/[0.06] !backdrop-blur-xl' : '!border-slate-100 !bg-white'"
-                :pt="{ body: { class: isDark ? '!bg-transparent' : '' } }"
-            >
+            <div class="neu-card rounded-2xl transition-colors duration-300">
+                <Card
+                    class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                    :pt="{ body: { class: '!bg-transparent' } }"
+                >
                 <template #content>
                     <!-- Top Toolbar -->
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
@@ -419,8 +419,8 @@ const helpPopover = ref(null);
                                 <InputText
                                     v-model="academicTermSearch"
                                     placeholder="Search by school year or semester"
-                                    class="w-full !pl-9"
-                                    :class="isDark ? '!border-white/15 !bg-white/[0.06] !text-white placeholder:!text-slate-500' : ''"
+                                    class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                    :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                 />
                             </span>
                         </template>
@@ -429,7 +429,8 @@ const helpPopover = ref(null);
                                 <Button
                                     icon="pi pi-refresh"
                                     severity="secondary"
-                                    outlined
+                                    text
+                                    class="neu-icon-well !rounded-full"
                                     :loading="academicTermLoading"
                                     @click="onRefreshAcademicTerms"
                                     aria-label="Refresh"
@@ -444,7 +445,7 @@ const helpPopover = ref(null);
                         :value="academicTerms.data"
                         :loading="academicTermLoading"
                         dataKey="id"
-                        class="rounded-xl overflow-hidden"
+                        class="neu-inset rounded-xl overflow-hidden"
                         :class="isDark ? 'academic-calendar-table-dark' : ''"
                         stripedRows
                         responsiveLayout="scroll"
@@ -551,21 +552,22 @@ const helpPopover = ref(null);
                         </Column>
                     </DataTable>
                 </template>
-            </Card>
+                </Card>
+            </div>
         </div>
 
         <!-- Add / Edit Academic Term Modal -->
         <Dialog
             v-model:visible="academicTermDialogVisible"
             modal
-            :style="{ width: '620px' }"
+            :style="{ width: '620px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
             :pt="{
-                root: { class: isDark ? '!bg-[#0F1730] !border !border-white/10 !text-white' : '' },
-                header: { class: isDark ? '!bg-[#0F1730] !border-b !border-white/10' : '' },
-                content: { class: isDark ? '!bg-[#0F1730]' : '' },
-                footer: { class: isDark ? '!bg-[#0F1730] !border-t !border-white/10' : '' },
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
             }"
         >
             <template #header>
@@ -574,7 +576,7 @@ const helpPopover = ref(null);
                 </span>
             </template>
 
-            <form class="pt-2" autocomplete="off" @submit.prevent="onSaveAcademicTerm">
+            <form class="pt-2 academic-term-form" autocomplete="off" @submit.prevent="onSaveAcademicTerm">
                 <!-- School Year -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <FloatLabel variant="on">
@@ -767,17 +769,33 @@ const helpPopover = ref(null);
     background: transparent;
     color: #e2e8f0;
 }
-.academic-calendar-table-dark :deep(.p-datatable-tbody > tr.p-datatable-row-striped) {
-    background: rgba(255, 255, 255, 0.03);
+/* PrimeVue stripes rows via :nth-child, not a .p-datatable-row-striped
+   class — targeting that class was a no-op, which is why striped rows
+   fell back to PrimeVue's own (light) surface token even in dark mode. */
+.academic-calendar-table-dark :deep(.p-datatable-tbody > tr:nth-child(even)) {
+    background: rgba(255, 255, 255, 0.045) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 2px 6px rgba(0, 0, 0, 0.35) !important;
+    position: relative;
 }
 .academic-calendar-table-dark :deep(.p-datatable-tbody > tr > td) {
     border-color: rgba(255, 255, 255, 0.08);
 }
 .academic-calendar-table-dark :deep(.p-datatable-tbody > tr:hover) {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.08) !important;
 }
 .academic-calendar-table-dark :deep(.p-paginator) {
     background: transparent;
     color: #cbd5e1;
+}
+
+/* Light mode: same nth-child fix, plus a matching soft "lifted" shadow on
+   striped rows so they read as a raised band rather than flat shading. */
+:deep(.p-datatable-tbody > tr:nth-child(even)) {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.6),
+        0 2px 6px rgba(30, 41, 59, 0.08);
+    position: relative;
 }
 </style>

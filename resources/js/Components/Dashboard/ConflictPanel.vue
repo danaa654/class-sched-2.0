@@ -36,10 +36,9 @@ const cardPt = computed(() => ({
 </script>
 
 <template>
-    <div class="neon-frame-static rounded-2xl p-[1.5px]">
+    <div class="neu-card rounded-2xl">
         <Card
-            class="!rounded-[15px] transition-colors duration-300"
-            :class="isDark ? '!bg-[#0B1220]/90' : '!bg-white/90'"
+            class="!rounded-2xl !bg-transparent transition-colors duration-300"
             :pt="cardPt"
         >
         <template #title>
@@ -48,8 +47,8 @@ const cardPt = computed(() => ({
         <template #content>
             <div
                 v-if="totalIssues === 0"
-                class="flex items-center gap-3 rounded-xl border px-4 py-5"
-                :class="isDark ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-emerald-100 bg-emerald-50'"
+                class="neu-inset neu-glow flex items-center gap-3 rounded-xl px-4 py-5"
+                :style="{ '--neu-glow-color': isDark ? 'rgba(52, 211, 153, 0.25)' : 'rgba(16, 185, 129, 0.25)' }"
             >
                 <i class="pi pi-check-circle text-2xl" :class="isDark ? 'text-emerald-400' : 'text-emerald-600'"></i>
                 <p class="font-medium" :class="isDark ? 'text-emerald-300' : 'text-emerald-800'">No scheduling conflicts detected.</p>
@@ -59,21 +58,19 @@ const cardPt = computed(() => ({
                 <div
                     v-for="item in items"
                     :key="item.key"
-                    class="rounded-xl p-[1.5px]"
-                    :class="conflicts[item.key] > 0 ? 'neon-frame-static' : ''"
+                    class="rounded-xl"
+                    :class="conflicts[item.key] > 0 ? 'neu-card neu-glow' : 'neu-inset'"
+                    :style="conflicts[item.key] > 0 ? { '--neu-glow-color': isDark ? 'rgba(248, 113, 113, 0.25)' : 'rgba(220, 38, 38, 0.2)' } : {}"
                 >
                     <Link
                         :href="route('scheduling.section-subjects')"
-                        class="flex items-center gap-3 rounded-[10px] p-4 transition-colors"
-                        :class="conflicts[item.key] > 0
-                            ? (isDark ? 'bg-[#0B1220]/90 hover:bg-[#0B1220]/75' : 'bg-white/90 hover:bg-white/70')
-                            : (isDark ? 'border border-white/10 hover:bg-white/[0.06]' : 'border border-slate-100 hover:bg-slate-50')"
+                        class="flex items-center gap-3 rounded-xl p-4 transition-colors"
                     >
                         <span
-                            class="flex h-10 w-10 flex-none items-center justify-center rounded-full"
+                            class="neu-icon-well flex h-10 w-10 flex-none items-center justify-center rounded-full"
                             :class="conflicts[item.key] > 0
-                                ? (isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-600')
-                                : (isDark ? 'bg-white/10 text-slate-400' : 'bg-slate-100 text-slate-400')"
+                                ? (isDark ? 'text-red-400' : 'text-red-600')
+                                : (isDark ? 'text-slate-400' : 'text-slate-400')"
                         >
                             <i :class="['pi', item.icon]"></i>
                         </span>

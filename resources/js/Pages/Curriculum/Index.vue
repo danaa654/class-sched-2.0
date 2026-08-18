@@ -286,7 +286,7 @@ const onRestore = (curriculum) => {
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     Curriculum
                     <InfoPopover
                         title="Curriculum"
@@ -300,22 +300,27 @@ const onRestore = (curriculum) => {
                         ]"
                     />
                 </h1>
-                <p class="mt-1 text-slate-500">
+                <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage the academic plans (subjects offered per Major) used across school years.
                 </p>
             </div>
 
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
                     <!-- Top Toolbar -->
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                         <template #start>
                             <span class="relative w-full sm:w-80">
-                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                 <InputText
                                     v-model="search"
                                     placeholder="Search by code, name, major or start/end year"
-                                    class="w-full !pl-9"
+                                    class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                    :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                 />
                             </span>
                         </template>
@@ -324,7 +329,8 @@ const onRestore = (curriculum) => {
                                 <Button
                                     icon="pi pi-refresh"
                                     severity="secondary"
-                                    outlined
+                                    text
+                                    class="neu-icon-well !rounded-full"
                                     :loading="loading"
                                     @click="onRefresh"
                                     aria-label="Refresh"
@@ -339,7 +345,8 @@ const onRestore = (curriculum) => {
                         :value="curriculums.data"
                         :loading="loading"
                         dataKey="id"
-                        class="rounded-xl overflow-hidden"
+                        class="neu-inset neu-table rounded-xl overflow-hidden"
+                        :class="isDark ? 'neu-table-dark' : ''"
                         stripedRows
                         responsiveLayout="scroll"
                         lazy
@@ -434,16 +441,22 @@ const onRestore = (curriculum) => {
                     </DataTable>
                 </template>
             </Card>
+            </div>
         </div>
 
         <!-- Add / Edit Curriculum Modal -->
         <Dialog
             v-model:visible="dialogVisible"
             modal
-            :style="{ width: '700px' }"
+            :style="{ width: '700px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
         >
             <template #header>
                 <span class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
@@ -451,7 +464,7 @@ const onRestore = (curriculum) => {
                 </span>
             </template>
 
-            <form class="pt-2" autocomplete="off" @submit.prevent="onSave">
+            <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onSave">
                 <!-- Major -->
                 <div class="grid grid-cols-1 gap-5">
                     <FloatLabel variant="on">
@@ -485,9 +498,13 @@ const onRestore = (curriculum) => {
                         <label for="curriculumStartYear">Start Year *</label>
                     </FloatLabel>
 
-                    <div v-if="yearRangeLabel" class="flex flex-col justify-center px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-100">
-                        <span class="text-[11px] font-medium uppercase tracking-wide text-emerald-600">Curriculum Duration</span>
-                        <span class="text-sm font-semibold text-emerald-700">{{ yearRangeLabel }}</span>
+                    <div
+                        v-if="yearRangeLabel"
+                        class="flex flex-col justify-center px-3 py-1 rounded-lg border"
+                        :class="isDark ? 'bg-emerald-500/10 border-emerald-400/20' : 'bg-emerald-50 border-emerald-100'"
+                    >
+                        <span class="text-[11px] font-medium uppercase tracking-wide" :class="isDark ? 'text-emerald-400' : 'text-emerald-600'">Curriculum Duration</span>
+                        <span class="text-sm font-semibold" :class="isDark ? 'text-emerald-300' : 'text-emerald-700'">{{ yearRangeLabel }}</span>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 gap-1 mt-1">
@@ -551,7 +568,7 @@ const onRestore = (curriculum) => {
                         inputId="curriculumAllowNewStudents"
                         binary
                     />
-                    <label for="curriculumAllowNewStudents" class="text-sm text-[#1E293B]">
+                    <label for="curriculumAllowNewStudents" class="text-sm" :class="isDark ? 'text-slate-200' : 'text-[#1E293B]'">
                         Allow New Students
                     </label>
                 </div>

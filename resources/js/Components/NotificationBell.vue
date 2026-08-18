@@ -127,66 +127,171 @@ onUnmounted(() => {
     <div class="relative" data-notification-bell>
         <button
             type="button"
-            class="relative flex h-10 items-center justify-center gap-1 rounded-full border border-white/20 bg-white/10 px-3 text-white transition-colors hover:bg-white/20"
+            class="neu-bell relative flex h-11 w-11 items-center justify-center rounded-2xl transition-transform duration-150 active:scale-95"
             :aria-label="hasUnread ? `${unreadCount} unread notifications` : 'Notifications'"
             @click="toggleOpen"
         >
-            <i class="pi pi-bell text-base"></i>
-            <span v-if="hasUnread" class="text-xs font-semibold">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+            <i class="pi pi-bell text-[17px] text-slate-200"></i>
+            <span
+                v-if="hasUnread"
+                class="neu-badge absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
+            >
+                {{ unreadCount > 99 ? '99+' : unreadCount }}
+            </span>
         </button>
 
+        <transition name="neu-fade">
         <div
             v-if="isOpen"
-            class="absolute right-0 z-50 mt-2 w-96 max-w-[90vw] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-[#0F1B4C]"
+            class="neu-panel absolute right-0 z-50 mt-3 w-96 max-w-[90vw] overflow-hidden rounded-2xl"
         >
-            <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-                <span class="text-sm font-semibold text-slate-800 dark:text-white">Notifications</span>
+            <div class="flex items-center justify-between px-4 py-3.5">
+                <span class="text-sm font-bold tracking-wide text-white">Notifications</span>
                 <button
                     v-if="hasUnread"
                     type="button"
-                    class="text-xs font-medium text-blue-600 hover:underline dark:text-blue-300"
+                    class="text-xs font-medium text-blue-300 transition-colors hover:text-blue-200"
                     @click="markAllRead"
                 >
                     Mark all read
                 </button>
             </div>
 
-            <div class="max-h-96 overflow-y-auto">
-                <div v-if="isLoading" class="px-4 py-6 text-center text-sm text-slate-400">
+            <div class="neu-divider"></div>
+
+            <div class="neu-scroll max-h-96 overflow-y-auto px-2 py-2">
+                <div v-if="isLoading" class="px-4 py-8 text-center text-sm text-slate-400">
                     Loading…
                 </div>
-                <div v-else-if="notifications.length === 0" class="px-4 py-6 text-center text-sm text-slate-400">
-                    No notifications yet.
+                <div v-else-if="notifications.length === 0" class="flex flex-col items-center gap-2 px-4 py-10 text-center">
+                    <i class="pi pi-bell-slash text-2xl text-slate-500"></i>
+                    <span class="text-sm text-slate-400">No notifications yet.</span>
                 </div>
                 <button
                     v-for="notification in notifications"
                     :key="notification.id"
                     type="button"
-                    class="flex w-full flex-col gap-0.5 border-b border-slate-100 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-white/5"
-                    :class="!notification.is_read ? 'bg-blue-50/60 dark:bg-blue-500/10' : ''"
+                    class="neu-item mb-1.5 flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors last:mb-0"
+                    :class="!notification.is_read ? 'neu-item--unread' : ''"
                     @click="openNotification(notification)"
                 >
-                    <span class="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-white">
-                        <span>{{ iconFor(notification.type) }}</span>
-                        <span>{{ notification.title }}</span>
-                        <span
-                            v-if="notification.priority && notification.priority !== 'IMPORTANT'"
-                            class="h-1.5 w-1.5 shrink-0 rounded-full"
-                            :class="priorityColor(notification.priority)"
-                            :title="notification.priority"
-                        ></span>
-                        <span v-if="!notification.is_read" class="ml-auto h-2 w-2 shrink-0 rounded-full bg-blue-500"></span>
+                    <span class="neu-icon-chip flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px]">
+                        {{ iconFor(notification.type) }}
                     </span>
-                    <span class="whitespace-pre-line text-xs text-slate-600 dark:text-slate-300">{{ notification.message }}</span>
-                    <span class="text-[11px] text-slate-400">{{ timeAgo(notification.created_at) }}</span>
+                    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span class="flex items-center gap-1.5 text-sm font-semibold text-white">
+                            <span class="truncate">{{ notification.title }}</span>
+                            <span
+                                v-if="notification.priority && notification.priority !== 'IMPORTANT'"
+                                class="h-1.5 w-1.5 shrink-0 rounded-full"
+                                :class="priorityColor(notification.priority)"
+                                :title="notification.priority"
+                            ></span>
+                        </span>
+                        <span class="whitespace-pre-line text-xs leading-snug text-slate-300">{{ notification.message }}</span>
+                        <span class="text-[11px] text-slate-500">{{ timeAgo(notification.created_at) }}</span>
+                    </span>
+                    <span v-if="!notification.is_read" class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-400"></span>
                 </button>
             </div>
 
-            <div class="border-t border-slate-200 px-4 py-2 text-center dark:border-slate-700">
-                <a :href="route('notifications')" class="text-xs font-medium text-blue-600 hover:underline dark:text-blue-300">
+            <div class="neu-divider"></div>
+
+            <div class="px-4 py-2.5 text-center">
+                <a :href="route('notifications')" class="text-xs font-medium text-blue-300 transition-colors hover:text-blue-200">
                     View all notifications
                 </a>
             </div>
         </div>
+        </transition>
     </div>
 </template>
+
+<style scoped>
+.neu-bell {
+    background: var(--neu-navy-raised-bg, #14225E);
+    box-shadow:
+        3px 3px 6px rgba(0, 0, 0, 0.55),
+        -2px -2px 5px rgba(255, 255, 255, 0.06);
+}
+.neu-bell:hover {
+    box-shadow:
+        4px 4px 8px rgba(0, 0, 0, 0.6),
+        -2px -2px 6px rgba(255, 255, 255, 0.08);
+}
+.neu-bell:active {
+    box-shadow:
+        inset 2px 2px 5px rgba(0, 0, 0, 0.6),
+        inset -2px -2px 5px rgba(255, 255, 255, 0.06);
+}
+
+.neu-badge {
+    background: linear-gradient(145deg, #f87171, #ef4444);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* Dropdown panel — same navy neumorphic surface as the dashboard cards,
+   raised off the header with a soft outer shadow instead of a border. */
+.neu-panel {
+    background: var(--neu-navy-raised-bg, #14225E);
+    box-shadow:
+        0 10px 24px rgba(0, 0, 0, 0.45),
+        0 2px 6px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.neu-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* Each row reads as a subtly inset well on the panel; unread rows get
+   a faint blue-tinted inset instead of a flat highlight block. */
+.neu-item {
+    background: rgba(255, 255, 255, 0.02);
+}
+.neu-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+.neu-item--unread {
+    background: rgba(59, 130, 246, 0.08);
+}
+.neu-item--unread:hover {
+    background: rgba(59, 130, 246, 0.13);
+}
+
+.neu-icon-chip {
+    background: var(--neu-navy-bg, #0B1849);
+    box-shadow:
+        2px 2px 4px rgba(0, 0, 0, 0.55),
+        -1px -1px 3px rgba(255, 255, 255, 0.05);
+}
+
+.neu-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.neu-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+.neu-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+}
+.neu-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+.neu-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.neu-fade-enter-active,
+.neu-fade-leave-active {
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.neu-fade-enter-from,
+.neu-fade-leave-to {
+    opacity: 0;
+    transform: translateY(-4px);
+}
+</style>

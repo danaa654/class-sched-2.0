@@ -436,7 +436,11 @@ const placementStatusSeverity = (status) => {
                 />
             </div>
 
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
                     <Tabs v-model:value="activeTab">
                         <TabList>
@@ -453,20 +457,20 @@ const placementStatusSeverity = (status) => {
                                     <Button label="Edit Information" icon="pi pi-pencil" severity="secondary" outlined @click="openEdit" />
                                 </div>
 
-                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    <div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Faculty ID</p>
                                         <p class="mt-1 text-slate-800 font-medium">{{ faculty.faculty_id }}</p>
                                     </div>
-                                    <div>
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Full Name</p>
                                         <p class="mt-1 text-slate-800 font-medium">{{ fullName }}</p>
                                     </div>
-                                    <div>
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Employment Type</p>
                                         <p class="mt-1 text-slate-800 font-medium">{{ faculty.employment_type }}</p>
                                     </div>
-                                    <div>
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">College</p>
                                         <p class="mt-1">
                                             <span v-if="faculty.college?.name" class="text-slate-800 font-medium">{{ faculty.college.name }}</span>
@@ -480,19 +484,19 @@ const placementStatusSeverity = (status) => {
                                             may teach General Education subjects.
                                         </p>
                                     </div>
-                                    <div>
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Max Teaching Units</p>
                                         <p class="mt-1 text-slate-800 font-medium">{{ faculty.max_teaching_units }}</p>
                                     </div>
-                                    <div>
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Email</p>
                                         <p class="mt-1 text-slate-800 font-medium">{{ faculty.email || '—' }}</p>
                                     </div>
-                                    <div>
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Contact Number</p>
                                         <p class="mt-1 text-slate-800 font-medium">{{ faculty.contact_number || '—' }}</p>
                                     </div>
-                                    <div class="sm:col-span-2 lg:col-span-3">
+                                    <div class="neu-inset rounded-xl p-4 sm:col-span-2 lg:col-span-3">
                                         <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Remarks</p>
                                         <p class="mt-1 text-slate-800 font-medium whitespace-pre-line">{{ faculty.remarks || '—' }}</p>
                                     </div>
@@ -511,7 +515,7 @@ const placementStatusSeverity = (status) => {
                                     filterPlaceholder="Search subjects"
                                     display="chip"
                                     placeholder="Select subjects this faculty member can teach"
-                                    class="w-full mt-1"
+                                    class="w-full mt-1 neu-inset !border-none"
                                     :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                 >
                                     <template #option="{ option }">
@@ -531,7 +535,13 @@ const placementStatusSeverity = (status) => {
                                     />
                                 </div>
 
-                                <DataTable :value="assignedSubjects" dataKey="id" class="rounded-xl overflow-hidden mt-4" stripedRows>
+                                <DataTable
+                                    :value="assignedSubjects"
+                                    dataKey="id"
+                                    class="neu-inset neu-table rounded-xl overflow-hidden mt-4"
+                                    :class="isDark ? 'neu-table-dark' : ''"
+                                    stripedRows
+                                >
                                     <template #empty>
                                         <div class="text-center py-8">
                                             <p class="text-slate-500 font-medium text-sm">No subjects assigned yet.</p>
@@ -572,8 +582,7 @@ const placementStatusSeverity = (status) => {
                                     <div
                                         v-for="day in weekDays"
                                         :key="day"
-                                        class="rounded-xl border border-slate-100 p-3"
-                                        :class="availabilityByDay[day]?.is_available ? 'bg-emerald-50/50' : 'bg-slate-50'"
+                                        class="neu-inset rounded-xl p-3"
                                     >
                                         <p class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{{ day }}</p>
                                         <template v-if="availabilityByDay[day]?.is_available">
@@ -601,7 +610,13 @@ const placementStatusSeverity = (status) => {
                                     />
                                 </div>
 
-                                <DataTable :value="faculty.availabilities ?? []" dataKey="id" class="rounded-xl overflow-hidden" stripedRows>
+                                <DataTable
+                                    :value="faculty.availabilities ?? []"
+                                    dataKey="id"
+                                    class="neu-inset neu-table rounded-xl overflow-hidden"
+                                    :class="isDark ? 'neu-table-dark' : ''"
+                                    stripedRows
+                                >
                                     <template #empty>
                                         <div class="text-center py-8">
                                             <p class="text-slate-500 font-medium text-sm">No availability records yet.</p>
@@ -657,7 +672,7 @@ const placementStatusSeverity = (status) => {
                             <!-- WORKLOAD -->
                             <TabPanel value="workload">
                                 <div
-                                    class="mb-6 flex items-center justify-between rounded-xl border p-4"
+                                    class="mb-6 flex items-center justify-between rounded-xl p-4 neu-inset"
                                     :class="workloadStatusMeta.class"
                                 >
                                     <div>
@@ -673,15 +688,15 @@ const placementStatusSeverity = (status) => {
                                 </div>
 
                                 <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-                                    <div class="rounded-xl border border-slate-100 p-4">
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Maximum Load</p>
                                         <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ workload?.max ?? 0 }}</p>
                                     </div>
-                                    <div class="rounded-xl border border-slate-100 p-4">
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Current Assigned</p>
                                         <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ workload?.current ?? 0 }}</p>
                                     </div>
-                                    <div class="rounded-xl border border-slate-100 p-4">
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Remaining</p>
                                         <p
                                             class="mt-1 text-2xl font-bold"
@@ -690,7 +705,7 @@ const placementStatusSeverity = (status) => {
                                             {{ workload?.remaining ?? 0 }}
                                         </p>
                                     </div>
-                                    <div class="rounded-xl border border-slate-100 p-4">
+                                    <div class="neu-inset rounded-xl p-4">
                                         <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Assigned Subjects</p>
                                         <p class="mt-1 text-2xl font-bold text-[#1E293B]">{{ workload?.assigned_subjects ?? 0 }}</p>
                                     </div>
@@ -732,7 +747,8 @@ const placementStatusSeverity = (status) => {
                                         v-if="assignedPlacements.length"
                                         :value="assignedPlacements"
                                         dataKey="id"
-                                        class="text-sm"
+                                        class="text-sm neu-inset neu-table rounded-xl overflow-hidden"
+                                        :class="isDark ? 'neu-table-dark' : ''"
                                         stripedRows
                                     >
                                         <Column field="edp_code" header="EDP Code">
@@ -782,6 +798,7 @@ const placementStatusSeverity = (status) => {
                     </Tabs>
                 </template>
             </Card>
+            </div>
         </div>
 
         <!-- Edit Faculty Information Dialog -->
@@ -792,10 +809,15 @@ const placementStatusSeverity = (status) => {
             :style="{ width: '760px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeEdit"
         >
-            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveFaculty">
+            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 neu-form" @submit.prevent="onSaveFaculty">
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">Faculty ID <span class="text-red-500">*</span></label>
                     <InputText v-model="facultyForm.faculty_id" :invalid="!!facultyForm.errors.faculty_id" class="w-full" />
@@ -944,10 +966,15 @@ const placementStatusSeverity = (status) => {
             :style="{ width: '480px' }"
             :breakpoints="{ '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeAvailabilityDialog"
         >
-            <form class="grid grid-cols-1 gap-4" @submit.prevent="onSaveAvailability">
+            <form class="grid grid-cols-1 gap-4 neu-form" @submit.prevent="onSaveAvailability">
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">Day <span class="text-red-500">*</span></label>
                     <Select

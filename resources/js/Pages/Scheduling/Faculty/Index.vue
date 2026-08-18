@@ -246,13 +246,13 @@ const fullName = (faculty) => {
         <Toast />
 
         <template #header>
-            <span class="text-lg font-semibold text-[#1E293B]">Faculty Master</span>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Faculty Master</span>
         </template>
 
         <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
             <!-- Page Title -->
             <div class="mb-8">
-                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
+                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                     Faculty Master
                     <InfoPopover
                         title="Faculty Master"
@@ -267,23 +267,28 @@ const fullName = (faculty) => {
                         ]"
                     />
                 </h1>
-                <p class="mt-1 text-slate-500">
+                <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                     Manage faculty members available for teaching assignments.
                 </p>
             </div>
 
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
+            <div class="neu-card rounded-2xl transition-colors duration-300">
+            <Card
+                class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
+                :pt="{ body: { class: '!bg-transparent' } }"
+            >
                 <template #content>
                     <!-- Top Toolbar -->
                     <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3">
                         <template #start>
-                            <div class="flex flex-wrap items-center gap-3 w-full">
+                            <div class="flex flex-wrap items-center gap-3 w-full neu-form">
                                 <span class="relative w-full sm:w-80">
-                                    <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                    <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                     <InputText
                                         v-model="search"
                                         placeholder="Search by ID, name, or college"
-                                        class="w-full !pl-9"
+                                        class="neu-inset w-full !rounded-xl !border-none !pl-9"
+                                        :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                     />
                                 </span>
                                 <Select
@@ -301,7 +306,8 @@ const fullName = (faculty) => {
                                 <Button
                                     icon="pi pi-refresh"
                                     severity="secondary"
-                                    outlined
+                                    text
+                                    class="neu-icon-well !rounded-full"
                                     :loading="loading"
                                     @click="onRefresh"
                                     aria-label="Refresh"
@@ -312,15 +318,16 @@ const fullName = (faculty) => {
                     </Toolbar>
 
                     <!-- Faculty Table -->
-                    <p class="text-xs text-slate-400 mb-2 flex items-center gap-1">
-                        <i class="pi pi-eye text-slate-400"></i>
+                    <p class="text-xs mb-2 flex items-center gap-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
+                        <i class="pi pi-eye" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                         Click the view icon on a row to manage that faculty member's teaching qualifications, availability, and workload.
                     </p>
                     <DataTable
                         :value="faculties.data"
                         :loading="loading"
                         dataKey="id"
-                        class="rounded-xl overflow-hidden"
+                        class="neu-inset neu-table rounded-xl overflow-hidden"
+                        :class="isDark ? 'neu-table-dark' : ''"
                         stripedRows
                         responsiveLayout="scroll"
                         lazy
@@ -332,8 +339,8 @@ const fullName = (faculty) => {
                     >
                         <template #empty>
                             <div class="text-center py-10">
-                                <p class="text-slate-500 font-medium">No faculty members found.</p>
-                                <p class="text-slate-400 text-sm mt-1">
+                                <p class="font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-500'">No faculty members found.</p>
+                                <p class="text-sm mt-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                                     Click "Add Faculty" to create your first faculty record.
                                 </p>
                                 <Button
@@ -391,7 +398,7 @@ const fullName = (faculty) => {
                                     <span>
                                         {{ data.workload.status === 'overloaded' ? '🔴' : data.workload.status === 'high' ? '🟡' : '🟢' }}
                                     </span>
-                                    <span class="text-sm text-slate-700">
+                                    <span class="text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                                         {{ data.workload.current }} / {{ data.workload.max }} {{ data.workload.unit_label }}
                                     </span>
                                 </div>
@@ -455,6 +462,7 @@ const fullName = (faculty) => {
                     </DataTable>
                 </template>
             </Card>
+            </div>
         </div>
 
         <!-- Add Faculty Dialog -->
@@ -462,16 +470,21 @@ const fullName = (faculty) => {
             v-model:visible="addFacultyVisible"
             modal
             :header="editingFaculty ? 'Edit Faculty' : 'Add Faculty'"
-            :style="{ width: '760px' }"
+            :style="{ width: '760px', ...(isDark ? {} : { backgroundColor: 'var(--neu-card-light)' }) }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"
-            :pt="{ root: { class: isDark ? 'dark-scope' : '' } }"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
             @hide="closeAddFaculty"
         >
-            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4" @submit.prevent="onSaveFaculty">
+            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 neu-form" @submit.prevent="onSaveFaculty">
                 <!-- Faculty ID -->
                 <div class="flex flex-col gap-1">
-                    <label for="faculty_id" class="text-sm font-medium text-slate-700">
+                    <label for="faculty_id" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Faculty ID <span class="text-red-500">*</span>
                     </label>
                     <InputText
@@ -491,7 +504,7 @@ const fullName = (faculty) => {
 
                 <!-- Employment Type -->
                 <div class="flex flex-col gap-1">
-                    <label for="employment_type" class="text-sm font-medium text-slate-700">
+                    <label for="employment_type" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Employment Type <span class="text-red-500">*</span>
                     </label>
                     <Select
@@ -510,7 +523,7 @@ const fullName = (faculty) => {
 
                 <!-- First Name -->
                 <div class="flex flex-col gap-1">
-                    <label for="first_name" class="text-sm font-medium text-slate-700">
+                    <label for="first_name" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         First Name <span class="text-red-500">*</span>
                     </label>
                     <InputText
@@ -527,7 +540,7 @@ const fullName = (faculty) => {
 
                 <!-- Middle Name -->
                 <div class="flex flex-col gap-1">
-                    <label for="middle_name" class="text-sm font-medium text-slate-700">Middle Name</label>
+                    <label for="middle_name" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Middle Name</label>
                     <InputText
                         id="middle_name"
                         v-model="facultyForm.middle_name"
@@ -542,7 +555,7 @@ const fullName = (faculty) => {
 
                 <!-- Last Name -->
                 <div class="flex flex-col gap-1">
-                    <label for="last_name" class="text-sm font-medium text-slate-700">
+                    <label for="last_name" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Last Name <span class="text-red-500">*</span>
                     </label>
                     <InputText
@@ -559,7 +572,7 @@ const fullName = (faculty) => {
 
                 <!-- Suffix -->
                 <div class="flex flex-col gap-1">
-                    <label for="suffix" class="text-sm font-medium text-slate-700">Suffix</label>
+                    <label for="suffix" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Suffix</label>
                     <InputText
                         id="suffix"
                         v-model="facultyForm.suffix"
@@ -574,7 +587,7 @@ const fullName = (faculty) => {
 
                 <!-- College -->
                 <div class="flex flex-col gap-1">
-                    <label for="college_id" class="text-sm font-medium text-slate-700">College</label>
+                    <label for="college_id" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">College</label>
                     <Select
                         id="college_id"
                         v-model="facultyForm.college_id"
@@ -597,7 +610,7 @@ const fullName = (faculty) => {
 
                 <!-- Maximum Teaching Units -->
                 <div class="flex flex-col gap-1">
-                    <label for="max_teaching_units" class="text-sm font-medium text-slate-700">
+                    <label for="max_teaching_units" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Maximum Teaching Units <span class="text-red-500">*</span>
                     </label>
                     <InputNumber
@@ -617,7 +630,7 @@ const fullName = (faculty) => {
 
                 <!-- Status -->
                 <div class="flex flex-col gap-1">
-                    <label for="status" class="text-sm font-medium text-slate-700">
+                    <label for="status" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">
                         Status <span class="text-red-500">*</span>
                     </label>
                     <Select
@@ -638,7 +651,7 @@ const fullName = (faculty) => {
 
                 <!-- Email -->
                 <div class="flex flex-col gap-1">
-                    <label for="email" class="text-sm font-medium text-slate-700">Email</label>
+                    <label for="email" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Email</label>
                     <InputText
                         id="email"
                         v-model="facultyForm.email"
@@ -654,7 +667,7 @@ const fullName = (faculty) => {
 
                 <!-- Contact Number -->
                 <div class="flex flex-col gap-1">
-                    <label for="contact_number" class="text-sm font-medium text-slate-700">Contact Number</label>
+                    <label for="contact_number" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Contact Number</label>
                     <InputText
                         id="contact_number"
                         v-model="facultyForm.contact_number"
@@ -669,7 +682,7 @@ const fullName = (faculty) => {
 
                 <!-- Remarks -->
                 <div class="flex flex-col gap-1 sm:col-span-2">
-                    <label for="remarks" class="text-sm font-medium text-slate-700">Remarks</label>
+                    <label for="remarks" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Remarks</label>
                     <Textarea
                         id="remarks"
                         v-model="facultyForm.remarks"

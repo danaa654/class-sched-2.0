@@ -2,7 +2,6 @@
 import { Head, router } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
-import Card from 'primevue/card';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
@@ -147,40 +146,66 @@ const activeFiltersLabel = computed(() => {
     if (form.value.section_type) parts.push(form.value.section_type);
     return parts.join(' · ');
 });
+
+// Dashboard Summary tiles — icon + accent per metric, same neu-icon-well
+// pattern used on the Scheduling Dashboard's stat cards.
+const summaryCards = computed(() => [
+    { label: 'Programs', value: props.summary.total_programs, icon: 'pi-sitemap', color: isDark.value ? '#5B9CFF' : '#2563EB', glow: isDark.value ? 'rgba(91, 156, 255, 0.3)' : 'rgba(37, 99, 235, 0.25)' },
+    { label: 'Sections', value: props.summary.total_sections, icon: 'pi-th-large', color: isDark.value ? '#5B9CFF' : '#2563EB', glow: isDark.value ? 'rgba(91, 156, 255, 0.3)' : 'rgba(37, 99, 235, 0.25)' },
+    { label: 'Regular', value: props.summary.regular_sections, icon: 'pi-check-circle', color: isDark.value ? '#34D399' : '#059669', glow: isDark.value ? 'rgba(52, 211, 153, 0.3)' : 'rgba(5, 150, 105, 0.25)' },
+    { label: 'Irregular', value: props.summary.irregular_sections, icon: 'pi-exclamation-circle', color: isDark.value ? '#FBBF24' : '#D97706', glow: isDark.value ? 'rgba(251, 191, 36, 0.3)' : 'rgba(217, 119, 6, 0.25)' },
+    { label: 'Subjects', value: props.summary.total_subjects, icon: 'pi-book', color: isDark.value ? '#C4B5FD' : '#7C3AED', glow: isDark.value ? 'rgba(196, 181, 253, 0.3)' : 'rgba(124, 58, 237, 0.25)' },
+    { label: 'Scheduled', value: props.summary.scheduled_subjects, icon: 'pi-calendar-plus', color: isDark.value ? '#34D399' : '#059669', glow: isDark.value ? 'rgba(52, 211, 153, 0.3)' : 'rgba(5, 150, 105, 0.25)' },
+    { label: 'Unscheduled', value: props.summary.unscheduled_subjects, icon: 'pi-calendar-times', color: isDark.value ? '#FCA5A5' : '#DC2626', glow: isDark.value ? 'rgba(252, 165, 165, 0.3)' : 'rgba(220, 38, 38, 0.2)' },
+    { label: 'Faculty', value: props.summary.total_faculty, icon: 'pi-users', color: isDark.value ? '#C4B5FD' : '#7C3AED', glow: isDark.value ? 'rgba(196, 181, 253, 0.3)' : 'rgba(124, 58, 237, 0.25)' },
+    { label: 'Rooms', value: props.summary.total_rooms, icon: 'pi-building', color: isDark.value ? '#C4B5FD' : '#7C3AED', glow: isDark.value ? 'rgba(196, 181, 253, 0.3)' : 'rgba(124, 58, 237, 0.25)' },
+    { label: 'Scheduling Completion', value: `${props.summary.completion_percent}%`, icon: 'pi-percentage', color: isDark.value ? '#34D399' : '#059669', glow: isDark.value ? 'rgba(52, 211, 153, 0.3)' : 'rgba(5, 150, 105, 0.25)' },
+]);
 </script>
 
 <template>
     <Head title="Reports" />
 
     <AppLayout>
-        <div :class="isDark ? 'dark-scope' : ''">
-        <div class="flex items-center justify-between no-print">
-            <div>
-                <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
-                    Reports
-                    <InfoPopover
-                        title="Reports"
-                        :paragraphs="[
-                            'Generate read-only reports on scheduling, faculty load, room usage, and sections for a given academic term.',
-                        ]"
-                        :bullets="[
-                            'Choose a Term (or Academic Year + Semester) and a Report Type, then click \'Generate Report\'.',
-                            'Some report types reveal extra filters — e.g. Faculty or Room — once selected.',
-                            'Use Print or Export Excel to save a generated report; reports themselves are not saved in the system.',
-                        ]"
-                    />
-                </h1>
-                <p class="mt-1 text-slate-500">Generate and view academic scheduling reports.</p>
-            </div>
-        </div>
+        <template #header>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Reports</span>
+        </template>
 
-        <!-- Global Filters -->
-        <Card class="mt-6 no-print">
-            <template #content>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="max-w-7xl mx-auto w-full" :class="isDark ? 'dark-scope' : ''">
+            <div class="mb-8 flex items-center justify-between no-print">
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
+                        Reports
+                        <InfoPopover
+                            title="Reports"
+                            :paragraphs="[
+                                'Generate read-only reports on scheduling, faculty load, room usage, and sections for a given academic term.',
+                            ]"
+                            :bullets="[
+                                'Choose a Term (or Academic Year + Semester) and a Report Type, then click \'Generate Report\'.',
+                                'Some report types reveal extra filters — e.g. Faculty or Room — once selected.',
+                                'Use Print or Export Excel to save a generated report; reports themselves are not saved in the system.',
+                            ]"
+                        />
+                    </h1>
+                    <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Generate and view academic scheduling reports.</p>
+                </div>
+            </div>
+
+            <!-- Global Filters -->
+            <div class="neu-card no-print rounded-2xl p-6 transition-colors duration-300">
+                <div class="grid grid-cols-2 gap-4 md:grid-cols-4 neu-form">
                     <div>
-                        <label class="text-xs font-semibold text-slate-500">Term</label>
-                        <Select v-model="selectedTerm" :options="termOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" @change="onTermChange">
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Term</label>
+                        <Select
+                            v-model="selectedTerm"
+                            :options="termOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="neu-inset w-full mt-1 !rounded-xl !border-none"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                            @change="onTermChange"
+                        >
                             <template #option="{ option }">
                                 <span class="flex items-center gap-2">
                                     {{ option.label }}
@@ -190,82 +215,68 @@ const activeFiltersLabel = computed(() => {
                         </Select>
                     </div>
                     <div>
-                        <label class="text-xs font-semibold text-slate-500">Academic Year</label>
-                        <Select v-model="form.academic_year" :options="academicYearOptions" optionLabel="label" optionValue="value" placeholder="All Years" showClear class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Academic Year</label>
+                        <Select v-model="form.academic_year" :options="academicYearOptions" optionLabel="label" optionValue="value" placeholder="All Years" showClear class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
-                        <label class="text-xs font-semibold text-slate-500">Semester</label>
-                        <Select v-model="form.semester" :options="semesterOptions" optionLabel="label" optionValue="value" placeholder="All Semesters" showClear class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Semester</label>
+                        <Select v-model="form.semester" :options="semesterOptions" optionLabel="label" optionValue="value" placeholder="All Semesters" showClear class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
-                        <label class="text-xs font-semibold text-slate-500">College / Program</label>
-                        <Select v-model="form.college_id" :options="collegeOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">College / Program</label>
+                        <Select v-model="form.college_id" :options="collegeOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
-                        <label class="text-xs font-semibold text-slate-500">Major</label>
-                        <Select v-model="form.major_id" :options="majorOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Major</label>
+                        <Select v-model="form.major_id" :options="majorOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
-                        <label class="text-xs font-semibold text-slate-500">Year Level</label>
-                        <Select v-model="form.year_level" :options="yearLevelOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Year Level</label>
+                        <Select v-model="form.year_level" :options="yearLevelOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
-                        <label class="text-xs font-semibold text-slate-500">Section Type</label>
-                        <Select v-model="form.section_type" :disabled="forcesIrregular" :options="sectionTypeOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Section Type</label>
+                        <Select v-model="form.section_type" :disabled="forcesIrregular" :options="sectionTypeOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsSection">
-                        <label class="text-xs font-semibold text-slate-500">Section</label>
-                        <Select v-model="form.section_id" :options="sectionOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Section</label>
+                        <Select v-model="form.section_id" :options="sectionOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsFaculty">
-                        <label class="text-xs font-semibold text-slate-500">Faculty</label>
-                        <Select v-model="form.faculty_id" :options="facultyOptions" optionLabel="label" optionValue="value" filter class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Faculty</label>
+                        <Select v-model="form.faculty_id" :options="facultyOptions" optionLabel="label" optionValue="value" filter class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsRoom">
-                        <label class="text-xs font-semibold text-slate-500">Room</label>
-                        <Select v-model="form.room_id" :options="roomOptions" optionLabel="label" optionValue="value" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Room</label>
+                        <Select v-model="form.room_id" :options="roomOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div class="md:col-span-2">
-                        <label class="text-xs font-semibold text-slate-500">Report Type</label>
-                        <Select v-model="reportType" :options="reportTypeOptions" optionLabel="label" optionValue="value" optionGroupLabel="label" optionGroupChildren="items" placeholder="Select Report" class="w-full mt-1" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Report Type</label>
+                        <Select v-model="reportType" :options="reportTypeOptions" optionLabel="label" optionValue="value" optionGroupLabel="label" optionGroupChildren="items" placeholder="Select Report" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                 </div>
-                <div class="flex gap-2 mt-4">
-                    <Button label="Generate Report" icon="pi pi-search" :disabled="!reportType" @click="generate" />
+                <div class="mt-5 flex gap-2">
+                    <Button label="Generate Report" icon="pi pi-search" severity="success" :disabled="!reportType" @click="generate" />
                     <Button label="Reset Filters" severity="secondary" outlined @click="resetFilters" />
                 </div>
-            </template>
-        </Card>
+            </div>
 
-        <!-- Dashboard Summary -->
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mt-6 no-print">
-            <Card v-for="card in [
-                ['Programs', summary.total_programs],
-                ['Sections', summary.total_sections],
-                ['Regular', summary.regular_sections],
-                ['Irregular', summary.irregular_sections],
-                ['Subjects', summary.total_subjects],
-                ['Scheduled', summary.scheduled_subjects],
-                ['Unscheduled', summary.unscheduled_subjects],
-                ['Faculty', summary.total_faculty],
-                ['Rooms', summary.total_rooms],
-            ]" :key="card[0]">
-                <template #content>
-                    <p class="text-xs text-slate-500">{{ card[0] }}</p>
-                    <p class="text-xl font-bold text-slate-800">{{ card[1] }}</p>
-                </template>
-            </Card>
-            <Card>
-                <template #content>
-                    <p class="text-xs text-slate-500">Scheduling Completion</p>
-                    <p class="text-xl font-bold text-emerald-600">{{ summary.completion_percent }}%</p>
-                </template>
-            </Card>
-        </div>
+            <!-- Dashboard Summary -->
+            <div class="mt-6 grid grid-cols-2 gap-4 no-print md:grid-cols-5">
+                <div v-for="card in summaryCards" :key="card.label" class="neu-card rounded-2xl p-4 transition-colors duration-300">
+                    <span
+                        class="neu-icon-well neu-glow flex h-10 w-10 items-center justify-center rounded-xl"
+                        :style="{ '--neu-glow-color': card.glow }"
+                    >
+                        <i class="pi text-base" :class="[card.icon]" :style="{ color: card.color }"></i>
+                    </span>
+                    <p class="mt-3 text-xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">{{ card.value }}</p>
+                    <p class="mt-1 text-xs font-semibold uppercase tracking-wide" :class="isDark ? 'text-slate-400' : 'text-slate-400'">{{ card.label }}</p>
+                </div>
+            </div>
 
-        <!-- Report Results -->
-        <Card class="mt-6" v-if="report">
-            <template #content>
+            <!-- Report Results -->
+            <div v-if="report" class="neu-card mt-6 rounded-2xl p-6 transition-colors duration-300">
                 <div class="print-header hidden print:block mb-4">
                     <p class="text-lg font-bold">CLASSLY</p>
                     <p class="text-base font-semibold">{{ report.title }}</p>
@@ -276,25 +287,34 @@ const activeFiltersLabel = computed(() => {
 
                 <div class="flex items-center justify-between no-print">
                     <div>
-                        <h2 class="text-lg font-bold text-slate-800">{{ report.title }}</h2>
-                        <p class="text-xs text-slate-500" v-if="activeFiltersLabel">{{ activeFiltersLabel }}</p>
+                        <h2 class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">{{ report.title }}</h2>
+                        <p class="text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'" v-if="activeFiltersLabel">{{ activeFiltersLabel }}</p>
                     </div>
                     <div class="flex gap-2">
-                        <Button label="Print" icon="pi pi-print" severity="secondary" outlined @click="printReport" />
-                        <Button label="Export Excel" icon="pi pi-file-excel" severity="secondary" outlined @click="exportCsv" :disabled="!report.rows.length" />
+                        <Button label="Print" icon="pi pi-print" severity="secondary" outlined class="report-btn report-btn--print" @click="printReport" />
+                        <Button label="Export Excel" icon="pi pi-file-excel" severity="secondary" outlined class="report-btn report-btn--export" @click="exportCsv" :disabled="!report.rows.length" />
                     </div>
                 </div>
 
-                <div v-if="report.summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 no-print">
-                    <div v-for="(value, label) in report.summary" :key="label" class="rounded-lg border border-slate-100 p-3 text-center">
-                        <p class="text-xs text-slate-500">{{ label }}</p>
-                        <p class="text-lg font-bold text-slate-800">{{ value }}</p>
+                <div v-if="report.summary" class="mt-4 grid grid-cols-2 gap-3 no-print md:grid-cols-4">
+                    <div v-for="(value, label) in report.summary" :key="label" class="neu-inset rounded-xl p-3 text-center">
+                        <p class="text-xs" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ label }}</p>
+                        <p class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">{{ value }}</p>
                     </div>
                 </div>
 
-                <p v-if="!report.rows.length" class="text-center text-slate-400 italic py-10">{{ report.empty_message }}</p>
+                <p v-if="!report.rows.length" class="py-10 text-center italic" :class="isDark ? 'text-slate-500' : 'text-slate-400'">{{ report.empty_message }}</p>
 
-                <DataTable v-else :value="report.rows" class="mt-4" stripedRows scrollable paginator :rows="15">
+                <DataTable
+                    v-else
+                    :value="report.rows"
+                    class="neu-inset neu-table mt-4 rounded-xl overflow-hidden"
+                    :class="isDark ? 'neu-table-dark' : ''"
+                    stripedRows
+                    scrollable
+                    paginator
+                    :rows="15"
+                >
                     <Column v-for="col in report.columns" :key="col" :field="col" :header="col">
                         <template #body="{ data }" v-if="isStatusColumn(col)">
                             <Tag :value="data[col]" :severity="statusSeverity(data[col])" v-if="data[col]" />
@@ -302,38 +322,22 @@ const activeFiltersLabel = computed(() => {
                         </template>
                     </Column>
                 </DataTable>
-            </template>
-        </Card>
+            </div>
 
-        <Card class="mt-6" v-else>
-            <template #content>
-                <p class="text-center text-slate-400 italic py-10">Select filters and a Report Type above, then click "Generate Report".</p>
-            </template>
-        </Card>
+            <div v-else class="neu-card mt-6 rounded-2xl p-6 transition-colors duration-300">
+                <p class="py-10 text-center italic" :class="isDark ? 'text-slate-500' : 'text-slate-400'">Select filters and a Report Type above, then click "Generate Report".</p>
+            </div>
         </div>
     </AppLayout>
 </template>
 
 <style scoped>
-/* Dark-mode overrides — same "dark-scope" pattern used across the rest
-   of the app. Wrapping the page body lets these rules recolor
-   PrimeVue Cards/DataTable/Select and plain Tailwind utility classes
-   only when the app theme is dark. */
-.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
-.dark-scope :deep(.text-slate-800) { color: #F1F5F9 !important; }
-.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
-.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
-.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
-.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
-
-.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
-.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
-
-.dark-scope :deep(.p-select) {
-    background: rgba(255, 255, 255, 0.05) !important;
-    border-color: rgba(255, 255, 255, 0.15) !important;
-    color: #F8FAFC !important;
-}
+/* Dark-mode overrides for teleported PrimeVue overlays (Select
+   dropdown panels render outside this component via <Teleport>, so
+   they need :global() rather than :deep()). Neumorphic surfaces
+   (neu-card / neu-inset) already recolor automatically via the global
+   ".dark" class — only the overlay panel and DataTable chrome need
+   explicit handling here. */
 .dark-scope :deep(.p-select-label) { color: #F8FAFC !important; }
 .dark-scope :deep(.p-select-label.p-placeholder) { color: #7C8CA8 !important; }
 .dark-scope :deep(.p-select.p-disabled) { background: rgba(255, 255, 255, 0.03) !important; color: #64748B !important; }
@@ -342,7 +346,7 @@ const activeFiltersLabel = computed(() => {
 .dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
 
 .dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
-.dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; }
+.dark-scope :deep(.p-datatable-thead > tr > th) { background: #1C2947 !important; color: #F8FAFC !important; border-color: rgba(255, 255, 255, 0.14) !important; font-weight: 700 !important; }
 .dark-scope :deep(.p-datatable-tbody > tr) { background: transparent !important; color: #F1F5F9 !important; }
 .dark-scope :deep(.p-datatable-tbody > tr > td) { color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.08) !important; }
 .dark-scope :deep(.p-datatable-tbody > tr.p-datatable-row-striped) { background: rgba(255, 255, 255, 0.035) !important; }
@@ -358,15 +362,80 @@ const activeFiltersLabel = computed(() => {
 .dark-scope :deep(.p-paginator .p-paginator-last) { color: #CBD5E1 !important; }
 .dark-scope :deep(.p-paginator .p-paginator-page.p-paginator-page-selected) { background: rgba(37, 99, 235, 0.9) !important; color: #fff !important; }
 
-/* Report summary tiles + row-level "rounded-lg border" blocks */
-.dark-scope :deep(.rounded-lg.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; background: rgba(255, 255, 255, 0.04) !important; }
-
 :global(.p-select-overlay.dark-scope) { background: #0F1730 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; color: #F8FAFC !important; }
 :global(.p-select-overlay.dark-scope .p-select-option) { color: #F1F5F9 !important; }
 :global(.p-select-overlay.dark-scope .p-select-option:hover) { background: rgba(255, 255, 255, 0.08) !important; }
 :global(.p-select-overlay.dark-scope .p-select-option-group) { background: rgba(255, 255, 255, 0.04) !important; color: #94A3B8 !important; }
 :global(.p-select-overlay.dark-scope .p-select-filter) { background: rgba(255, 255, 255, 0.06) !important; color: #F8FAFC !important; border-color: rgba(255, 255, 255, 0.15) !important; }
 :global(.p-select-overlay.dark-scope .p-select-empty-message) { color: #94A3B8 !important; }
+
+/* Print / Export Excel: on hover, tint the outline + text to a
+   semantic color (green = print, blue = export) with a matching soft
+   glow, instead of the generic gray outline hover. */
+.report-btn--print:hover:not(:disabled) {
+    border-color: rgba(34, 197, 94, 0.6) !important;
+    color: #16A34A !important;
+    background: rgba(34, 197, 94, 0.08) !important;
+    box-shadow: 0 0 12px 1px rgba(34, 197, 94, 0.35) !important;
+}
+.report-btn--export:hover:not(:disabled) {
+    border-color: rgba(37, 99, 235, 0.6) !important;
+    color: #2563EB !important;
+    background: rgba(37, 99, 235, 0.08) !important;
+    box-shadow: 0 0 12px 1px rgba(37, 99, 235, 0.35) !important;
+}
+
+.dark-scope :deep(.report-btn--print:hover:not(:disabled)) {
+    color: #4ADE80 !important;
+    box-shadow: 0 0 16px 2px rgba(34, 197, 94, 0.5) !important;
+}
+.dark-scope :deep(.report-btn--export:hover:not(:disabled)) {
+    color: #60A5FA !important;
+    box-shadow: 0 0 16px 2px rgba(37, 99, 235, 0.5) !important;
+}
+
+/* DataTable's horizontal scrollbar was rendering as the browser's
+   chunky default (bright blue on some platforms) — thin it out and
+   theme it to match the rest of the app's slim scrollbars. */
+.dark-scope :deep(.p-datatable-table-container) {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.dark-scope :deep(.p-datatable-table-container::-webkit-scrollbar) {
+    height: 6px;
+    width: 6px;
+}
+.dark-scope :deep(.p-datatable-table-container::-webkit-scrollbar-thumb) {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 999px;
+}
+.dark-scope :deep(.p-datatable-table-container::-webkit-scrollbar-track) {
+    background: transparent;
+}
+:deep(.p-datatable-table-container) {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+}
+:deep(.p-datatable-table-container::-webkit-scrollbar) {
+    height: 6px;
+    width: 6px;
+}
+:deep(.p-datatable-table-container::-webkit-scrollbar-thumb) {
+    background: rgba(148, 163, 184, 0.5);
+    border-radius: 999px;
+}
+:deep(.p-datatable-table-container::-webkit-scrollbar-track) {
+    background: transparent;
+}
+
+/* Light-mode header row: PrimeVue's default header background is a
+   near-white tint that barely contrasts against the neu-card surface
+   it sits on — give it a solid, clearly darker background instead. */
+:deep(.p-datatable-thead > tr > th) {
+    background: #EEF1F6 !important;
+    color: #1E293B !important;
+    font-weight: 700 !important;
+}
 </style>
 
 <style>
@@ -377,10 +446,10 @@ const activeFiltersLabel = computed(() => {
     header, aside, nav, .no-print {
         display: none !important;
     }
-    .p-card, .p-card * {
+    .neu-card, .neu-card * {
         visibility: visible;
     }
-    .p-card {
+    .neu-card {
         position: absolute;
         left: 0;
         top: 0;

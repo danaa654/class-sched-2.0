@@ -19,24 +19,19 @@ defineProps({
 </script>
 
 <template>
-    <div
-        class="rounded-2xl border p-5 shadow-sm transition-colors duration-300"
-        :class="isDark ? 'border-white/10 bg-white/[0.06] backdrop-blur-xl' : 'border-slate-100 bg-white'"
-    >
+    <div class="neu-card rounded-2xl p-5 transition-colors duration-300">
         <p class="mb-4 text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Quick Actions</p>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <Link
                 v-for="action in actions"
                 :key="action.route"
                 :href="route(action.route)"
-                class="flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center transition-colors"
-                :class="isDark
-                    ? 'border-white/10 hover:border-blue-400/40 hover:bg-blue-500/10'
-                    : 'border-slate-100 hover:border-blue-200 hover:bg-blue-50'"
+                class="neu-card neu-card--clickable flex flex-col items-center gap-2 rounded-xl px-3 py-4 text-center"
             >
                 <span
-                    class="flex h-10 w-10 items-center justify-center rounded-full"
-                    :class="isDark ? 'bg-blue-500/15 text-blue-400' : 'bg-blue-50 text-blue-600'"
+                    class="neu-icon-well neu-glow flex h-10 w-10 items-center justify-center rounded-full"
+                    :class="isDark ? 'text-blue-400' : 'text-blue-600'"
+                    :style="{ '--neu-glow-color': isDark ? 'rgba(56, 189, 248, 0.3)' : 'rgba(37, 99, 235, 0.3)' }"
                 >
                     <i :class="['pi', action.icon]"></i>
                 </span>

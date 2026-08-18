@@ -49,10 +49,32 @@ const props = defineProps({
 
 const popover = ref();
 const toggle = (event) => popover.value?.toggle(event);
+
+// Hover-to-open/close: opening on mouseenter already worked via
+// popover.show(e) below, but PrimeVue's Popover only auto-closes on
+// an outside click — so without this it stays open once the cursor
+// leaves both the icon and the card. A short grace delay avoids it
+// flickering shut while the cursor is in the gap between icon and card.
+let closeTimer = null;
+const CLOSE_DELAY = 150;
+
+function cancelClose() {
+    if (closeTimer) {
+        clearTimeout(closeTimer);
+        closeTimer = null;
+    }
+}
+
+function scheduleClose() {
+    cancelClose();
+    closeTimer = setTimeout(() => {
+        popover.value?.hide();
+    }, CLOSE_DELAY);
+}
 </script>
 
 <template>
-    <span class="inline-flex" @mouseenter="(e) => popover?.show(e)">
+    <span class="inline-flex" @mouseenter="(e) => { cancelClose(); popover?.show(e); }" @mouseleave="scheduleClose">
         <Button
             icon="pi pi-info-circle"
             text
@@ -64,8 +86,8 @@ const toggle = (event) => popover.value?.toggle(event);
             :title="ariaLabel || `About ${title}`"
             @click="toggle"
         />
-        <Popover ref="popover" :pt="{ content: { class: '!p-0' } }">
-            <div :class="[width, 'max-w-[85vw] overflow-hidden -m-[1px] rounded-lg']">
+        <Popover ref="popover" :pt="{ content: { class: '!p-0', onmouseenter: cancelClose, onmouseleave: scheduleClose } }">
+            <div :class="[width, 'max-w-[85vw] overflow-hidden -m-[1px] rounded-2xl neu-info-panel']">
                 <!-- Accent header strip -->
                 <div class="flex items-center gap-2.5 bg-gradient-to-r from-[#2563EB] to-[#3B82F6] px-4 py-3">
                     <span class="flex items-center justify-center h-6 w-6 rounded-full bg-white/20 shrink-0">
@@ -90,12 +112,21 @@ const toggle = (event) => popover.value?.toggle(event);
 </template>
 
 <style scoped>
-/* Popover panel itself: rounded corners + soft shadow so the accent
-   header strip's top corners read cleanly against the card edge. */
+/* Popover panel itself: rounded corners + soft layered shadow so the
+   accent header strip's top corners read cleanly against the card edge
+   and the card lifts off the page behind it. */
 :deep(.p-popover) {
-    border-radius: 0.75rem;
+    border-radius: 1rem;
     overflow: hidden;
     border: none;
-    box-shadow: 0 12px 32px -8px rgba(15, 23, 42, 0.25), 0 4px 12px -4px rgba(15, 23, 42, 0.1);
+    background: transparent;
+    box-shadow: none;
+}
+
+.neu-info-panel {
+    box-shadow:
+        0 16px 40px -8px rgba(15, 23, 42, 0.35),
+        0 6px 16px -4px rgba(15, 23, 42, 0.15),
+        0 1px 0 rgba(255, 255, 255, 0.6) inset;
 }
 </style>

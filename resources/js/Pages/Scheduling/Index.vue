@@ -2,10 +2,9 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
-import Card from 'primevue/card';
 import ProgressBar from 'primevue/progressbar';
 import Tag from 'primevue/tag';
-import Button from 'primevue/button';
+import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -61,12 +60,25 @@ const alertItems = computed(() => {
     return items;
 });
 
-const facultyBarColor = (units, max) => {
-    if (!max) return '#94A3B8';
+// Summary stat cards — icon, accent color, and glow per card. Kept
+// inline (rather than the shared KpiCard, which only defines 4 accent
+// colors) since this dashboard needs seven distinct accents at a glance.
+const statCards = computed(() => [
+    { key: 'total_sections', label: 'Sections', value: props.stats.total_sections, icon: 'pi-th-large', color: isDark.value ? '#5B9CFF' : '#2563EB', glow: isDark.value ? 'rgba(91, 156, 255, 0.3)' : 'rgba(37, 99, 235, 0.25)' },
+    { key: 'total_subjects', label: 'Subjects', value: props.stats.total_subjects, icon: 'pi-book', color: isDark.value ? '#5B9CFF' : '#2563EB', glow: isDark.value ? 'rgba(91, 156, 255, 0.3)' : 'rgba(37, 99, 235, 0.25)' },
+    { key: 'scheduled_subjects', label: 'Successfully Scheduled', value: props.stats.scheduled_subjects, icon: 'pi-check-circle', color: isDark.value ? '#34D399' : '#059669', glow: isDark.value ? 'rgba(52, 211, 153, 0.3)' : 'rgba(5, 150, 105, 0.25)' },
+    { key: 'remaining_subjects', label: 'Needs Scheduling', value: props.stats.remaining_subjects, icon: 'pi-exclamation-circle', color: isDark.value ? '#FBBF24' : '#D97706', glow: isDark.value ? 'rgba(251, 191, 36, 0.3)' : 'rgba(217, 119, 6, 0.25)', href: route('scheduling.section-subjects') },
+    { key: 'completion', label: 'Complete', value: `${props.stats.completion}%`, icon: 'pi-percentage', color: isDark.value ? '#5B9CFF' : '#2563EB', glow: isDark.value ? 'rgba(91, 156, 255, 0.3)' : 'rgba(37, 99, 235, 0.25)' },
+    { key: 'active_rooms', label: 'Rooms Used', value: props.stats.active_rooms, icon: 'pi-building', color: isDark.value ? '#C4B5FD' : '#7C3AED', glow: isDark.value ? 'rgba(196, 181, 253, 0.3)' : 'rgba(124, 58, 237, 0.25)' },
+    { key: 'active_faculty', label: 'Faculty Assigned', value: props.stats.active_faculty, icon: 'pi-users', color: isDark.value ? '#C4B5FD' : '#7C3AED', glow: isDark.value ? 'rgba(196, 181, 253, 0.3)' : 'rgba(124, 58, 237, 0.25)' },
+]);
+
+const facultyBarColorClass = (units, max) => {
+    if (!max) return '!bg-slate-400';
     const ratio = units / max;
-    if (ratio > 1) return '#DC2626';
-    if (ratio >= 0.85) return '#D97706';
-    return '#2563EB';
+    if (ratio > 1) return '!bg-red-500';
+    if (ratio >= 0.85) return '!bg-amber-500';
+    return '!bg-blue-500';
 };
 
 const activityStatusSeverity = (status) => {
@@ -74,130 +86,123 @@ const activityStatusSeverity = (status) => {
     if (status === 'Conflict') return 'danger';
     return 'warn';
 };
+
+const quickActions = [
+    { label: 'Generate All Schedules', icon: 'pi-bolt', href: 'scheduling.section-subjects', accent: true },
+    { label: 'Validate Schedules', icon: 'pi-check-square', href: 'scheduling.section-subjects' },
+    { label: 'Detect Conflicts', icon: 'pi-search', href: 'scheduling.section-subjects' },
+    { label: 'Export Master Schedule', icon: 'pi-download', href: null, disabled: true },
+];
 </script>
 
 <template>
     <Head title="Scheduling Dashboard" />
 
     <AppLayout>
-        <div :class="isDark ? 'dark-scope' : ''">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-                <h1 class="text-2xl font-bold tracking-tight text-[#1E293B]">Scheduling Dashboard</h1>
-                <p class="mt-1 max-w-2xl text-slate-500">
-                    Monitor scheduling progress, detect conflicts, validate schedules, and manage the overall
-                    scheduling process for the active semester.
-                </p>
+        <template #header>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Scheduling Dashboard</span>
+        </template>
+
+        <div class="max-w-7xl mx-auto w-full">
+            <!-- Page Title -->
+            <div class="mb-8 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
+                        Scheduling Dashboard
+                        <InfoPopover
+                            title="Scheduling Dashboard"
+                            :paragraphs="[
+                                'A live overview of scheduling progress, conflicts, and workload for the active academic term.',
+                            ]"
+                            :bullets="[
+                                'Stat cards and progress reflect the active academic term shown at the top right.',
+                                'Alerts link straight to the relevant workspace so you can act on them immediately.',
+                            ]"
+                        />
+                    </h1>
+                    <p class="mt-1 max-w-2xl" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                        Monitor scheduling progress, detect conflicts, validate schedules, and manage the overall
+                        scheduling process for the active semester.
+                    </p>
+                </div>
+                <span
+                    class="neu-inset neu-glow flex items-center gap-2 self-start rounded-full px-4 py-2 text-sm font-semibold"
+                    :class="isDark ? 'text-slate-200' : 'text-slate-600'"
+                    :style="{ '--neu-glow-color': isDark ? 'rgba(91, 156, 255, 0.2)' : 'rgba(37, 99, 235, 0.2)' }"
+                >
+                    <i class="pi pi-calendar" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'"></i>
+                    {{ termLabel }}
+                </span>
             </div>
-            <span
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-sm font-semibold text-slate-600"
-            >
-                <i class="pi pi-calendar text-[#2563EB]"></i>
-                {{ termLabel }}
-            </span>
-        </div>
 
-        <!-- Summary Stat Cards -->
-        <div class="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #content>
-                    <p class="text-2xl font-bold text-[#1E293B]">{{ stats.total_sections }}</p>
-                    <p class="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Sections</p>
-                </template>
-            </Card>
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #content>
-                    <p class="text-2xl font-bold text-[#1E293B]">{{ stats.total_subjects }}</p>
-                    <p class="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Subjects</p>
-                </template>
-            </Card>
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #content>
-                    <p class="text-2xl font-bold text-emerald-600">{{ stats.scheduled_subjects }}</p>
-                    <p class="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Successfully Scheduled</p>
-                </template>
-            </Card>
-            <Link :href="route('scheduling.section-subjects')">
-                <Card class="!rounded-2xl border border-slate-100 shadow-sm transition-colors hover:border-amber-200 hover:bg-amber-50/40">
-                    <template #content>
-                        <p class="text-2xl font-bold text-amber-600">{{ stats.remaining_subjects }}</p>
-                        <p class="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Needs Scheduling</p>
-                    </template>
-                </Card>
-            </Link>
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #content>
-                    <p class="text-2xl font-bold text-[#2563EB]">{{ stats.completion }}%</p>
-                    <p class="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Complete</p>
-                </template>
-            </Card>
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #content>
-                    <p class="text-2xl font-bold text-[#1E293B]">{{ stats.active_rooms }}</p>
-                    <p class="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Rooms Used</p>
-                </template>
-            </Card>
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #content>
-                    <p class="text-2xl font-bold text-[#1E293B]">{{ stats.active_faculty }}</p>
-                    <p class="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Faculty Assigned</p>
-                </template>
-            </Card>
-        </div>
+            <!-- Summary Stat Cards -->
+            <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+                <component
+                    :is="card.href ? Link : 'div'"
+                    v-for="card in statCards"
+                    :key="card.key"
+                    :href="card.href"
+                    class="neu-card rounded-2xl p-4 transition-colors duration-300"
+                    :class="card.href ? 'neu-card--clickable cursor-pointer' : ''"
+                >
+                    <span
+                        class="neu-icon-well neu-glow flex h-10 w-10 items-center justify-center rounded-xl"
+                        :style="{ '--neu-glow-color': card.glow }"
+                    >
+                        <i class="pi text-base" :class="[card.icon]" :style="{ color: card.color }"></i>
+                    </span>
+                    <p class="mt-3 text-2xl font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">{{ card.value }}</p>
+                    <p class="mt-1 text-xs font-semibold uppercase tracking-wide" :class="isDark ? 'text-slate-400' : 'text-slate-400'">{{ card.label }}</p>
+                </component>
+            </div>
 
-        <!-- Scheduling Progress -->
-        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-6">
-            <template #title>
-                <span class="text-base font-bold text-[#1E293B]">Scheduling Progress</span>
-            </template>
-            <template #content>
+            <!-- Scheduling Progress -->
+            <div class="neu-card mt-6 rounded-2xl p-6 transition-colors duration-300">
+                <p class="text-lg font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Scheduling Progress</p>
                 <ProgressBar
                     :value="stats.completion"
                     :showValue="false"
-                    style="height: 12px"
-                    :pt="{ value: { style: { backgroundColor: '#2563EB' } } }"
+                    class="neu-inset mt-4 h-3 !bg-transparent"
+                    :pt="{ root: { class: '!bg-transparent' }, value: { class: '!bg-[#2563EB]' } }"
                 />
                 <div class="mt-2 flex items-center justify-between text-sm">
-                    <span class="text-slate-500">
+                    <span :class="isDark ? 'text-slate-400' : 'text-slate-500'">
                         {{ stats.scheduled_subjects }} of {{ stats.total_subjects }} subjects scheduled
                     </span>
-                    <span class="font-semibold text-[#2563EB]">{{ stats.completion }}%</span>
+                    <span class="font-semibold" :class="isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]'">{{ stats.completion }}%</span>
                 </div>
-            </template>
-        </Card>
+            </div>
 
-        <div class="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <!-- College Progress -->
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #title>
-                    <span class="text-base font-bold text-[#1E293B]">College Progress</span>
-                </template>
-                <template #content>
-                    <div v-if="collegeProgress.length === 0" class="text-sm text-slate-400">
+            <div class="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <!-- College Progress -->
+                <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                    <p class="text-base font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">College Progress</p>
+                    <div v-if="collegeProgress.length === 0" class="mt-3 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         No sections found for the active term.
                     </div>
-                    <div v-for="college in collegeProgress" :key="college.id" class="mb-4 last:mb-0">
+                    <div v-for="college in collegeProgress" :key="college.id" class="mt-4 first:mt-4">
                         <div class="mb-1 flex items-center justify-between text-sm">
-                            <span class="font-medium text-slate-700">{{ college.name }}</span>
-                            <span class="font-semibold text-slate-500">{{ college.percent }}%</span>
+                            <span class="font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">{{ college.name }}</span>
+                            <span class="font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ college.percent }}%</span>
                         </div>
                         <ProgressBar
                             :value="college.percent"
                             :showValue="false"
-                            style="height: 8px"
-                            :pt="{ value: { style: { backgroundColor: '#2563EB' } } }"
+                            class="neu-inset h-2 !bg-transparent"
+                            :pt="{ root: { class: '!bg-transparent' }, value: { class: '!bg-[#2563EB]' } }"
                         />
                     </div>
-                </template>
-            </Card>
+                </div>
 
-            <!-- Scheduling Alerts -->
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #title>
-                    <span class="text-base font-bold text-[#1E293B]">Scheduling Alerts</span>
-                </template>
-                <template #content>
-                    <div v-if="alertItems.length === 0" class="flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                <!-- Scheduling Alerts -->
+                <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                    <p class="text-base font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Scheduling Alerts</p>
+                    <div
+                        v-if="alertItems.length === 0"
+                        class="neu-inset neu-glow mt-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium"
+                        :class="isDark ? 'text-emerald-300' : 'text-emerald-700'"
+                        :style="{ '--neu-glow-color': isDark ? 'rgba(52, 211, 153, 0.25)' : 'rgba(16, 185, 129, 0.25)' }"
+                    >
                         <i class="pi pi-check-circle"></i>
                         No scheduling conflicts detected.
                     </div>
@@ -205,176 +210,110 @@ const activityStatusSeverity = (status) => {
                         v-for="(alert, idx) in alertItems"
                         :key="idx"
                         :href="alert.href"
-                        class="mb-2 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 transition-colors last:mb-0 hover:bg-amber-100"
+                        class="neu-card neu-card--clickable neu-glow mt-3 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition-colors first:mt-4"
+                        :class="isDark ? 'text-amber-300' : 'text-amber-800'"
+                        :style="{ '--neu-glow-color': isDark ? 'rgba(251, 191, 36, 0.2)' : 'rgba(217, 119, 6, 0.18)' }"
                     >
-                        <i class="pi pi-exclamation-triangle text-amber-500"></i>
+                        <i class="pi pi-exclamation-triangle" :class="isDark ? 'text-amber-400' : 'text-amber-500'"></i>
                         {{ alert.text }}
                     </Link>
-                </template>
-            </Card>
-        </div>
+                </div>
+            </div>
 
-        <div class="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <!-- Faculty Utilization -->
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #title>
-                    <span class="text-base font-bold text-[#1E293B]">Faculty Utilization</span>
-                </template>
-                <template #content>
-                    <div v-if="topFaculty.length === 0" class="text-sm text-slate-400">
+            <div class="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <!-- Faculty Utilization -->
+                <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                    <p class="text-base font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Faculty Utilization</p>
+                    <div v-if="topFaculty.length === 0" class="mt-3 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         No faculty assignments yet.
                     </div>
-                    <div v-for="f in topFaculty" :key="f.name" class="mb-3 last:mb-0">
+                    <div v-for="f in topFaculty" :key="f.name" class="mt-4 first:mt-4">
                         <div class="mb-1 flex items-center justify-between text-sm">
-                            <span class="font-medium text-slate-700">{{ f.name }}</span>
-                            <span class="text-slate-500">{{ f.units }} / {{ f.max }}</span>
+                            <span class="font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">{{ f.name }}</span>
+                            <span :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ f.units }} / {{ f.max }}</span>
                         </div>
                         <ProgressBar
                             :value="f.max ? Math.min(100, (f.units / f.max) * 100) : 0"
                             :showValue="false"
-                            style="height: 7px"
-                            :pt="{ value: { style: { backgroundColor: facultyBarColor(f.units, f.max) } } }"
+                            class="neu-inset h-2 !bg-transparent"
+                            :pt="{ root: { class: '!bg-transparent' }, value: { class: facultyBarColorClass(f.units, f.max) } }"
                         />
                     </div>
-                </template>
-            </Card>
+                </div>
 
-            <!-- Room Utilization -->
-            <Card class="!rounded-2xl border border-slate-100 shadow-sm">
-                <template #title>
-                    <span class="text-base font-bold text-[#1E293B]">Room Utilization</span>
-                </template>
-                <template #content>
-                    <div v-if="topRooms.length === 0" class="text-sm text-slate-400">
+                <!-- Room Utilization -->
+                <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                    <p class="text-base font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Room Utilization</p>
+                    <div v-if="topRooms.length === 0" class="mt-3 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         No room assignments yet.
                     </div>
-                    <div v-for="r in topRooms" :key="r.name" class="mb-3 last:mb-0">
+                    <div v-for="r in topRooms" :key="r.name" class="mt-4 first:mt-4">
                         <div class="mb-1 flex items-center justify-between text-sm">
-                            <span class="font-medium text-slate-700">{{ r.name }}</span>
-                            <span class="text-slate-500">{{ r.occupancy }}%</span>
+                            <span class="font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">{{ r.name }}</span>
+                            <span :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ r.occupancy }}%</span>
                         </div>
                         <ProgressBar
                             :value="r.occupancy"
                             :showValue="false"
-                            style="height: 7px"
-                            :pt="{ value: { style: { backgroundColor: '#2563EB' } } }"
+                            class="neu-inset h-2 !bg-transparent"
+                            :pt="{ root: { class: '!bg-transparent' }, value: { class: '!bg-[#2563EB]' } }"
                         />
                     </div>
-                </template>
-            </Card>
-        </div>
-
-        <!-- Quick Actions -->
-        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-6">
-            <template #title>
-                <span class="text-base font-bold text-[#1E293B]">Quick Actions</span>
-            </template>
-            <template #content>
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <Link :href="route('scheduling.section-subjects')">
-                        <Button
-                            label="Generate All Schedules"
-                            icon="pi pi-bolt"
-                            class="!w-full !justify-start !bg-[#2563EB] !border-[#2563EB]"
-                        />
-                    </Link>
-                    <Link :href="route('scheduling.section-subjects')">
-                        <Button
-                            label="Validate Schedules"
-                            icon="pi pi-check-square"
-                            severity="secondary"
-                            outlined
-                            class="!w-full !justify-start"
-                        />
-                    </Link>
-                    <Link :href="route('scheduling.section-subjects')">
-                        <Button
-                            label="Detect Conflicts"
-                            icon="pi pi-search"
-                            severity="secondary"
-                            outlined
-                            class="!w-full !justify-start"
-                        />
-                    </Link>
-                    <Button
-                        label="Export Master Schedule"
-                        icon="pi pi-download"
-                        severity="secondary"
-                        outlined
-                        disabled
-                        class="!w-full !justify-start"
-                        v-tooltip="'Coming soon'"
-                    />
                 </div>
-                <p class="mt-3 text-xs text-slate-400">
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="neu-card mt-6 rounded-2xl p-6 transition-colors duration-300">
+                <p class="text-base font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Quick Actions</p>
+                <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <component
+                        :is="action.disabled ? 'span' : Link"
+                        v-for="action in quickActions"
+                        :key="action.label"
+                        :href="action.href ? route(action.href) : undefined"
+                        v-tooltip.top="action.disabled ? 'Coming soon' : undefined"
+                        class="neu-card flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition-colors duration-300"
+                        :class="[
+                            action.disabled ? 'cursor-not-allowed opacity-50' : 'neu-card--clickable cursor-pointer',
+                            isDark ? 'text-slate-200' : 'text-slate-700',
+                        ]"
+                    >
+                        <span
+                            class="neu-icon-well neu-glow flex h-9 w-9 flex-none items-center justify-center rounded-full"
+                            :style="{ '--neu-glow-color': action.accent ? (isDark ? 'rgba(91, 156, 255, 0.3)' : 'rgba(37, 99, 235, 0.25)') : (isDark ? 'rgba(148, 163, 184, 0.15)' : 'rgba(100, 116, 139, 0.12)') }"
+                        >
+                            <i
+                                class="pi text-sm"
+                                :class="[action.icon, action.accent ? (isDark ? 'text-[#5B9CFF]' : 'text-[#2563EB]') : (isDark ? 'text-slate-300' : 'text-slate-500')]"
+                            ></i>
+                        </span>
+                        {{ action.label }}
+                    </component>
+                </div>
+                <p class="mt-3 text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                     Generating, validating, and resolving schedules happens on the Section Subjects page — these
                     shortcuts take you straight there.
                 </p>
-            </template>
-        </Card>
+            </div>
 
-        <!-- Recent Scheduling Activity -->
-        <Card class="!rounded-2xl border border-slate-100 shadow-sm mt-6">
-            <template #title>
-                <span class="text-base font-bold text-[#1E293B]">Recent Scheduling Activity</span>
-            </template>
-            <template #content>
-                <div v-if="recentActivity.length === 0" class="text-sm text-slate-400">
+            <!-- Recent Scheduling Activity -->
+            <div class="neu-card mt-6 rounded-2xl p-6 transition-colors duration-300">
+                <p class="text-base font-bold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Recent Scheduling Activity</p>
+                <div v-if="recentActivity.length === 0" class="mt-3 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                     No scheduling activity yet.
                 </div>
                 <div
                     v-for="(activity, idx) in recentActivity"
                     :key="idx"
-                    class="flex items-center justify-between gap-3 border-b border-slate-100 py-3 text-sm last:border-b-0"
+                    class="neu-inset mt-3 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm first:mt-4"
                 >
-                    <span class="text-slate-700">{{ activity.label }}</span>
+                    <span :class="isDark ? 'text-slate-200' : 'text-slate-700'">{{ activity.label }}</span>
                     <div class="flex flex-none items-center gap-3">
                         <Tag :value="activity.status" :severity="activityStatusSeverity(activity.status)" />
-                        <span class="w-24 text-right text-xs text-slate-400">{{ activity.updated_at }}</span>
+                        <span class="w-24 text-right text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'">{{ activity.updated_at }}</span>
                     </div>
                 </div>
-            </template>
-        </Card>
+            </div>
         </div>
     </AppLayout>
 </template>
-
-<style scoped>
-/* Dark-mode overrides — same "dark-scope" pattern used on Rooms,
-   Sections, Faculty, etc. Wrapping the page body lets these rules
-   recolor PrimeVue Cards and plain Tailwind utility classes only when
-   the app theme is dark. */
-.dark-scope :deep(.text-\[\#1E293B\]) { color: #F8FAFC !important; }
-.dark-scope :deep(.text-\[\#2563EB\]) { color: #60A5FA !important; }
-.dark-scope :deep(.text-slate-700) { color: #CBD5E1 !important; }
-.dark-scope :deep(.text-slate-600) { color: #94A3B8 !important; }
-.dark-scope :deep(.text-slate-500) { color: #94A3B8 !important; }
-.dark-scope :deep(.text-slate-400) { color: #64748B !important; }
-.dark-scope :deep(.text-emerald-600) { color: #34D399 !important; }
-.dark-scope :deep(.text-amber-600) { color: #FBBF24 !important; }
-.dark-scope :deep(.text-amber-800) { color: #FDE68A !important; }
-.dark-scope :deep(.text-amber-500) { color: #FBBF24 !important; }
-.dark-scope :deep(.text-emerald-700) { color: #6EE7B7 !important; }
-
-.dark-scope :deep(.border-slate-100) { border-color: rgba(255, 255, 255, 0.1) !important; }
-.dark-scope :deep(.border-slate-200) { border-color: rgba(255, 255, 255, 0.15) !important; }
-.dark-scope :deep(.border-amber-200) { border-color: rgba(217, 119, 6, 0.35) !important; }
-.dark-scope :deep(.border-b) { border-color: rgba(255, 255, 255, 0.08) !important; }
-
-.dark-scope :deep(.bg-white) { background-color: rgba(255, 255, 255, 0.06) !important; }
-.dark-scope :deep(.bg-emerald-50) { background-color: rgba(16, 185, 129, 0.12) !important; }
-.dark-scope :deep(.bg-amber-50) { background-color: rgba(217, 119, 6, 0.14) !important; }
-.dark-scope :deep(.hover\:bg-amber-100:hover) { background-color: rgba(217, 119, 6, 0.22) !important; }
-.dark-scope :deep(.hover\:bg-amber-50\/40:hover) { background-color: rgba(217, 119, 6, 0.1) !important; }
-.dark-scope :deep(.hover\:border-amber-200:hover) { border-color: rgba(217, 119, 6, 0.4) !important; }
-
-.dark-scope :deep(.p-card) { background: #101A35 !important; color: #F8FAFC; border: 1px solid rgba(255, 255, 255, 0.08) !important; }
-.dark-scope :deep(.p-card .p-card-body) { background: transparent !important; }
-.dark-scope :deep(.p-card .p-card-title) { color: #F8FAFC !important; }
-
-.dark-scope :deep(.p-progressbar) { background: rgba(255, 255, 255, 0.1) !important; }
-
-.dark-scope :deep(.p-button-outlined.p-button-secondary) { color: #CBD5E1 !important; border-color: rgba(255, 255, 255, 0.2) !important; background: transparent !important; }
-.dark-scope :deep(.p-button-outlined.p-button-secondary:hover) { background: rgba(255, 255, 255, 0.08) !important; }
-.dark-scope :deep(.p-button-outlined.p-button-secondary:disabled) { color: #64748B !important; border-color: rgba(255, 255, 255, 0.1) !important; }
-</style>
