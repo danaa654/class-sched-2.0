@@ -20,11 +20,12 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import Popover from 'primevue/popover';
 import MultiSelect from 'primevue/multiselect';
-import DatePicker from 'primevue/datepicker';
+import Select from 'primevue/select';
 import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 import ProgressBar from 'primevue/progressbar';
 import RecommendedTimeModal from './RecommendedTimeModal.vue';
+import { dockedEditSectionSubjectId } from '@/Composables/useTimeEditDock';
 
 const props = defineProps({
     sectionId: { type: [Number, String], required: true },
@@ -52,6 +53,18 @@ const props = defineProps({
     // Controlled by the parent (Show.vue) — one "Show details" toggle
     // per subject drives Faculty/Room/Time together.
     showDetails: { type: Boolean, default: false },
+    // OPTIONAL — a CSS selector (e.g. "#autoScheduleTimeDock") for a
+    // container that lives elsewhere in the parent's markup. When
+    // set, clicking the Time trigger no longer opens a floating
+    // PrimeVue Popover next to it; instead the exact same "Edit Day &
+    // Time" panel is teleported into that container (see
+    // dockedEditSectionSubjectId above) — used by the Auto Schedule
+    // Complete modal so the editor renders as a right-side panel of
+    // the modal itself instead of a popover overlapping the
+    // Generated Assignments list underneath it. Left unset (the
+    // default) everywhere else, which keeps the original Popover
+    // behavior completely untouched.
+    dockTarget: { type: String, default: null },
 });
 
 const emit = defineEmits(['updated']);
@@ -123,6 +136,58 @@ const dateToTimeString = (date) => {
     return `${hours}:${minutes}`;
 };
 
+// Start/End Time list — same generated-dropdown design as the main
+// scheduling table's Start Time/End Time Selects (Show.vue's
+// timeOptions), swapped in here for the old spin-box DatePicker so
+// both places pick a time the exact same way: search-and-select from
+// the School Year's actual Scheduling Window in 30-minute increments,
+// with the fixed lunch break excluded, instead of scrolling
+// hour/minute/am-pm wheels one click at a time.
+const TIME_OPTION_STEP_MINUTES = 30;
+const formatTimeOptionLabel = (hours, minutes) => {
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+    return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+};
+const timeOptions = computed(() => {
+    if (!props.schedulingWindow?.start_time || !props.schedulingWindow?.end_time) return [];
+
+    const [startH, startM] = props.schedulingWindow.start_time.split(':').map(Number);
+    const [endH, endM] = props.schedulingWindow.end_time.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+
+    const hasLunch = props.schedulingWindow.lunch_start && props.schedulingWindow.lunch_end;
+    const [lunchStartH, lunchStartM] = hasLunch ? props.schedulingWindow.lunch_start.split(':').map(Number) : [null, null];
+    const [lunchEndH, lunchEndM] = hasLunch ? props.schedulingWindow.lunch_end.split(':').map(Number) : [null, null];
+    const lunchStartMinutes = hasLunch ? lunchStartH * 60 + lunchStartM : null;
+    const lunchEndMinutes = hasLunch ? lunchEndH * 60 + lunchEndM : null;
+
+    const options = [];
+    for (let m = startMinutes; m <= endMinutes; m += TIME_OPTION_STEP_MINUTES) {
+        if (hasLunch && m > lunchStartMinutes && m < lunchEndMinutes) continue;
+
+        const h = Math.floor(m / 60);
+        const min = m % 60;
+        const value = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+        options.push({ label: formatTimeOptionLabel(h, min), value });
+    }
+    return options;
+});
+
+// Bridges the dropdown's "H:i" string values to the Date objects
+// editStart/editEnd already are everywhere else in this component
+// (toMinutesOfDay/minutesBetween/addMinutes, etc.), so nothing else
+// below needs to change — only the popover's input control does.
+const editStartValue = computed({
+    get: () => dateToTimeString(editStart.value),
+    set: (v) => { editStart.value = timeStringToDate(v); },
+});
+const editEndValue = computed({
+    get: () => dateToTimeString(editEnd.value),
+    set: (v) => { editEnd.value = timeStringToDate(v); },
+});
+
 // --- Auto-adjust duration when the number of meeting days changes ---------
 // The Registrar edits a *per-meeting* time (e.g. 1:00-2:00 PM), but the
 // underlying commitment is really a *weekly* duration (the Subject's total
@@ -173,6 +238,24 @@ const editStart = ref(null);
 const editEnd = ref(null);
 const applying = ref(false);
 const applyError = ref(null);
+
+// True while this exact instance's panel is the one currently
+// teleported into dockTarget — see useTimeEditDock.js.
+const isDockedActive = computed(() => !!props.dockTarget && dockedEditSectionSubjectId.value === props.sectionSubjectId);
+
+// Closes the editor regardless of which mode it's running in —
+// Popover's own hide() for the ordinary trigger, or clearing the
+// shared docked id so the right-side panel goes back to its empty
+// "pick a subject" state.
+const closeEditor = () => {
+    if (props.dockTarget) {
+        if (dockedEditSectionSubjectId.value === props.sectionSubjectId) {
+            dockedEditSectionSubjectId.value = null;
+        }
+        return;
+    }
+    popover.value?.hide();
+};
 
 // How many meetings/week this Subject expects (from
 // MeetingPatternService — hour-aware, e.g. a 4-hour/week Capstone
@@ -279,6 +362,14 @@ const openEditor = (event) => {
     }
 
     popover.value?.toggle(event);
+    if (props.dockTarget) {
+        // Docked mode: no PrimeVue Popover at all (see template below)
+        // — "opening" this row's editor just means making it the one
+        // shared dockedEditSectionSubjectId, which reassigns the
+        // right-side panel to this subject and implicitly closes
+        // whichever other subject had it open before.
+        dockedEditSectionSubjectId.value = props.sectionSubjectId;
+    }
     nextTick(() => {
         openingEditor.value = false;
     });
@@ -330,12 +421,6 @@ const canApply = computed(
 );
 
 const isManualOverride = computed(() => current.value?.manual_override === true);
-
-// Non-blocking hint shown when the current picks don't match the
-// Subject's expected meeting count — mirrors the "Manual Override"
-// language used for Faculty/Room. Purely informational; Apply is never
-// disabled for this.
-const patternMismatch = computed(() => editDays.value.length > 0 && editDays.value.length !== expectedMeetings.value);
 
 // Live weekly-hours total for whatever's currently in the editor, so the
 // Registrar sees the running total update as they add/remove days or
@@ -542,7 +627,7 @@ const apply = async () => {
 
         current.value = data.time;
         emit('updated', { time: data.time, overall_score: data.overall_score });
-        popover.value?.hide();
+        closeEditor();
     } catch (e) {
         applyError.value = e.message ?? 'Could not apply this time.';
         // eslint-disable-next-line no-console
@@ -584,7 +669,7 @@ const apply = async () => {
             </div>
         </button>
 
-        <Popover ref="popover" class="time-recommendation-popover">
+        <Popover v-if="!dockTarget" ref="popover" class="time-recommendation-popover">
             <div class="p-1 w-72">
                 <p class="text-xs font-semibold text-slate-600 mb-2">Edit Day &amp; Time</p>
 
@@ -613,11 +698,6 @@ const apply = async () => {
                     This subject expects {{ expectedMeetings }}x per week —
                     picking a day adds it as its own meeting; picking it again removes it.
                 </p>
-                <p v-if="patternMismatch" class="text-[11px] text-amber-600 mb-2 flex items-center gap-1">
-                    <i class="pi pi-info-circle"></i>
-                    {{ editDays.length }}x/week doesn't match this subject's usual {{ expectedMeetings }}x pattern — still applies as a Manual Override.
-                </p>
-                <p v-else class="mb-2"></p>
 
                 <!-- Each selected day is its own meeting occurrence, all sharing the
                      Start/End below; the weekly total updates live as days are added
@@ -633,22 +713,30 @@ const apply = async () => {
                 <div class="grid grid-cols-2 gap-2 mb-1">
                     <div>
                         <label class="text-xs text-slate-500 mb-1 block">Start</label>
-                        <DatePicker
-                            v-model="editStart"
-                            timeOnly
-                            hourFormat="12"
-                            class="w-full"
-                            :inputClass="['w-full text-sm', outsideSchedulingWindow ? '!border-red-400 !text-red-700' : '']"
+                        <Select
+                            v-model="editStartValue"
+                            :options="timeOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            showClear
+                            placeholder="Start"
+                            class="w-full time-select"
+                            :class="outsideSchedulingWindow ? '!border-red-400' : ''"
                         />
                     </div>
                     <div>
                         <label class="text-xs text-slate-500 mb-1 block">End</label>
-                        <DatePicker
-                            v-model="editEnd"
-                            timeOnly
-                            hourFormat="12"
-                            class="w-full"
-                            :inputClass="['w-full text-sm', outsideSchedulingWindow ? '!border-red-400 !text-red-700' : '']"
+                        <Select
+                            v-model="editEndValue"
+                            :options="timeOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            showClear
+                            placeholder="End"
+                            class="w-full time-select"
+                            :class="outsideSchedulingWindow ? '!border-red-400' : ''"
                         />
                     </div>
                 </div>
@@ -699,11 +787,143 @@ const apply = async () => {
                 <p v-if="applyError" class="text-xs text-red-600 mb-2">{{ applyError }}</p>
 
                 <div class="flex justify-end gap-2">
-                    <Button label="Cancel" size="small" severity="secondary" text @click="popover?.hide()" />
+                    <Button label="Cancel" size="small" severity="secondary" text @click="closeEditor" />
                     <Button label="Apply" size="small" :loading="applying" :disabled="!canApply" @click="apply" />
                 </div>
             </div>
         </Popover>
+
+        <!-- DOCKED MODE — used only inside the Auto Schedule Complete
+             modal (dockTarget set). Identical panel content and
+             identical editDays/editStart/editEnd/apply()/closeEditor()
+             logic as the Popover above; only WHERE it renders differs
+             — teleported into the modal's own right-side column
+             (see Show.vue's #autoScheduleTimeDock) instead of floating
+             next to the trigger, and only while this row is the
+             shared dockedEditSectionSubjectId. -->
+        <Teleport v-else-if="isDockedActive" :to="dockTarget">
+            <div class="rounded-xl neu-inset p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-sm font-semibold text-slate-700">Edit Day &amp; Time</p>
+                    <button type="button" class="text-slate-400 hover:text-slate-600 text-xs" @click="closeEditor">
+                        <i class="pi pi-times"></i>
+                    </button>
+                </div>
+
+                <div class="flex flex-wrap gap-1 mb-2">
+                    <Button
+                        v-for="preset in dayPresets"
+                        :key="preset.label"
+                        :label="preset.label"
+                        size="small"
+                        text
+                        class="!text-xs !py-1 !px-2"
+                        @click="applyPreset(preset)"
+                    />
+                </div>
+
+                <MultiSelect
+                    v-model="editDays"
+                    :options="dayOptions"
+                    optionLabel="label"
+                    optionValue="value"
+                    placeholder="Select days"
+                    class="w-full mb-1"
+                    display="chip"
+                />
+                <p class="text-[11px] text-slate-400 mb-1">
+                    This subject expects {{ expectedMeetings }}x per week —
+                    picking a day adds it as its own meeting; picking it again removes it.
+                </p>
+
+                <div v-if="editDays.length > 1" class="mb-2 space-y-1">
+                    <p class="text-xs font-medium text-slate-600">Meeting Schedule</p>
+                    <div v-for="(day, idx) in editDays" :key="day" class="flex items-center justify-between text-xs text-slate-600 bg-slate-50 rounded px-2 py-1">
+                        <span>Meeting {{ idx + 1 }} — {{ dayOptions.find((o) => o.value === day)?.label ?? day }}</span>
+                        <span v-if="editStart && editEnd">{{ formatTimeRange(dateToTimeString(editStart), dateToTimeString(editEnd)) }}</span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 mb-1">
+                    <div>
+                        <label class="text-xs text-slate-500 mb-1 block">Start</label>
+                        <Select
+                            v-model="editStartValue"
+                            :options="timeOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            showClear
+                            placeholder="Start"
+                            class="w-full time-select"
+                            :class="outsideSchedulingWindow ? '!border-red-400' : ''"
+                        />
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500 mb-1 block">End</label>
+                        <Select
+                            v-model="editEndValue"
+                            :options="timeOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            showClear
+                            placeholder="End"
+                            class="w-full time-select"
+                            :class="outsideSchedulingWindow ? '!border-red-400' : ''"
+                        />
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-400 mb-1">
+                    Scheduling Window: {{ schedulingWindowLabel }}
+                </p>
+
+                <p v-if="liveWeeklyHours !== null" class="text-[11px] mb-2" :class="requiredWeeklyHours && liveWeeklyHours !== requiredWeeklyHours ? 'text-amber-600' : 'text-slate-400'">
+                    Total: {{ liveWeeklyHours }} {{ liveWeeklyHours === 1 ? 'hour' : 'hours' }}/week
+                    <template v-if="requiredWeeklyHours">
+                        (required {{ requiredWeeklyHours }})
+                        <i v-if="liveWeeklyHours === requiredWeeklyHours" class="pi pi-check text-green-600"></i>
+                        <i v-else class="pi pi-exclamation-triangle"></i>
+                    </template>
+                </p>
+
+                <div v-if="schedulingWindowError" class="text-xs text-red-800 bg-red-100 border border-red-300 rounded-md px-2 py-1.5 mb-2 flex items-start gap-1">
+                    <i class="pi pi-ban mt-0.5"></i>
+                    <span>{{ schedulingWindowError }}</span>
+                </div>
+
+                <div v-if="sectionConflictReason" class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 mb-2">
+                    <p class="flex items-start gap-1">
+                        <i class="pi pi-exclamation-triangle mt-0.5"></i>
+                        <span>
+                            {{ sectionConflictReason }}
+                            You can still apply this — it'll be flagged as a Section Conflict and "Accept All &amp; Save" will be blocked until it's resolved.
+                        </span>
+                    </p>
+                </div>
+
+                <div v-if="hasDraftConflict" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-2">
+                    <p v-if="activeConflictReason" class="flex items-start gap-1 mb-1.5">
+                        <i class="pi pi-exclamation-triangle mt-0.5"></i>
+                        <span>{{ activeConflictReason }}</span>
+                    </p>
+                    <Button
+                        label="Find Recommended Day & Time"
+                        icon="pi pi-sparkles"
+                        size="small"
+                        class="!text-xs !py-1 w-full"
+                        @click="openRecommendations"
+                    />
+                </div>
+
+                <p v-if="applyError" class="text-xs text-red-600 mb-2">{{ applyError }}</p>
+
+                <div class="flex justify-end gap-2">
+                    <Button label="Cancel" size="small" severity="secondary" text @click="closeEditor" />
+                    <Button label="Apply" size="small" :loading="applying" :disabled="!canApply" @click="apply" />
+                </div>
+            </div>
+        </Teleport>
 
         <RecommendedTimeModal
             v-model:visible="showRecommendModal"
@@ -747,5 +967,37 @@ const apply = async () => {
 <style scoped>
 .time-recommendation-trigger:hover {
     border-color: var(--p-primary-400, #60a5fa);
+}
+
+/* Start/End Time Select — smaller label text so "8:00 AM"/"10:30 AM"
+   shows in full instead of truncating to "8:00 ..."/"10:3..." inside
+   the popover's narrower two-column layout. */
+.time-select :deep(.p-select-label) {
+    font-size: 0.75rem;
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+}
+
+/* Move the "Edit Day & Time" popover fully outside the Auto Schedule
+   Complete modal, pinned along the right edge of the viewport,
+   instead of dropping down on top of the modal's own content next to
+   the trigger. PrimeVue's Popover sets "top"/"left" as an inline
+   style computed from the trigger's position — we leave "top" alone
+   (keeps it roughly level with the row you clicked) and override just
+   the horizontal placement so it detaches from the trigger and sits
+   beside the modal instead of inside it. */
+:deep(.time-recommendation-popover) {
+    left: auto !important;
+    right: 16px !important;
+    transform: none;
+}
+
+/* The pointer arrow is drawn aligned to the trigger's position; once
+   detached to the right edge above, it would point at empty space
+   instead of the trigger, so it's hidden rather than left pointing
+   the wrong way. */
+:deep(.time-recommendation-popover)::before,
+:deep(.time-recommendation-popover)::after {
+    display: none;
 }
 </style>

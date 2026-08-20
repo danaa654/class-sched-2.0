@@ -27,6 +27,7 @@ import Divider from 'primevue/divider';
 import FacultyRecommendationSelector from '@/Components/Scheduling/FacultyRecommendationSelector.vue';
 import RoomRecommendationSelector from '@/Components/Scheduling/RoomRecommendationSelector.vue';
 import TimeRecommendationSelector from '@/Components/Scheduling/TimeRecommendationSelector.vue';
+import { dockedEditSectionSubjectId } from '@/Composables/useTimeEditDock';
 import MergeRecommendationModal from '@/Components/Scheduling/MergeRecommendationModal.vue';
 import RoomGrid from '@/Components/Scheduling/RoomGrid.vue';
 import InfoPopover from '@/Components/InfoPopover.vue';
@@ -312,12 +313,43 @@ const applyDayPreset = (row, preset) => {
 /* qualified to teach the subject float to the top, but any active        */
 /* faculty can still be picked manually (Registrar override).             */
 
+// This Section's own College — e.g. a BSIT section resolves to the
+// College of Computer Studies (CCS). Same relation chain the backend
+// uses (section->major->department->college_id) for the same purpose
+// (Room/Faculty RBAC scoping), loaded eagerly with the Section so it's
+// already on hand here with no extra request.
+const sectionCollegeId = computed(() => props.section.major?.department?.college_id ?? null);
+
+// The Section's own owning College's display name (e.g. "College of
+// Computer Studies" / "CCS") — used purely for the group HEADER text
+// below, exactly the same way roomGroupsFor() labels its type-match
+// group "Laboratory Rooms"/"Lecture Rooms" from the subject itself.
+const sectionCollegeName = computed(() => props.section.major?.department?.college?.short_name
+    ?? props.section.major?.department?.college?.name
+    ?? null);
+
 const isQualifiedFor = (faculty, subject) => {
     if (!subject) return false;
-    if (subject.category === 'General Education' && faculty.faculty_category === 'General Education Faculty') {
-        return true;
+    if (subject.category === 'General Education') {
+        // General Education subjects are owned by General Education
+        // Faculty, i.e. faculty with no College of their own — same
+        // rule the backend's subjectCollegeId()/recommendFaculty()
+        // uses (a null owning-College routes to the college_id-null
+        // GenEd pool), so the client-side grouping never disagrees
+        // with what the recommendation engine considers eligible.
+        return faculty.faculty_category === 'General Education Faculty' || faculty.college_id === null;
     }
-    return faculty.qualified_subject_ids.includes(subject.id);
+    if (faculty.qualified_subject_ids.includes(subject.id)) return true;
+    // Major/Minor subjects fall back to a College match: a BSIT
+    // (Major) subject is offered by the College of Computer Studies,
+    // so any active CCS faculty member is a reasonable manual pick
+    // even without an explicit Teaching Qualification on file — same
+    // idea for BSHM -> SHTM, COC subjects -> College of Criminology,
+    // and so on for every College/Program pairing.
+    if (sectionCollegeId.value !== null) {
+        return faculty.college_id === sectionCollegeId.value;
+    }
+    return false;
 };
 
 const facultyGroupsFor = (row) => {
@@ -343,11 +375,20 @@ const facultyGroupsFor = (row) => {
 
     props.activeFaculty.forEach((faculty) => {
         if (recommendedIds.has(faculty.id)) return;
+        // "Best Match" — this faculty has an explicit Teaching
+        // Qualification on file for THIS subject (Faculty Master ->
+        // Teaching Qualifications), not just a same-College guess.
+        // Mirrors the Room dropdown's "Best Match" tag for rooms
+        // explicitly linked to the subject via
+        // section_subject_room_preferences, so both dropdowns signal
+        // "explicitly linked" the same way.
+        const isBestMatch = subject ? faculty.qualified_subject_ids.includes(subject.id) : false;
         const option = {
             label: faculty.full_name,
             value: faculty.id,
             currentLoad: faculty.current_load,
             maxUnits: faculty.max_teaching_units,
+            bestMatch: isBestMatch,
         };
         if (isQualifiedFor(faculty, subject)) {
             qualified.push(option);
@@ -355,6 +396,23 @@ const facultyGroupsFor = (row) => {
             others.push(option);
         }
     });
+
+    // Within the College group, explicit Teaching-Qualification
+    // matches ("Best Match") float above faculty who only match by
+    // College membership — same "most specific signal first" idea
+    // Rooms already use by listing type-matched rooms before others.
+    qualified.sort((a, b) => (b.bestMatch === true) - (a.bestMatch === true));
+
+    // Group label mirrors roomGroupsFor()'s dynamic "Laboratory
+    // Rooms"/"Lecture Rooms" naming — a Major/Minor subject shows the
+    // Section's OWN owning College by name (e.g. "College of
+    // Computer Studies Faculty") instead of the generic "Qualified
+    // for This Subject", so the Registrar sees at a glance exactly
+    // which College this bucket was scoped to, same as the Room
+    // dropdown scopes by Laboratory/Lecture type.
+    const qualifiedGroupLabel = subject?.category === 'General Education'
+        ? 'General Education Faculty'
+        : (sectionCollegeName.value ? `${sectionCollegeName.value} Faculty` : 'Qualified for This Subject');
 
     const groups = [];
     if (isRecommendationsLoading(row.id) && !recommended.length) {
@@ -366,7 +424,7 @@ const facultyGroupsFor = (row) => {
     } else if (recommended.length) {
         groups.push({ label: 'Recommended', items: recommended, isRecommended: true });
     }
-    if (qualified.length) groups.push({ label: 'Qualified for This Subject', items: qualified });
+    if (qualified.length) groups.push({ label: qualifiedGroupLabel, items: qualified });
     if (others.length) groups.push({ label: 'Other Active Faculty (Manual Override)', items: others });
     return groups;
 };
@@ -400,7 +458,7 @@ const roomGroupsFor = (row) => {
     props.activeRooms.forEach((room) => {
         if (recommendedIds.has(room.id)) return;
         const option = {
-            label: `${room.room_code} — ${room.room_name} (${room.capacity})`,
+            label: `${room.room_name} (${room.capacity})`,
             value: room.id,
             scheduledHours: room.scheduled_hours,
             maxHours: room.max_hours,
@@ -671,7 +729,7 @@ const tableConflicts = computed(() => {
                     type: 'capacity',
                     rowIds: [a.id],
                     label: 'Capacity Warning',
-                    detail: `${a.subject?.subject_code ?? 'Subject'} — Section Capacity ${a.capacity}, Room Capacity ${room.capacity} (${room.room_code})`,
+                    detail: `${a.subject?.subject_code ?? 'Subject'} — Section Capacity ${a.capacity}, Room Capacity ${room.capacity} (${room.room_name})`,
                 });
             }
         }
@@ -763,7 +821,7 @@ const tableConflicts = computed(() => {
                     type: 'room',
                     rowIds: [a.id, b.id],
                     label: 'Room Conflict',
-                    detail: `${room ? `${room.room_code} — ${room.room_name}` : 'Room'} — ${formatDays(a.days.filter((d) => b.days.includes(d)))} ${formatTimeRange(a.start_time, a.end_time)}`,
+                    detail: `${room ? room.room_name : 'Room'} — ${formatDays(a.days.filter((d) => b.days.includes(d)))} ${formatTimeRange(a.start_time, a.end_time)}`,
                 });
             }
         }
@@ -1764,7 +1822,7 @@ const chooseIndependentSchedule = async () => {
                     ? { id: freshRow.faculty.id, name: freshRow.faculty.full_name }
                     : null;
                 mergeModalResult.value.room = freshRow.room
-                    ? { id: freshRow.room.id, name: `${freshRow.room.room_code} — ${freshRow.room.room_name}` }
+                    ? { id: freshRow.room.id, name: freshRow.room.room_name }
                     : null;
                 mergeModalResult.value.time = {
                     days: toDaysArray(freshRow.days),
@@ -1996,6 +2054,11 @@ const onAutoSummaryVisibleChange = async (visible) => {
     }
 
     autoSummaryVisible.value = false;
+    // Nothing should still be docked open in the right-side Edit Day
+    // & Time panel once the modal itself is closed — otherwise the
+    // very next Auto Generate Schedule run would open with some
+    // unrelated previous subject's panel already showing.
+    dockedEditSectionSubjectId.value = null;
 
     if (!hasAutoGeneratedRows.value) {
         autoSummary.value = null;
@@ -2075,7 +2138,7 @@ const onRoomOverride = (result, { room, overall_score }) => {
     const row = rows.value.find((r) => r.id === result.section_subject_id);
     if (row) {
         row.room_id = room.id;
-        if (row.room) row.room = { ...row.room, id: room.id, room_code: room.name?.split(' — ')[0] ?? row.room.room_code };
+        if (row.room) row.room = { ...row.room, id: room.id, room_name: room.name ?? row.room.room_name };
         // Same optimistic-clear reasoning as onFacultyOverride above.
         if (row.auto_generated_meta?.time?.hard_conflict) {
             row.auto_generated_meta = {
@@ -2864,6 +2927,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                                     {{ option.currentLoad ?? 0 }}/{{ option.maxUnits }} units
                                                                 </span>
                                                                 <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="!text-[0.6rem] !py-0.5" />
+                                                                <Tag v-else-if="option.bestMatch" value="Best Match" severity="success" class="!text-[0.6rem] !py-0.5" />
                                                             </span>
                                                         </div>
                                                     </template>
@@ -3619,8 +3683,8 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             @update:visible="onAutoSummaryVisibleChange"
             modal
             header="⚡ Auto Schedule Complete"
-            :style="{ width: '860px' }"
-            :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
+            :style="{ width: dockedEditSectionSubjectId ? '1100px' : '760px', maxWidth: '95vw', transition: 'width 0.2s ease' }"
+            :breakpoints="{ '960px': '95vw', '640px': '98vw' }"
             :draggable="false"
             :pt="{
                 root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
@@ -3659,194 +3723,226 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </div>
                 </div>
 
-                <!-- Successfully scheduled subjects -->
-                <div v-if="autoSummary.results?.length" class="space-y-3 mb-4">
-                    <p class="text-sm font-medium text-slate-700">Generated Assignments</p>
-                    <div
-                        v-for="result in autoSummary.results"
-                        :key="result.section_subject_id"
-                        class="rounded-xl p-4"
-                        :class="resultHasHardConflict(result) ? 'border border-red-300 bg-red-50' : 'neu-inset'"
-                    >
-                        <div class="flex items-start justify-between gap-3 mb-3">
-                            <p class="font-semibold text-slate-800">
-                                {{ result.subject_code }} <span class="text-slate-400 font-normal">— {{ result.subject_title }}</span>
-                            </p>
-                            <Tag v-if="resultHasHardConflict(result)" value="Scheduling Conflict" severity="danger" icon="pi pi-exclamation-triangle" class="!text-xs shrink-0" />
-                            <Tag v-else-if="result.is_merged" value="Merged" severity="info" class="!text-xs shrink-0" />
-                        </div>
-
-                        <!-- Hard conflict banner — names exactly which Section/Subject
-                             already occupies the Faculty/Room/Section slot that was
-                             just picked, so this row must be fixed before "Accept
-                             All & Save" can be used (see blockingConflictRowIds). -->
-                        <div
-                            v-if="resultHasHardConflict(result)"
-                            class="mb-3 rounded-lg border border-red-200 bg-red-100/60 px-3 py-2"
-                        >
-                            <p v-for="(msg, mIdx) in resultConflictMessages(result)" :key="mIdx" class="text-xs text-red-700">
-                                <i class="pi pi-exclamation-triangle mr-1"></i>{{ msg }}
-                            </p>
-                        </div>
-
-                        <!-- INTELLIGENT IRREGULAR SECTION SCHEDULING — merged subjects
-                             don't get their own Faculty/Room/Time selectors; they ride
-                             along on the host Regular section's existing class. -->
-                        <div v-if="result.is_merged" class="rounded-lg bg-blue-50 border border-blue-100 p-3">
-                            <p class="text-sm text-slate-700">
-                                <i class="pi pi-sitemap mr-1 text-blue-600"></i>
-                                Merged into <span class="font-semibold">{{ result.merged_into_section_code }}</span>
-                                — {{ result.faculty?.name || '—' }}, {{ result.room?.name || '—' }},
-                                {{ (result.time?.days || []).join('/') }}
-                            </p>
-                            <div class="mt-2">
-                                <Button
-                                    label="Merge Recommendation"
-                                    icon="pi pi-list"
-                                    size="small"
-                                    text
-                                    @click="openMergeModal(result)"
-                                />
-                            </div>
-                        </div>
-
-                        <div v-else>
-                            <!-- SIBLING SECTION PATTERN MATCHING — this is a NEW,
-                                 independent ScheduleAssignment for THIS section; only
-                                 its Faculty/Room/duration PREFERENCE was based on
-                                 another section of the same cohort that already
-                                 teaches this exact subject, and the Day was
-                                 deliberately changed to avoid conflicting with that
-                                 other section's own booking. Nothing was copied or
-                                 moved from the donor — see SiblingSectionPatternService.
-                                 No badge/explanation shown here on purpose — end users
-                                 found "Based on <section>" confusing; result.pattern_source
-                                 is still available on the row for anyone who needs it
-                                 (e.g. future admin-facing diagnostics). -->
-
-                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <!-- Faculty — interactive recommendation selector (Prompt 8.11) -->
-                                <div>
-                                    <FacultyRecommendationSelector
-                                        :section-id="section.id"
-                                        :section-subject-id="result.section_subject_id"
-                                        :model-value="result.faculty"
-                                        @updated="onFacultyOverride(result, $event)"
-                                    />
+                <!-- Two-column layout: left = the scrollable Generated
+                     Assignments / Requires Manual Scheduling content
+                     (unchanged), right = a docked "Edit Day & Time"
+                     panel that lives beside the modal's own content
+                     instead of a popover floating on top of it.
+                     Collapses to a single column below the lg
+                     breakpoint (see the responsive note on
+                     #autoScheduleTimeDock below) so this never forces
+                     an oversized modal on narrower screens — the dock
+                     column simply drops beneath the assignments list
+                     there instead of sitting beside it. -->
+                <div
+                    class="grid grid-cols-1 gap-4 items-start transition-[grid-template-columns] duration-200"
+                    :class="dockedEditSectionSubjectId ? 'lg:grid-cols-[1fr_300px]' : 'lg:grid-cols-1'"
+                >
+                    <div class="min-w-0">
+                        <!-- Successfully scheduled subjects -->
+                        <div v-if="autoSummary.results?.length" class="space-y-3 mb-4">
+                            <p class="text-sm font-medium text-slate-700">Generated Assignments</p>
+                            <div
+                                v-for="result in autoSummary.results"
+                                :key="result.section_subject_id"
+                                class="rounded-xl p-4"
+                                :class="resultHasHardConflict(result) ? 'border border-red-300 bg-red-50' : 'neu-inset'"
+                            >
+                                <div class="flex items-start justify-between gap-3 mb-3">
+                                    <p class="font-semibold text-slate-800">
+                                        {{ result.subject_code }} <span class="text-slate-400 font-normal">— {{ result.subject_title }}</span>
+                                    </p>
+                                    <Tag v-if="resultHasHardConflict(result)" value="Scheduling Conflict" severity="danger" icon="pi pi-exclamation-triangle" class="!text-xs shrink-0" />
+                                    <Tag v-else-if="result.is_merged" value="Merged" severity="info" class="!text-xs shrink-0" />
                                 </div>
 
-                                <!-- Room — interactive recommendation selector, same click-to-edit/search flow as Faculty -->
-                                <div>
-                                    <RoomRecommendationSelector
-                                        :section-id="section.id"
-                                        :section-subject-id="result.section_subject_id"
-                                        :model-value="result.room"
-                                        @updated="onRoomOverride(result, $event)"
-                                    />
+                                <!-- Hard conflict banner — names exactly which Section/Subject
+                                     already occupies the Faculty/Room/Section slot that was
+                                     just picked, so this row must be fixed before "Accept
+                                     All & Save" can be used (see blockingConflictRowIds). -->
+                                <div
+                                    v-if="resultHasHardConflict(result)"
+                                    class="mb-3 rounded-lg border border-red-200 bg-red-100/60 px-3 py-2"
+                                >
+                                    <p v-for="(msg, mIdx) in resultConflictMessages(result)" :key="mIdx" class="text-xs text-red-700">
+                                        <i class="pi pi-exclamation-triangle mr-1"></i>{{ msg }}
+                                    </p>
                                 </div>
 
-                                <!-- Time — interactive recommendation selector, same click-to-edit flow as Faculty/Room -->
-                                <div>
-                                    <TimeRecommendationSelector
-                                        :section-id="section.id"
-                                        :section-subject-id="result.section_subject_id"
-                                        :model-value="result.time"
-                                        :scheduling-window="schedulingWindow"
-                                        @updated="onTimeOverride(result, $event)"
-                                    />
+                                <!-- INTELLIGENT IRREGULAR SECTION SCHEDULING — merged subjects
+                                     don't get their own Faculty/Room/Time selectors; they ride
+                                     along on the host Regular section's existing class. -->
+                                <div v-if="result.is_merged" class="rounded-lg bg-blue-50 border border-blue-100 p-3">
+                                    <p class="text-sm text-slate-700">
+                                        <i class="pi pi-sitemap mr-1 text-blue-600"></i>
+                                        Merged into <span class="font-semibold">{{ result.merged_into_section_code }}</span>
+                                        — {{ result.faculty?.name || '—' }}, {{ result.room?.name || '—' }},
+                                        {{ (result.time?.days || []).join('/') }}
+                                    </p>
+                                    <div class="mt-2">
+                                        <Button
+                                            label="Merge Recommendation"
+                                            icon="pi pi-list"
+                                            size="small"
+                                            text
+                                            @click="openMergeModal(result)"
+                                        />
+                                    </div>
                                 </div>
 
-                                <div v-if="isIrregularSection" class="sm:col-span-3">
-                                    <Button
-                                        label="Merge Recommendation"
-                                        icon="pi pi-sitemap"
-                                        size="small"
-                                        text
-                                        @click="openMergeModal(result)"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                                <div v-else>
+                                    <!-- SIBLING SECTION PATTERN MATCHING — this is a NEW,
+                                         independent ScheduleAssignment for THIS section; only
+                                         its Faculty/Room/duration PREFERENCE was based on
+                                         another section of the same cohort that already
+                                         teaches this exact subject, and the Day was
+                                         deliberately changed to avoid conflicting with that
+                                         other section's own booking. Nothing was copied or
+                                         moved from the donor — see SiblingSectionPatternService.
+                                         No badge/explanation shown here on purpose — end users
+                                         found "Based on <section>" confusing; result.pattern_source
+                                         is still available on the row for anyone who needs it
+                                         (e.g. future admin-facing diagnostics). -->
 
-                <!-- Subjects that need manual scheduling -->
-                <div v-if="autoSummary.unresolved?.length">
-                    <p class="text-sm font-medium text-slate-700 mb-2">Requires Manual Scheduling</p>
-                    <div class="space-y-2">
-                        <div
-                            v-for="item in autoSummary.unresolved"
-                            :key="item.section_subject_id"
-                            class="border border-amber-200 bg-amber-50 rounded-lg p-3 flex items-start gap-2"
-                        >
-                            <i class="pi pi-exclamation-triangle text-amber-600 mt-0.5"></i>
-                            <div class="flex-1">
-                                <p class="text-sm font-medium text-slate-800">
-                                    {{ item.subject_code }} — {{ item.subject_title }}
-                                </p>
-                                <p class="text-xs text-slate-600">{{ item.reason }}</p>
-                                <ul v-if="item.reason_details?.length" class="mt-1 space-y-0.5">
-                                    <li v-for="(detail, idx) in item.reason_details" :key="idx" class="text-xs text-slate-500">
-                                        • {{ detail }}
-                                    </li>
-                                </ul>
+                                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                        <!-- Faculty — interactive recommendation selector (Prompt 8.11) -->
+                                        <div>
+                                            <FacultyRecommendationSelector
+                                                :section-id="section.id"
+                                                :section-subject-id="result.section_subject_id"
+                                                :model-value="result.faculty"
+                                                @updated="onFacultyOverride(result, $event)"
+                                            />
+                                        </div>
 
-                                <!-- SIBLING SECTION PATTERN MATCHING — diagnostic trail
-                                     showing exactly why this row could NOT inherit a
-                                     sibling section's Faculty/Room/Duration pattern
-                                     (which donor(s) were considered, which Day
-                                     candidates were tried, and the exact Section/
-                                     Faculty/Room conflict that rejected each one). -->
-                                <details v-if="item.sibling_pattern_diagnostics?.length" class="mt-2">
-                                    <summary class="text-xs text-amber-700 cursor-pointer select-none">
-                                        <i class="pi pi-info-circle mr-1"></i>Why wasn't a sibling section's pattern used?
-                                    </summary>
-                                    <div class="mt-1.5 space-y-2 pl-1">
-                                        <div
-                                            v-for="(donorTrace, dIdx) in item.sibling_pattern_diagnostics"
-                                            :key="dIdx"
-                                            class="text-xs bg-white border border-amber-100 rounded-md p-2"
-                                        >
-                                            <p class="font-medium text-slate-700">
-                                                Donor: {{ donorTrace.donor_section }}
-                                                <span v-if="donorTrace.faculty || donorTrace.room" class="text-slate-400 font-normal">
-                                                    — {{ donorTrace.faculty || '—' }}, {{ donorTrace.room || '—' }}
-                                                </span>
-                                            </p>
-                                            <p class="text-slate-500">{{ donorTrace.outcome }}</p>
-                                            <ul v-if="donorTrace.days_tried?.length" class="mt-1 space-y-0.5">
-                                                <li
-                                                    v-for="(attempt, aIdx) in donorTrace.days_tried"
-                                                    :key="aIdx"
-                                                    class="flex items-start gap-1"
-                                                    :class="attempt.result === 'rejected' ? 'text-red-500' : (attempt.result === 'accepted' ? 'text-emerald-600' : 'text-slate-400')"
-                                                >
-                                                    <i
-                                                        :class="attempt.result === 'rejected' ? 'pi pi-times-circle' : (attempt.result === 'accepted' ? 'pi pi-check-circle' : 'pi pi-minus-circle')"
-                                                        class="mt-0.5"
-                                                    ></i>
-                                                    <span>
-                                                        <span class="font-medium">{{ formatDays(attempt.days) }}</span>
-                                                        — {{ attempt.reason }}
-                                                    </span>
-                                                </li>
-                                            </ul>
+                                        <!-- Room — interactive recommendation selector, same click-to-edit/search flow as Faculty -->
+                                        <div>
+                                            <RoomRecommendationSelector
+                                                :section-id="section.id"
+                                                :section-subject-id="result.section_subject_id"
+                                                :model-value="result.room"
+                                                @updated="onRoomOverride(result, $event)"
+                                            />
+                                        </div>
+
+                                        <!-- Time — interactive recommendation selector. dock-target
+                                             routes its "Edit Day & Time" panel into the right-side
+                                             column below instead of a popover, exactly like Faculty/
+                                             Room stay click-to-edit inline; only Time needed the dock
+                                             since its editor is by far the largest of the three. -->
+                                        <div>
+                                            <TimeRecommendationSelector
+                                                :section-id="section.id"
+                                                :section-subject-id="result.section_subject_id"
+                                                :model-value="result.time"
+                                                :scheduling-window="schedulingWindow"
+                                                dock-target="#autoScheduleTimeDock"
+                                                @updated="onTimeOverride(result, $event)"
+                                            />
+                                        </div>
+
+                                        <div v-if="isIrregularSection" class="sm:col-span-3">
+                                            <Button
+                                                label="Merge Recommendation"
+                                                icon="pi pi-sitemap"
+                                                size="small"
+                                                text
+                                                @click="openMergeModal(result)"
+                                            />
                                         </div>
                                     </div>
-                                </details>
+                                </div>
+                            </div>
+                        </div>
 
-                                <Button
-                                    v-if="isIrregularSection"
-                                    label="Merge Recommendation"
-                                    icon="pi pi-sitemap"
-                                    size="small"
-                                    text
-                                    class="mt-1 !p-0"
-                                    @click="openMergeModal(item)"
-                                />
+                        <!-- Subjects that need manual scheduling -->
+                        <div v-if="autoSummary.unresolved?.length">
+                            <p class="text-sm font-medium text-slate-700 mb-2">Requires Manual Scheduling</p>
+                            <div class="space-y-2">
+                                <div
+                                    v-for="item in autoSummary.unresolved"
+                                    :key="item.section_subject_id"
+                                    class="border border-amber-200 bg-amber-50 rounded-lg p-3 flex items-start gap-2"
+                                >
+                                    <i class="pi pi-exclamation-triangle text-amber-600 mt-0.5"></i>
+                                    <div class="flex-1">
+                                        <p class="text-sm font-medium text-slate-800">
+                                            {{ item.subject_code }} — {{ item.subject_title }}
+                                        </p>
+                                        <p class="text-xs text-slate-600">{{ item.reason }}</p>
+                                        <ul v-if="item.reason_details?.length" class="mt-1 space-y-0.5">
+                                            <li v-for="(detail, idx) in item.reason_details" :key="idx" class="text-xs text-slate-500">
+                                                • {{ detail }}
+                                            </li>
+                                        </ul>
+
+                                        <!-- SIBLING SECTION PATTERN MATCHING — diagnostic trail
+                                             showing exactly why this row could NOT inherit a
+                                             sibling section's Faculty/Room/Duration pattern
+                                             (which donor(s) were considered, which Day
+                                             candidates were tried, and the exact Section/
+                                             Faculty/Room conflict that rejected each one). -->
+                                        <details v-if="item.sibling_pattern_diagnostics?.length" class="mt-2">
+                                            <summary class="text-xs text-amber-700 cursor-pointer select-none">
+                                                <i class="pi pi-info-circle mr-1"></i>Why wasn't a sibling section's pattern used?
+                                            </summary>
+                                            <div class="mt-1.5 space-y-2 pl-1">
+                                                <div
+                                                    v-for="(donorTrace, dIdx) in item.sibling_pattern_diagnostics"
+                                                    :key="dIdx"
+                                                    class="text-xs bg-white border border-amber-100 rounded-md p-2"
+                                                >
+                                                    <p class="font-medium text-slate-700">
+                                                        Donor: {{ donorTrace.donor_section }}
+                                                        <span v-if="donorTrace.faculty || donorTrace.room" class="text-slate-400 font-normal">
+                                                            — {{ donorTrace.faculty || '—' }}, {{ donorTrace.room || '—' }}
+                                                        </span>
+                                                    </p>
+                                                    <p class="text-slate-500">{{ donorTrace.outcome }}</p>
+                                                    <ul v-if="donorTrace.days_tried?.length" class="mt-1 space-y-0.5">
+                                                        <li
+                                                            v-for="(attempt, aIdx) in donorTrace.days_tried"
+                                                            :key="aIdx"
+                                                            class="flex items-start gap-1"
+                                                            :class="attempt.result === 'rejected' ? 'text-red-500' : (attempt.result === 'accepted' ? 'text-emerald-600' : 'text-slate-400')"
+                                                        >
+                                                            <i
+                                                                :class="attempt.result === 'rejected' ? 'pi pi-times-circle' : (attempt.result === 'accepted' ? 'pi pi-check-circle' : 'pi pi-minus-circle')"
+                                                                class="mt-0.5"
+                                                            ></i>
+                                                            <span>
+                                                                <span class="font-medium">{{ formatDays(attempt.days) }}</span>
+                                                                — {{ attempt.reason }}
+                                                            </span>
+                                                        </li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </details>
+
+                                        <Button
+                                            v-if="isIrregularSection"
+                                            label="Merge Recommendation"
+                                            icon="pi pi-sitemap"
+                                            size="small"
+                                            text
+                                            class="mt-1 !p-0"
+                                            @click="openMergeModal(item)"
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- Right column — Edit Day & Time dock. Sticky so it
+                         stays level with wherever the modal is scrolled to.
+                         Empty/placeholder state when no subject's Time is
+                         currently being edited; TimeRecommendationSelector
+                         teleports the actual "Edit Day & Time" panel in
+                         here the moment a Time trigger above is clicked
+                         (see dockedEditSectionSubjectId / useTimeEditDock.js). -->
+                    <div v-show="dockedEditSectionSubjectId" id="autoScheduleTimeDock" class="lg:sticky lg:top-0"></div>
                 </div>
             </div>
 

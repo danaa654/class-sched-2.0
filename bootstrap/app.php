@@ -32,8 +32,17 @@ return Application::configure(basePath: dirname(__DIR__))
         // other role that reaches them directly by URL. Redirect to the
         // dashboard with a flash message instead of Laravel's raw
         // "403 | FORBIDDEN" page, consistent with the 404 handling above.
+        //
+        // Scoped to GET requests only: this is meant for a person typing
+        // a restricted page's URL directly into the browser. Write
+        // endpoints (PATCH/POST/DELETE) — like the scheduling save
+        // routes — always return JsonResponse and must surface a real
+        // 403 to the caller, even if the request didn't set an Accept
+        // header (a plain fetch()/test client won't, but the frontend's
+        // real AJAX layer does; either way a write request should never
+        // be silently redirected).
         $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException $e, \Illuminate\Http\Request $request) {
-            if (! $request->expectsJson()) {
+            if ($request->isMethod('GET') && ! $request->expectsJson()) {
                 return redirect(auth()->check() ? route('dashboard') : route('login'))
                     ->with('error', 'You do not have permission to access that page.');
             }

@@ -52,17 +52,10 @@ const props = defineProps({
     },
 });
 
-// A seed/manual room whose room_name is identical to its room_code
-// (e.g. both "Room 306 (Lab 1)") would otherwise render duplicated —
-// "Room 306 (Lab 1) — Room 306 (Lab 1)". Only append the name when it
-// actually adds information.
-const roomLabel = (room) => {
-    if (!room) return '';
-    const code = (room.room_code || '').trim();
-    const name = (room.room_name || '').trim();
-    if (!name || name.toLowerCase() === code.toLowerCase()) return code;
-    return `${code} — ${name}`;
-};
+// Room Code was retired from the UI — the underlying rooms table still
+// stores one (derived from Room Name for uniqueness), but it's no longer
+// meaningful to display, so the grid just shows the Room Name.
+const roomLabel = (room) => (room?.room_name || '').trim();
 
 // Left border + tint so Lecture vs Laboratory rooms are visually
 // distinguishable at a glance in the sidebar lists, without relying
@@ -609,6 +602,31 @@ const onDrop = async (day, rowIndex) => {
         const startTime = hourRows.value[rowIndex];
         const endTime = toHHMM(toMinutes(startTime) + draggingDuration.value);
 
+        // KEEP OTHER MEETING DAYS INTACT — a block on the grid is one
+        // VISUAL occurrence of a SectionSubject row that may meet on
+        // more than one day per week (e.g. "Fri,Sat"); block.day is
+        // just THIS occurrence's day, while block.days still carries
+        // the row's full original day list (see placedBlocks above,
+        // which spreads `...a` — the raw assignment — onto every
+        // occurrence before narrowing to a single `day`). Previously
+        // this always sent `days: [day]`, replacing the ENTIRE day
+        // list with only the day just dropped on — so dragging one
+        // meeting of a 2x/week subject silently deleted its other
+        // meeting and halved the subject's total scheduled hours.
+        // Swapping only the dragged occurrence's OLD day for the NEW
+        // one (leaving every other day untouched) keeps the meeting
+        // count — and therefore the subject's total hours/week —
+        // unchanged. Start/End Time is still shared across every day
+        // on the row (a single SectionSubject row has one time slot
+        // for all its meeting days, not a separate time per day), so
+        // every meeting on this row moves to the newly dropped time —
+        // only the DAY of this specific occurrence changes relative
+        // to the others.
+        const originalDays = (block?.days || '').split(',').filter(Boolean);
+        const newDays = originalDays.length > 1
+            ? [...new Set(originalDays.map((d) => (d === block.day ? day : d)))]
+            : [day];
+
         // No-op drop (same room/day/time it already occupies) — skip
         // the round trip and, for a cross-section block, skip the
         // confirmation dialog entirely.
@@ -750,7 +768,7 @@ const onDrop = async (day, rowIndex) => {
                 target.section_subject_id,
                 {
                     room_id: selectedRoom.value.id,
-                    days: [day],
+                    days: newDays,
                     start_time: startTime,
                     end_time: endTime,
                     // Backend independently re-derives same-section vs

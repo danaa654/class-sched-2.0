@@ -76,73 +76,98 @@ class AutoScheduleService
     {
         $section->loadMissing('major.department');
 
-        DB::transaction(function () use ($section, $expectedVersion) {
+        // CONCURRENCY HARDENING — TRUE FIRST-COME-FIRST-SERVED.
+        //
+        // Previously the version check above ran in its OWN short
+        // transaction that committed (and released the Section's row
+        // lock) immediately after checking — before any subject was
+        // actually scheduled. That let two runs started moments apart
+        // (e.g. Admin clicks, then Dean clicks) both pass the version
+        // check against the same starting version and then race each
+        // other subject-by-subject at the database level, so whichever
+        // request's PHP process happened to reach a given row's lock
+        // first — not whichever user clicked first in the browser —
+        // won that subject. From the Registrar's point of view this
+        // looked like "the second click won."
+        //
+        // Holding the Section's row lock for the ENTIRE run (version
+        // check through the final version bump, in one transaction)
+        // fixes this: the second request's own lockForUpdate() call
+        // now BLOCKS until the first run's transaction fully commits,
+        // so runs are serialized in true database-arrival order, and
+        // the second run's version check (re-read fresh once it
+        // finally gets the lock) correctly rejects with
+        // ScheduleVersionConflictException if the first run already
+        // bumped the version — exactly the "please refresh" outcome
+        // the frontend already handles today.
+        return DB::transaction(function () use ($section, $expectedVersion) {
             $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
             $this->conflictService->checkSectionVersion($lockedSection, $expectedVersion);
-        });
 
-        $targets = $this->unscheduledRows($section);
+            $targets = $this->unscheduledRows($section);
 
-        if ($targets->isEmpty()) {
-            return [
-                'total' => 0,
-                'scheduled' => 0,
-                'results' => [],
-                'unresolved' => [],
-                'message' => 'Every subject in this section already has a schedule assigned.',
-            ];
-        }
-
-        $results = [];
-        $unresolved = [];
-
-        // Heaviest (highest-unit) subjects first — these are the
-        // hardest to fit around everything else, so give them first
-        // pick of Faculty/Room/Time before the schedule fills up.
-        $targets = $targets->sortByDesc(fn (SectionSubject $row) => $row->subject->units ?? 0)->values();
-
-        foreach ($targets as $sectionSubject) {
-            $outcome = $this->generateOne($section, $sectionSubject);
-
-            if ($outcome['success']) {
-                $results[] = $outcome['result'];
-            } else {
-                $unresolved[] = $outcome['result'];
+            if ($targets->isEmpty()) {
+                return [
+                    'total' => 0,
+                    'scheduled' => 0,
+                    'results' => [],
+                    'unresolved' => [],
+                    'message' => 'Every subject in this section already has a schedule assigned.',
+                ];
             }
-        }
 
-        $mergedCount = collect($results)->where('is_merged', true)->count();
+            $results = [];
+            $unresolved = [];
 
-        $message = count($results) === $targets->count()
-            ? count($results).' of '.$targets->count().' subjects scheduled. No conflicts detected.'
-            : count($results).' of '.$targets->count().' subjects scheduled. '
-                .count($unresolved).' '.(count($unresolved) === 1 ? 'subject requires' : 'subjects require').' manual scheduling.';
+            // Heaviest (highest-unit) subjects first — these are the
+            // hardest to fit around everything else, so give them first
+            // pick of Faculty/Room/Time before the schedule fills up.
+            $targets = $targets->sortByDesc(fn (SectionSubject $row) => $row->subject->units ?? 0)->values();
 
-        if ($mergedCount > 0) {
-            $message .= ' '.$mergedCount.' '.($mergedCount === 1 ? 'subject was' : 'subjects were')
-                .' merged into existing Regular section classes.';
-        }
+            foreach ($targets as $sectionSubject) {
+                $outcome = $this->generateOne($section, $sectionSubject);
 
-        // Advance the Section's schedule_version exactly once for
-        // this run, but only when it actually wrote something — a run
-        // that placed nothing (every candidate lost its race, or
-        // there was simply nothing left to try) must not bump the
-        // version with no corresponding change (spec Section 20).
-        if (count($results) > 0) {
-            DB::transaction(function () use ($section) {
-                $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
+                if ($outcome['success']) {
+                    $results[] = $outcome['result'];
+                } else {
+                    $unresolved[] = $outcome['result'];
+                }
+            }
+
+            $mergedCount = collect($results)->where('is_merged', true)->count();
+
+            $message = count($results) === $targets->count()
+                ? count($results).' of '.$targets->count().' subjects scheduled. No conflicts detected.'
+                : count($results).' of '.$targets->count().' subjects scheduled. '
+                    .count($unresolved).' '.(count($unresolved) === 1 ? 'subject requires' : 'subjects require').' manual scheduling.';
+
+            if ($mergedCount > 0) {
+                $message .= ' '.$mergedCount.' '.($mergedCount === 1 ? 'subject was' : 'subjects were')
+                    .' merged into existing Regular section classes.';
+            }
+
+            // Advance the Section's schedule_version exactly once for
+            // this run, but only when it actually wrote something — a run
+            // that placed nothing (every candidate lost its race, or
+            // there was simply nothing left to try) must not bump the
+            // version with no corresponding change (spec Section 20).
+            // Still under the SAME lock/transaction as the version
+            // check above — no second lockResources() call needed, and
+            // no window where another run could sneak in between the
+            // check and the bump.
+            if (count($results) > 0) {
                 $this->conflictService->bumpScheduleVersion($lockedSection);
-            });
-        }
+            }
 
-        return [
-            'total' => $targets->count(),
-            'scheduled' => count($results),
-            'merged' => $mergedCount,
-            'results' => $results,
-            'unresolved' => $unresolved,
-            'message' => $message,
-        ];
+            return [
+                'total' => $targets->count(),
+                'scheduled' => count($results),
+                'merged' => $mergedCount,
+                'results' => $results,
+                'unresolved' => $unresolved,
+                'message' => $message,
+            ];
+        });
     }
 
     /**
@@ -326,20 +351,23 @@ class AutoScheduleService
             }
         }
 
-        // TEACHING QUALIFICATION — HARD REQUIREMENT (spec Sections 1-4,
-        // 26). requireQualified: true restricts the candidate pool to
-        // Faculty explicitly linked to this Subject via Teaching
-        // Qualifications — Auto Schedule must never fall back to a
-        // College-Match/GenEd-Match faculty member just because they
-        // happen to be available. That broader pool still exists for
-        // the human-facing selector (RecommendationService::recommendFaculty()
-        // without this flag), where a Registrar can knowingly choose to
-        // override it — never for an unattended automatic assignment.
-        $facultyRec = $this->recommendationService->recommendFaculty($subject, $section, $sectionSubject, requireQualified: true);
+        // TEACHING QUALIFICATION preferred, College/GenEd match
+        // accepted as a fallback (spec Sections 1-4, 26, updated).
+        // recommendFaculty() tries an explicit Teaching-Qualification
+        // match first; if this Subject's own College (or the GenEd
+        // pool) has no faculty with a Teaching Qualification on file
+        // yet, it falls through to any Active faculty in that same
+        // College/GenEd pool — the same College-scoped fallback the
+        // manual Faculty dropdown already offers, so Auto Generate
+        // Schedule no longer stalls on subjects the Registrar simply
+        // hasn't gotten around to recording a Teaching Qualification
+        // for. requireQualified is left false (the default) so this
+        // fallback level is reachable here too.
+        $facultyRec = $this->recommendationService->recommendFaculty($subject, $section, $sectionSubject);
         $facultyCandidates = $facultyRec['recommendations'];
 
         if (empty($facultyCandidates)) {
-            return $this->unresolved($sectionSubject, $facultyRec['message'] ?? 'No faculty member is qualified (Teaching Qualification) for this subject.', [], $siblingDiagnostics);
+            return $this->unresolved($sectionSubject, $facultyRec['message'] ?? 'No Active faculty exists in this Subject\'s own College (or General Education pool), and none exists in any other College either.', [], $siblingDiagnostics);
         }
 
         $roomRec = $this->recommendationService->recommendRooms($subject, $section, $sectionSubject);

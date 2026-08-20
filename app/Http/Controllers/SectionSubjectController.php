@@ -304,7 +304,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // subject regardless of their explicit pivot rows.
         $activeFaculty = Faculty::query()
             ->where('status', 'Active')
-            ->with('subjects:id')
+            ->with(['subjects:id', 'college:id,name,short_name'])
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'college_id', 'max_teaching_units'])
@@ -313,6 +313,17 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 'full_name' => $faculty->full_name,
                 'faculty_category' => $faculty->faculty_category,
                 'qualified_subject_ids' => $faculty->subjects->pluck('id'),
+                // college_id/college_name — MUST be sent so the
+                // scheduling table's client-side grouping
+                // (facultyGroupsFor in Show.vue) can tell which
+                // College a Faculty member belongs to and group them
+                // the same way Rooms are grouped by type. This was
+                // previously queried but dropped before being handed
+                // to the frontend, which silently broke College-based
+                // grouping (every faculty landed in one flat "Other
+                // Active Faculty" bucket regardless of College).
+                'college_id' => $faculty->college_id,
+                'college_name' => $faculty->college?->short_name ?? $faculty->college?->name ?? 'General Education',
                 // Teaching Load, same source (FacultyWorkloadService)
                 // the recommendation ranking and Save Schedule's
                 // workload guard already use — shown next to every

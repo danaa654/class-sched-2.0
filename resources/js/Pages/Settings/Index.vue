@@ -160,7 +160,6 @@ const priorityLevels = [
     { label: 'Low', value: 'low' },
 ];
 const priorityLabels = {
-    faculty_availability: 'Faculty Availability',
     room_availability: 'Room Availability',
     faculty_workload: 'Faculty Workload',
     section_daily_load: 'Section Daily Load',

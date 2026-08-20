@@ -99,6 +99,13 @@ const applyDayPreset = (row, preset) => {
 /* Faculty — searchable, filtered to those qualified for the subject   */
 /* ------------------------------------------------------------------ */
 
+// This Section's own College — e.g. a BSIT section resolves to the
+// College of Computer Studies (CCS), a BSHM section to SHTM, a BSCRIM
+// section to the College of Criminology, and so on. Same relation
+// chain the backend uses (section->major->department->college_id) for
+// the equivalent Room/Faculty RBAC scoping.
+const sectionCollegeId = computed(() => props.section.major?.department?.college_id ?? null);
+
 const facultyOptionsFor = (row) => {
     const subject = row.subject;
     if (!subject) return [];
@@ -110,7 +117,15 @@ const facultyOptionsFor = (row) => {
             if (isGenEd && faculty.faculty_category === 'General Education Faculty') {
                 return true;
             }
-            return faculty.qualified_subject_ids.includes(subject.id);
+            if (faculty.qualified_subject_ids.includes(subject.id)) return true;
+            // Major/Minor subjects fall back to a College match — any
+            // active faculty from the subject's own College is a
+            // reasonable manual pick even without an explicit Teaching
+            // Qualification on file.
+            if (!isGenEd && sectionCollegeId.value !== null) {
+                return faculty.college_id === sectionCollegeId.value;
+            }
+            return false;
         })
         .map((faculty) => ({ label: faculty.full_name, value: faculty.id }));
 };
@@ -121,7 +136,7 @@ const facultyOptionsFor = (row) => {
 
 const roomOptions = computed(() =>
     props.activeRooms.map((room) => ({
-        label: `${room.room_code} — ${room.room_name} (${room.capacity})`,
+        label: `${room.room_name} (${room.capacity})`,
         value: room.id,
         capacity: room.capacity,
     })),
@@ -830,7 +845,7 @@ const onAddManual = () => {
                 </div>
                 <div class="flex justify-between">
                     <span class="text-slate-400">Room</span>
-                    <span class="font-medium text-slate-700">{{ detailsRow.room?.room_code || '—' }}</span>
+                    <span class="font-medium text-slate-700">{{ detailsRow.room?.room_name || '—' }}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-slate-400">Days</span>

@@ -81,7 +81,6 @@ class SettingsService
                 'group' => 'autoschedule',
                 'type' => 'json',
                 'default' => [
-                    'faculty_availability' => 'high',
                     'room_availability' => 'high',
                     'faculty_workload' => 'medium',
                     'section_daily_load' => 'medium',

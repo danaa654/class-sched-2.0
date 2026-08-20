@@ -54,8 +54,10 @@ return new class extends Migration
             // semester (e.g. "BSIT-4A" existing in 2026-2027 · First
             // Semester does not block "BSIT-4A" in 2026-2027 · Second
             // Semester — that's a separate, valid Section).
+            // CASE WHEN (not MySQL's IF()) so this generated column works
+            // identically on MySQL (production) and SQLite (tests).
             $table->string('section_code_active')
-                ->virtualAs('IF(deleted_at IS NULL, section_code, NULL)')
+                ->virtualAs('CASE WHEN deleted_at IS NULL THEN section_code ELSE NULL END')
                 ->nullable();
 
             $table->unique(['section_code_active', 'academic_year', 'semester']);

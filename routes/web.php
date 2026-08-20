@@ -11,7 +11,6 @@ use App\Http\Controllers\CurriculumController;
 use App\Http\Controllers\CurriculumSubjectController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
-use App\Http\Controllers\FacultyAvailabilityController;
 use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\MajorController;
 use App\Http\Controllers\NotificationController;
@@ -104,9 +103,6 @@ Route::middleware('auth')->group(function () {
     Route::put('/scheduling/faculty/{faculty}', [FacultyController::class, 'update'])->name('scheduling.faculty.update');
     Route::delete('/scheduling/faculty/{faculty}', [FacultyController::class, 'destroy'])->name('scheduling.faculty.destroy');
 
-    Route::post('/scheduling/faculty/{faculty}/availability', [FacultyAvailabilityController::class, 'store'])->name('scheduling.faculty.availability.store');
-    Route::put('/scheduling/faculty/{faculty}/availability/{faculty_availability}', [FacultyAvailabilityController::class, 'update'])->name('scheduling.faculty.availability.update');
-    Route::delete('/scheduling/faculty/{faculty}/availability/{faculty_availability}', [FacultyAvailabilityController::class, 'destroy'])->name('scheduling.faculty.availability.destroy');
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');
     Route::get('/scheduling/rooms/{room}/schedule', [RoomController::class, 'schedule'])->name('scheduling.rooms.schedule');

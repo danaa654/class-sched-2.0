@@ -326,7 +326,7 @@ async function confirmRemove() {
             :draggable="false"
         >
             <p class="text-sm text-slate-600" v-if="removeTarget">
-                {{ removeTarget.subject_code }} will no longer be prioritized for {{ room.room_code }} during automatic scheduling.
+                {{ removeTarget.subject_code }} will no longer be prioritized for {{ room.room_name }} during automatic scheduling.
             </p>
             <template #footer>
                 <Button label="Cancel" severity="secondary" outlined @click="removeTarget = null" />

@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\College;
 use App\Models\Curriculum;
 use App\Models\Faculty;
-use App\Models\FacultyAvailability;
 use App\Models\Room;
 use App\Models\SchoolYear;
 use App\Models\Section;
@@ -39,7 +38,6 @@ class ReportsService
         ],
         'Faculty' => [
             'faculty_teaching_load' => 'Faculty Teaching Load',
-            'faculty_availability' => 'Faculty Availability',
         ],
         'Rooms' => [
             'room_utilization' => 'Room Utilization',
@@ -140,7 +138,6 @@ class ReportsService
             'unscheduled_subjects' => $this->unscheduledSubjects($filters),
             'scheduling_conflicts' => $this->schedulingConflicts($filters),
             'faculty_teaching_load' => $this->facultyTeachingLoad($filters),
-            'faculty_availability' => $this->facultyAvailability($filters),
             'room_utilization' => $this->roomUtilization($filters),
             'room_conflicts' => $this->schedulingConflicts($filters, onlyType: 'Room'),
             'sections_overview' => $this->sectionsOverview($filters),
@@ -433,24 +430,6 @@ class ReportsService
             'Faculty Unassigned' => $rows->count() - $assigned,
             'Average Teaching Load' => $rows->count() ? round($rows->avg('Total Units'), 1) : 0,
         ]);
-    }
-
-    private function facultyAvailability(array $filters): array
-    {
-        $query = FacultyAvailability::query()->with('faculty');
-        if (! empty($filters['faculty_id'])) {
-            $query->where('faculty_id', $filters['faculty_id']);
-        }
-
-        $rows = $query->get()->map(fn (FacultyAvailability $a) => [
-            'Faculty' => $a->faculty?->full_name,
-            'Day' => $a->day_of_week,
-            'Available From' => $this->formatTime12h($a->start_time),
-            'Available Until' => $this->formatTime12h($a->end_time),
-            'Availability Status' => $a->is_available ? 'Available' : 'Unavailable',
-        ]);
-
-        return $this->table('Faculty Availability', $rows);
     }
 
     // ------------------------------------------------------------

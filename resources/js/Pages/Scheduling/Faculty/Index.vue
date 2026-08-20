@@ -320,7 +320,7 @@ const fullName = (faculty) => {
                     <!-- Faculty Table -->
                     <p class="text-xs mb-2 flex items-center gap-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         <i class="pi pi-eye" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
-                        Click the view icon on a row to manage that faculty member's teaching qualifications, availability, and workload.
+                        Click a faculty member's name to manage their teaching qualifications and workload.
                     </p>
                     <DataTable
                         :value="faculties.data"
@@ -356,7 +356,13 @@ const fullName = (faculty) => {
                         <Column field="faculty_id" header="Faculty ID" style="width: 9rem" />
                         <Column header="Faculty Name" style="min-width: 14rem">
                             <template #body="{ data }">
-                                {{ fullName(data) }}
+                                <span
+                                    class="cursor-pointer hover:underline"
+                                    :class="isDark ? 'text-emerald-400' : 'text-emerald-700'"
+                                    @click="router.visit(route('scheduling.faculty.show', data.id))"
+                                >
+                                    {{ fullName(data) }}
+                                </span>
                             </template>
                         </Column>
                         <Column header="Employment Status" style="width: 10rem">
@@ -429,7 +435,7 @@ const fullName = (faculty) => {
                             <template #body="{ data }">
                                 <div class="flex gap-1">
                                     <Button
-                                        v-tooltip.top="'View details, teaching qualifications, availability & workload'"
+                                        v-tooltip.top="'View details, teaching qualifications & workload'"
                                         icon="pi pi-eye"
                                         text
                                         rounded

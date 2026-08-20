@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Models\AcademicTerm;
 use App\Models\College;
 use App\Models\Curriculum;
 use App\Models\Department;
 use App\Models\Major;
+use App\Models\SchoolYear;
 use App\Models\Section;
+use App\Models\Semester;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -42,6 +45,8 @@ class SectionAuthorizationTest extends TestCase
 
     private Curriculum $ccsCurriculum;
 
+    private Curriculum $cteCurriculum;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -65,6 +70,40 @@ class SectionAuthorizationTest extends TestCase
             'end_year' => 2025,
             'status' => 'Active',
             'allow_new_students' => true,
+        ]);
+
+        $this->cteCurriculum = Curriculum::create([
+            'major_id' => $this->cteMajor->id,
+            'code' => 'BSED-2024',
+            'name' => 'BSED 2024 Curriculum',
+            'start_year' => 2024,
+            'end_year' => 2025,
+            'status' => 'Active',
+            'allow_new_students' => true,
+        ]);
+
+        // StoreSectionRequest cross-validates academic_year/semester
+        // against a real AcademicTerm (see its withValidator()) — every
+        // payload in this file uses '2026-2027' / 'First Semester', so
+        // a matching term must exist or every "ALLOWED" case fails
+        // validation before authorization is ever reached.
+        $schoolYear = SchoolYear::create([
+            'name' => '2026-2027',
+            'start_year' => 2026,
+            'end_year' => 2027,
+            'status' => 'Active',
+        ]);
+
+        $semester = Semester::create(array_merge(
+            ['name' => '1st Semester'],
+            Semester::defaultsFor('1st Semester'),
+            ['status' => 'Active'],
+        ));
+
+        AcademicTerm::create([
+            'school_year_id' => $schoolYear->id,
+            'semester_id' => $semester->id,
+            'status' => 'Active',
         ]);
     }
 
@@ -107,7 +146,7 @@ class SectionAuthorizationTest extends TestCase
     {
         $registrar = $this->makeUser('Registrar');
 
-        $response = $this->actingAs($registrar)->post('/scheduling/sections', $this->sectionPayload($this->cteMajor));
+        $response = $this->actingAs($registrar)->post('/scheduling/sections', $this->sectionPayload($this->cteMajor, $this->cteCurriculum));
 
         $response->assertRedirect();
         $response->assertSessionHasNoErrors();
@@ -129,7 +168,7 @@ class SectionAuthorizationTest extends TestCase
     {
         $oic = $this->makeUser('OIC', $this->ccs);
 
-        $response = $this->actingAs($oic)->post('/scheduling/sections', $this->sectionPayload($this->cteMajor));
+        $response = $this->actingAs($oic)->post('/scheduling/sections', $this->sectionPayload($this->cteMajor, $this->cteCurriculum));
 
         $response->assertForbidden();
         $this->assertDatabaseCount('sections', 0);
@@ -150,7 +189,7 @@ class SectionAuthorizationTest extends TestCase
     {
         $dean = $this->makeUser('Dean', $this->ccs);
 
-        $response = $this->actingAs($dean)->post('/scheduling/sections', $this->sectionPayload($this->cteMajor));
+        $response = $this->actingAs($dean)->post('/scheduling/sections', $this->sectionPayload($this->cteMajor, $this->cteCurriculum));
 
         $response->assertForbidden();
         $this->assertDatabaseCount('sections', 0);
@@ -165,8 +204,9 @@ class SectionAuthorizationTest extends TestCase
     {
         $oic = $this->makeUser('OIC', $this->ccs);
 
-        $payload = $this->sectionPayload($this->ccsMajor);
+        $payload = $this->sectionPayload($this->ccsMajor, $this->ccsCurriculum);
         $payload['major_id'] = $this->cteMajor->id; // tampered
+        $payload['curriculum_id'] = $this->cteCurriculum->id; // kept consistent with the tampered major so validation doesn't reject it before the authorization check ever runs — a real attacker tampers both together
 
         $response = $this->actingAs($oic)->post('/scheduling/sections', $payload);
 
@@ -188,6 +228,7 @@ class SectionAuthorizationTest extends TestCase
             'section_name' => 'HACKED-1A',
             'section_type' => 'Regular',
             'major_id' => $this->cteMajor->id,
+            'curriculum_id' => $this->cteCurriculum->id,
             'year_level' => 'First Year',
             'academic_year' => '2026-2027',
             'semester' => 'First Semester',
@@ -208,6 +249,7 @@ class SectionAuthorizationTest extends TestCase
 
         $response = $this->actingAs($oic)->post('/scheduling/sections/batch', [
             'major_id' => $this->cteMajor->id,
+            'curriculum_id' => $this->cteCurriculum->id,
             'section_type' => 'Regular',
             'year_level' => 'First Year',
             'academic_year' => '2026-2027',
@@ -228,6 +270,7 @@ class SectionAuthorizationTest extends TestCase
 
         $response = $this->actingAs($oic)->post('/scheduling/sections/preview-batch', [
             'major_id' => $this->cteMajor->id,
+            'curriculum_id' => $this->cteCurriculum->id,
             'section_type' => 'Regular',
             'year_level' => 'First Year',
             'academic_year' => '2026-2027',

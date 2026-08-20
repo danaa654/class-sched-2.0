@@ -262,8 +262,38 @@ const closeAddRoom = () => {
     roomForm.clearErrors();
 };
 
-const onSaveRoom = () => {
-    const options = {
+// Room Code was dropped from the UI (it duplicated Room Name for every
+// room in practice), but the `rooms` table still stores it as a unique,
+// required column. Rather than migrating the schema, it's derived here
+// from Room Name right before saving — e.g. "Computer Laboratory 2"
+// becomes "COMPUTERLABORATORY2" — so the field stays populated behind
+// the scenes without the person ever having to type it twice. A short
+// numeric suffix is appended on retry if the derived code collides with
+// an existing room.
+const deriveRoomCode = (name, suffix = '') => {
+    const base = (name || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .slice(0, 20 - suffix.length);
+
+    return `${base}${suffix}`;
+};
+
+const submitRoomForm = (options) => {
+    if (editingRoom.value) {
+        roomForm.put(route('scheduling.rooms.update', editingRoom.value.id), options);
+    } else {
+        roomForm.post(route('scheduling.rooms.store'), options);
+    }
+};
+
+const onSaveRoom = (retried = false) => {
+    roomForm.room_code = deriveRoomCode(
+        roomForm.room_name,
+        retried ? String(Math.floor(Math.random() * 900) + 100) : ''
+    );
+
+    submitRoomForm({
         preserveScroll: true,
         onSuccess: () => {
             const wasEditing = !!editingRoom.value;
@@ -278,7 +308,16 @@ const onSaveRoom = () => {
             });
             onRefresh();
         },
-        onError: () => {
+        onError: (errors) => {
+            // A derived-code collision (two rooms with a very similar
+            // name) is the one room_code error a person could actually
+            // hit despite never seeing the field — retry once, silently,
+            // with a random suffix before bothering them about it.
+            if (errors.room_code && !retried) {
+                onSaveRoom(true);
+                return;
+            }
+
             toast.add({
                 severity: 'warn',
                 summary: 'Missing information',
@@ -286,19 +325,13 @@ const onSaveRoom = () => {
                 life: 3000,
             });
         },
-    };
-
-    if (editingRoom.value) {
-        roomForm.put(route('scheduling.rooms.update', editingRoom.value.id), options);
-    } else {
-        roomForm.post(route('scheduling.rooms.store'), options);
-    }
+    });
 };
 
 const onDeleteRoom = (room) => {
     Swal.fire({
         title: 'Delete this room?',
-        text: `${room.room_code} — ${room.room_name} will be permanently deleted.`,
+        text: `${room.room_name} will be permanently deleted.`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
@@ -574,8 +607,7 @@ const closeSchedule = () => {
                             </div>
                         </template>
 
-                        <Column field="room_code" header="Room Code" style="width: 10rem" />
-                        <Column field="room_name" header="Room Name" />
+                        <Column field="room_name" header="Room Name" style="width: 16rem" />
                         <Column field="building" header="Building" style="width: 12rem" />
                         <Column header="Floor" style="width: 7rem">
                             <template #body="{ data }">
@@ -741,26 +773,9 @@ const closeSchedule = () => {
             }"
             @hide="closeAddRoom"
         >
-            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 neu-form" @submit.prevent="onSaveRoom">
-                <!-- Room Code -->
-                <div class="flex flex-col gap-1">
-                    <label for="room_code" class="text-sm font-medium text-slate-700">
-                        Room Code <span class="text-red-500">*</span>
-                    </label>
-                    <InputText
-                        id="room_code"
-                        v-model="roomForm.room_code"
-                        placeholder="e.g. RM101, LAB2"
-                        :invalid="!!roomForm.errors.room_code"
-                        class="w-full"
-                    />
-                    <small v-if="roomForm.errors.room_code" class="text-red-500">
-                        {{ roomForm.errors.room_code }}
-                    </small>
-                </div>
-
+            <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 neu-form" @submit.prevent="onSaveRoom()">
                 <!-- Room Name -->
-                <div class="flex flex-col gap-1">
+                <div class="flex flex-col gap-1 sm:col-span-2">
                     <label for="room_name" class="text-sm font-medium text-slate-700">
                         Room Name <span class="text-red-500">*</span>
                     </label>
@@ -768,11 +783,11 @@ const closeSchedule = () => {
                         id="room_name"
                         v-model="roomForm.room_name"
                         placeholder="e.g. Computer Laboratory 2"
-                        :invalid="!!roomForm.errors.room_name"
+                        :invalid="!!roomForm.errors.room_name || !!roomForm.errors.room_code"
                         class="w-full"
                     />
-                    <small v-if="roomForm.errors.room_name" class="text-red-500">
-                        {{ roomForm.errors.room_name }}
+                    <small v-if="roomForm.errors.room_name || roomForm.errors.room_code" class="text-red-500">
+                        {{ roomForm.errors.room_name || roomForm.errors.room_code }}
                     </small>
                 </div>
 
@@ -939,7 +954,7 @@ const closeSchedule = () => {
                     icon="pi pi-check"
                     severity="success"
                     :loading="roomForm.processing"
-                    @click="onSaveRoom"
+                    @click="onSaveRoom()"
                 />
             </template>
         </Dialog>
@@ -948,7 +963,7 @@ const closeSchedule = () => {
         <Dialog
             v-model:visible="scheduleVisible"
             modal
-            :header="scheduleRoom ? `${scheduleRoom.room_code} — ${scheduleRoom.room_name}` : 'Room Schedule'"
+            :header="scheduleRoom ? scheduleRoom.room_name : 'Room Schedule'"
             :style="{ width: '900px' }"
             :breakpoints="{ '960px': '90vw', '640px': '95vw' }"
             :draggable="false"

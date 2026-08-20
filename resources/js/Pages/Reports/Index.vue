@@ -69,7 +69,7 @@ const yearLevelOptions = computed(() => [{ label: 'All Year Levels', value: '' }
 const sectionOptions = computed(() => [{ label: 'All Sections', value: '' }, ...props.filterOptions.sections.map((s) => ({ label: s.section_code, value: s.id }))]);
 const sectionTypeOptions = [{ label: 'All Types', value: '' }, { label: 'Regular', value: 'Regular' }, { label: 'Irregular', value: 'Irregular' }];
 const facultyOptions = computed(() => [{ label: 'All Faculty', value: '' }, ...props.filterOptions.faculty.map((f) => ({ label: f.name, value: f.id }))]);
-const roomOptions = computed(() => [{ label: 'All Rooms', value: '' }, ...props.filterOptions.rooms.map((r) => ({ label: r.room_code, value: r.id }))]);
+const roomOptions = computed(() => [{ label: 'All Rooms', value: '' }, ...props.filterOptions.rooms.map((r) => ({ label: r.room_name, value: r.id }))]);
 
 const reportTypeOptions = computed(() => {
     const groups = [];
@@ -83,7 +83,7 @@ const reportTypeOptions = computed(() => {
 });
 
 // Which selectors are relevant to the currently chosen report
-const needsFaculty = computed(() => ['schedule_by_faculty', 'faculty_teaching_load', 'faculty_availability'].includes(reportType.value));
+const needsFaculty = computed(() => ['schedule_by_faculty', 'faculty_teaching_load'].includes(reportType.value));
 const needsRoom = computed(() => ['schedule_by_room', 'room_utilization', 'room_conflicts'].includes(reportType.value));
 const needsSection = computed(() => ['schedule_by_section', 'section_subjects'].includes(reportType.value));
 const forcesIrregular = computed(() => ['irregular_sections', 'irregular_merge_report'].includes(reportType.value));

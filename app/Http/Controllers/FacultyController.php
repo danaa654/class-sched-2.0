@@ -84,7 +84,7 @@ class FacultyController extends Controller
 
     /**
      * Display the Faculty Details page (Information, Teaching
-     * Qualifications, Availability, and Workload tabs).
+     * Qualifications, and Workload tabs).
      */
     public function show(Faculty $faculty): Response
     {
@@ -93,7 +93,6 @@ class FacultyController extends Controller
         $faculty->load([
             'college' => fn ($query) => $query->withTrashed(),
             'subjects' => fn ($query) => $query->orderBy('subject_code'),
-            'availabilities',
         ]);
 
         // Real assigned workload (Scheduled + Draft placements, active

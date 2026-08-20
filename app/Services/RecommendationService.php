@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\SchoolYear;
 use App\Models\Faculty;
-use App\Models\FacultyAvailability;
 use App\Models\Room;
 use App\Models\Section;
 use App\Models\SectionSubject;
@@ -28,37 +27,16 @@ use App\Services\RoomUtilizationService;
  */
 class RecommendationService
 {
-    /**
-     * Maps the short Day tokens used throughout the scheduling
-     * workspace (days column, dayOptions in Show.vue) to the full
-     * day names FacultyAvailability.day_of_week stores.
-     *
-     * @var array<string, string>
-     */
-    private const DAY_MAP = [
-        'Mon' => 'Monday',
-        'Tue' => 'Tuesday',
-        'Wed' => 'Wednesday',
-        'Thu' => 'Thursday',
-        'Fri' => 'Friday',
-        'Sat' => 'Saturday',
-        'Sun' => 'Sunday',
-    ];
-
-    private const MAX_FACULTY_RESULTS = 5;
-
-    /**
-     * When the Priority 1 (Teaching Qualification) pool has fewer than
-     * this many Active candidates, recommendFaculty() blends in
-     * Priority 2/2b (College / General Education Match) candidates as
-     * lower-ranked alternates instead of stopping at the thin TQ pool.
-     * TQ faculty still always outrank blended candidates (higher point
-     * tier), this only widens the *options* the Registrar/Auto Schedule
-     * actually gets to see and choose from.
-     */
-    private const MIN_TQ_POOL_BEFORE_BLEND = 3;
-
     private const MAX_ROOM_RESULTS = 5;
+
+    // Was referenced (recommendFaculty()'s primary/fallback ranking,
+    // and the College/GenEd override ranking around line 716) but
+    // never declared, so any Faculty recommendation call — including
+    // the one Auto Generate Schedule fires per subject — fatal'd with
+    // "Undefined constant ...::MAX_FACULTY_RESULTS". Mirrors
+    // MAX_ROOM_RESULTS above: cap the ranked Faculty list to the top
+    // 5 candidates.
+    private const MAX_FACULTY_RESULTS = 5;
 
     private const MAX_TIME_RESULTS = 5;
 
@@ -320,54 +298,60 @@ class RecommendationService
     }
 
     /**
-     * FACULTY SELECTION — hierarchical strategy (Prompt 8.10):
+     * FACULTY SELECTION — academic-ownership-first strategy.
      *
-     *   PRIORITY 1 — Teaching Qualifications
-     *     If ANY faculty has been explicitly linked to this Subject via
-     *     the Teaching Qualifications module (faculty_subject pivot),
-     *     ONLY those faculty are eligible — College is irrelevant here.
-     *     Ranked by: Availability, Existing Schedule Conflicts, Lowest
-     *     Teaching Load, Full-time before Part-time, Preferred Teaching
-     *     Block.
+     * The question asked, in order, is "who owns this subject
+     * academically?" before "who can teach it?":
      *
-     *   PRIORITY 2 — College Matching (fallback)
-     *     Only reached when the Subject has NO Teaching Qualification
-     *     configured at all. Eligible faculty = every Active faculty
-     *     member whose own College matches the College that owns the
-     *     Subject (via Subject -> Major -> Department -> College, the
-     *     same chain the Curriculum for that Major belongs to). Ranked
-     *     by: Availability, No Schedule Conflicts, Lowest Teaching Load,
-     *     Full-time before Part-time. Results are flagged
-     *     `selected_by_college_match = true` so the UI can show the
-     *     "Selected by College Match" badge.
+     *   LEVEL 1 — Owning College/Program + Teaching Qualification
+     *     For a Major/Professional Subject, resolve the College that
+     *     owns it via Subject -> Major -> Department -> College (the
+     *     same chain the Section's own Curriculum belongs to), then
+     *     restrict to Active faculty whose own `college_id` matches
+     *     AND who are explicitly linked to this Subject via Teaching
+     *     Qualifications. For a General Education/Minor Subject (no
+     *     owning College — subjectCollegeId() is null), the pool is
+     *     General Education faculty (`college_id` null) who carry the
+     *     same Teaching Qualification. College match alone is never
+     *     enough on its own — a faculty member belonging to the right
+     *     College who ISN'T qualified for this specific Subject is not
+     *     a candidate at this tier, full stop.
+     *     Ranked by: No Schedule Conflicts, Lowest Teaching Load,
+     *     Full-time before Part-time.
      *
-     *   PRIORITY 3 — Manual Scheduling
+     *   LEVEL 4 — Cross-College Fallback
+     *     Only reached when Level 1 returns zero candidates — i.e. no
+     *     Active, Teaching-Qualification-linked faculty exists inside
+     *     the Subject's own academic home. Widens the same
+     *     Teaching-Qualification requirement to every College, and
+     *     flags the result `fallback = true` with a human-readable
+     *     `fallback_reason` so the Registrar/Auto Generate review can
+     *     surface a "Cross-college faculty fallback" notice instead of
+     *     silently treating it as an ordinary recommendation.
+     *
+     *   LEVEL 5 — Manual Scheduling
      *     No faculty eligible at either tier -> empty recommendations
-     *     with message "No qualified or college-matched faculty
-     *     available." The Auto Generate engine marks the subject as
-     *     requiring manual scheduling; nothing is auto-assigned.
+     *     with an explanatory message. The Auto Generate engine marks
+     *     the subject as requiring manual scheduling; nothing is
+     *     auto-assigned.
      *
-     * Teaching Qualifications are NEVER overridden or bypassed by
-     * College Matching — Priority 2 only ever runs when Priority 1
-     * returns zero candidates.
+     * Both the human-facing selector (this method) and Auto Schedule
+     * (AutoScheduleService, via the same call) share this exact
+     * eligibility logic — there is only ever one ranked candidate list
+     * for a given Subject/Section, never a looser "any available
+     * faculty" version for the automatic path.
      */
     private const TQ_POINTS_QUALIFIED = 25;
 
-    private const TQ_POINTS_AVAILABLE = 25;
-
-    private const TQ_POINTS_NO_CONFLICT = 15;
+    private const TQ_POINTS_NO_CONFLICT = 50;
 
     private const TQ_POINTS_LOW_LOAD = 15;
 
     private const TQ_POINTS_FULL_TIME = 10;
 
-    private const TQ_POINTS_PREFERRED_BLOCK = 10;
-
     private const COLLEGE_POINTS_MATCH = 30;
 
-    private const COLLEGE_POINTS_AVAILABLE = 25;
-
-    private const COLLEGE_POINTS_NO_CONFLICT = 20;
+    private const COLLEGE_POINTS_NO_CONFLICT = 45;
 
     private const COLLEGE_POINTS_LOW_LOAD = 15;
 
@@ -375,15 +359,13 @@ class RecommendationService
 
     /**
      * General Education Match uses the same weight distribution as
-     * College Match (they're both Priority 2 fallback tiers) — kept
-     * as separate constants only so the two can be tuned
+     * College Match (they're both "owning academic home" tiers) —
+     * kept as separate constants only so the two can be tuned
      * independently later without touching each other.
      */
     private const GENED_POINTS_MATCH = 30;
 
-    private const GENED_POINTS_AVAILABLE = 25;
-
-    private const GENED_POINTS_NO_CONFLICT = 20;
+    private const GENED_POINTS_NO_CONFLICT = 45;
 
     private const GENED_POINTS_LOW_LOAD = 15;
 
@@ -393,188 +375,162 @@ class RecommendationService
      * Manual Override carries no "match" points at all — the
      * Registrar has deliberately stepped outside every recommended
      * tier, so the category criterion scores 0 and the Live Score
-     * reflects only the faculty's own Availability/Load/Conflict
-     * standing.
+     * reflects only the faculty's own Load/Conflict standing.
      */
     private const OVERRIDE_POINTS_MATCH = 0;
 
-    private const OVERRIDE_POINTS_AVAILABLE = 25;
-
-    private const OVERRIDE_POINTS_NO_CONFLICT = 20;
+    private const OVERRIDE_POINTS_NO_CONFLICT = 45;
 
     private const OVERRIDE_POINTS_LOW_LOAD = 15;
 
     private const OVERRIDE_POINTS_FULL_TIME = 10;
 
+    /**
+     * @param  bool  $requireQualified  Kept for API compatibility with
+     *                                  existing callers (AutoScheduleService
+     *                                  passes `true` to make the "never
+     *                                  auto-assign an unqualified faculty
+     *                                  member" constraint explicit at the
+     *                                  call site). Every tier this method
+     *                                  returns is already Teaching-
+     *                                  Qualification-gated — College match
+     *                                  alone was never sufficient — so this
+     *                                  flag no longer changes the result;
+     *                                  it's accepted and ignored rather than
+     *                                  removed, to avoid a breaking-change
+     *                                  ripple through every caller.
+     */
     public function recommendFaculty(Subject $subject, Section $section, ?SectionSubject $current = null, bool $requireQualified = false): array
     {
-        // PRIORITY 1 — Teaching Qualifications. Any faculty explicitly
-        // linked to this Subject is eligible, full stop; College plays
-        // no part in eligibility at this tier.
-        $tqFaculty = Faculty::query()
+        $collegeId = $this->subjectCollegeId($subject);
+        $primaryTier = $collegeId !== null ? 'college_match' : 'general_education_match';
+
+        // LEVEL 1 — the Subject's own academic home (its owning
+        // College for a Major/Professional Subject, or the General
+        // Education pool for a GenEd/Minor Subject with no owning
+        // College of its own), restricted to faculty who are ALSO
+        // explicitly linked to this Subject via Teaching
+        // Qualifications. Being in the right College never substitutes
+        // for actually being qualified to teach the Subject.
+        $primaryQuery = Faculty::query()
             ->where('status', 'Active')
             ->whereHas('subjects', fn ($q) => $q->where('subjects.id', $subject->id))
-            ->with(['subjects:id', 'availabilities'])
-            ->get();
+            ->with(['subjects:id']);
 
-        $tqRanked = $tqFaculty->isNotEmpty()
-            ? $this->rankFacultyCandidates($tqFaculty, $subject, $current, tier: 'teaching_qualification')
+        $primaryQuery = $collegeId !== null
+            ? $primaryQuery->where('college_id', $collegeId)
+            : $primaryQuery->whereNull('college_id');
+
+        $primaryFaculty = $primaryQuery->get();
+
+        $primaryRanked = $primaryFaculty->isNotEmpty()
+            ? $this->rankFacultyCandidates($primaryFaculty, $subject, $current, tier: $primaryTier)
             : [];
 
-        // If the Teaching Qualification pool is healthy (>= threshold),
-        // it's the whole story — no need to widen the pool.
-        if (count($tqRanked) >= self::MIN_TQ_POOL_BEFORE_BLEND) {
+        if (! empty($primaryRanked)) {
             return [
-                'recommendations' => $tqRanked,
+                'recommendations' => array_slice($primaryRanked, 0, self::MAX_FACULTY_RESULTS),
                 'message' => null,
-                'tier' => 'teaching_qualification',
+                'tier' => $primaryTier,
+                'fallback' => false,
+                'fallback_reason' => null,
             ];
         }
 
-        // HARD QUALIFICATION MODE — used by AutoScheduleService (and any
-        // other caller that must never auto-assign an unqualified
-        // faculty member). Teaching Qualification is the ONLY eligible
-        // pool for a Major Subject here; College Match is a convenience
-        // for the human-facing selector only (a Registrar can knowingly
-        // pick a non-TQ faculty), never for an unattended automatic
-        // pick on a subject that actually belongs to a College. This is
-        // what makes "never assign an unqualified faculty member" an
-        // actual hard constraint instead of something the blend below
-        // could quietly override once the TQ pool is thin.
-        //
-        // GenEd/Minor Subjects (no owning College — subjectCollegeId()
-        // is null, e.g. UTS, GENSOC, PATHFIT1) are the one exception:
-        // they were never meant to require a Teaching-Qualification
-        // link in the first place, since they're explicitly open to
-        // whichever General Education faculty (college_id null, no
-        // department) is available — that pool IS "qualified" for a
-        // GenEd Subject by definition. Without this, Auto Schedule
-        // reported every GenEd/Minor Subject as "Requires Manual
-        // Scheduling" the moment nobody happened to have an explicit
-        // Teaching Qualification row for it, even though the General
-        // Education Faculty Master page exists precisely to staff
-        // these subjects.
-        if ($requireQualified) {
-            if (! empty($tqRanked)) {
+        // LEVEL 2 — SAME College/GenEd pool as Level 1, but WITHOUT
+        // requiring an explicit Teaching Qualification link. A BSIT
+        // (Major) Subject is still owned by the College of Computer
+        // Studies, a BSED (Major) Subject by the College of Teacher
+        // Education, a BSCRIM (Major) Subject by the College of
+        // Criminology, and so on — every Major/Professional Subject
+        // belongs to the Section's own College, and any Active
+        // faculty member in that same College is a reasonable
+        // scheduling candidate even before the Registrar has gotten
+        // around to recording a Teaching Qualification for them on
+        // the Faculty page. Same idea for a GenEd/Minor Subject and
+        // the College-less General Education pool. This is exactly
+        // the "College Match"/"General Education Match" scoring tier
+        // rankFacultyCandidates() already supports (see
+        // 'selected_by_college_match' below) — it just wasn't
+        // reachable before without a Teaching Qualification record.
+        // $requireQualified exists for callers (none currently) that
+        // must never accept a non-TQ pick; Auto Generate Schedule
+        // intentionally DOES fall through to this level, same as the
+        // manual Faculty dropdown does.
+        if (! $requireQualified) {
+            $collegeQuery = Faculty::query()
+                ->where('status', 'Active')
+                ->with(['subjects:id']);
+
+            $collegeQuery = $collegeId !== null
+                ? $collegeQuery->where('college_id', $collegeId)
+                : $collegeQuery->whereNull('college_id');
+
+            $collegeFaculty = $collegeQuery->get();
+
+            $collegeRanked = $collegeFaculty->isNotEmpty()
+                ? $this->rankFacultyCandidates($collegeFaculty, $subject, $current, tier: $primaryTier)
+                : [];
+
+            if (! empty($collegeRanked)) {
                 return [
-                    'recommendations' => array_slice($tqRanked, 0, self::MAX_FACULTY_RESULTS),
+                    'recommendations' => array_slice($collegeRanked, 0, self::MAX_FACULTY_RESULTS),
                     'message' => null,
-                    'tier' => 'teaching_qualification',
+                    'tier' => $primaryTier,
+                    'fallback' => false,
+                    'fallback_reason' => null,
                 ];
             }
-
-            if ($this->subjectCollegeId($subject) === null) {
-                $genEdFaculty = Faculty::query()
-                    ->where('status', 'Active')
-                    ->whereNull('college_id')
-                    ->with(['subjects:id', 'availabilities'])
-                    ->get();
-
-                $genEdRanked = $genEdFaculty->isNotEmpty()
-                    ? $this->rankFacultyCandidates($genEdFaculty, $subject, $current, tier: 'general_education_match')
-                    : [];
-
-                return [
-                    'recommendations' => array_slice($genEdRanked, 0, self::MAX_FACULTY_RESULTS),
-                    'message' => empty($genEdRanked)
-                        ? 'No General Education faculty member is available for this subject.'
-                        : null,
-                    'tier' => 'general_education_match',
-                ];
-            }
-
-            return [
-                'recommendations' => [],
-                'message' => 'No faculty member is qualified (Teaching Qualification) for this subject.',
-                'tier' => null,
-            ];
         }
 
-        // PRIORITY 2 / 2b — College Matching (or General Education
-        // Matching for GenEd/Minor Subjects, which have no owning
-        // College of their own). Reached in full when there is no
-        // Teaching Qualification at all, and reached as a *blend* when
-        // the TQ pool exists but is thin (fewer real alternatives than
-        // MIN_TQ_POOL_BEFORE_BLEND) — this is what stops one lone
-        // Teaching-Qualification-linked faculty member from being the
-        // only name Auto Schedule / the selector ever offers.
-        $collegeId = $this->subjectCollegeId($subject);
-        $tqIds = collect($tqRanked)->pluck('id')->all();
-        $fallbackRanked = [];
-        $fallbackTier = null;
+        // LEVEL 4 — CROSS-COLLEGE FALLBACK. Nobody inside the
+        // Subject's own academic home is both Active and Teaching-
+        // Qualification-linked to it, so the same Teaching
+        // Qualification requirement is widened to every College. This
+        // is still hard-gated on qualification — it is never "any
+        // available faculty regardless of college", only "qualified
+        // faculty regardless of college" — and is explicitly flagged
+        // as a fallback rather than presented as an ordinary
+        // recommendation.
+        $fallbackFaculty = Faculty::query()
+            ->where('status', 'Active')
+            ->whereHas('subjects', fn ($q) => $q->where('subjects.id', $subject->id))
+            ->with(['subjects:id'])
+            ->get();
 
-        if ($collegeId !== null) {
-            $collegeFaculty = Faculty::query()
-                ->where('status', 'Active')
-                ->where('college_id', $collegeId)
-                ->whereNotIn('id', $tqIds)
-                ->with(['subjects:id', 'availabilities'])
-                ->get();
+        $fallbackRanked = $fallbackFaculty->isNotEmpty()
+            ? $this->rankFacultyCandidates($fallbackFaculty, $subject, $current, tier: 'teaching_qualification')
+            : [];
 
-            if ($collegeFaculty->isNotEmpty()) {
-                $fallbackRanked = $this->rankFacultyCandidates($collegeFaculty, $subject, $current, tier: 'college_match');
-                $fallbackTier = 'college_match';
-            }
-        } else {
-            $genEdFaculty = Faculty::query()
-                ->where('status', 'Active')
-                ->whereNull('college_id')
-                ->whereNotIn('id', $tqIds)
-                ->with(['subjects:id', 'availabilities'])
-                ->get();
+        if (! empty($fallbackRanked)) {
+            $fallbackReason = $collegeId !== null
+                ? "No suitable qualified faculty is available in this Subject's own College. Showing qualified faculty from other Colleges instead."
+                : 'No suitable qualified General Education faculty is available. Showing other qualified faculty instead.';
 
-            if ($genEdFaculty->isNotEmpty()) {
-                $fallbackRanked = $this->rankFacultyCandidates($genEdFaculty, $subject, $current, tier: 'general_education_match');
-                $fallbackTier = 'general_education_match';
-            }
-        }
-
-        if (empty($tqRanked) && empty($fallbackRanked)) {
-            // PRIORITY 3 — nobody eligible at either tier. The Registrar
-            // (or Auto Generate Schedule) must assign this one manually.
-            return [
-                'recommendations' => [],
-                'message' => 'No qualified or college-matched faculty available.',
-                'tier' => null,
-            ];
-        }
-
-        if (empty($tqRanked)) {
-            // No Teaching Qualification pool at all — Priority 2/2b
-            // stands entirely on its own, exactly as before.
             return [
                 'recommendations' => array_slice($fallbackRanked, 0, self::MAX_FACULTY_RESULTS),
-                'message' => null,
-                'tier' => $fallbackTier,
+                'message' => $fallbackReason,
+                'tier' => 'teaching_qualification',
+                'fallback' => true,
+                'fallback_reason' => $fallbackReason,
             ];
         }
 
-        // Blend: previously TQ candidates were always concatenated
-        // first regardless of their actual score, so a Teaching-
-        // Qualification-linked faculty member who missed several
-        // criteria (e.g. no Preferred Teaching Block) could still
-        // rank #1 ahead of a College Match candidate who scored
-        // higher on every criterion actually met — not smart, just
-        // "TQ always wins". Now the merged pool is sorted by the
-        // real Recommendation Score (desc), with TQ only used as a
-        // tie-breaker when two candidates land on the exact same
-        // score, so "Best Match" always means the highest score in
-        // the list, matching what the Registrar visually sees.
-        $blended = array_merge($tqRanked, $fallbackRanked);
-        usort($blended, function (array $a, array $b) {
-            if ($a['score'] !== $b['score']) {
-                return $b['score'] <=> $a['score'];
-            }
-
-            return ($b['tier'] === 'teaching_qualification') <=> ($a['tier'] === 'teaching_qualification');
-        });
-        $blended = array_slice($blended, 0, self::MAX_FACULTY_RESULTS);
-
+        // LEVEL 5 — nobody eligible at any tier: no Active faculty
+        // exists in this Subject's own College/GenEd pool at all
+        // (Level 2 already covers "College has faculty, just no TQ
+        // recorded yet"), and no Active+TQ'd faculty exists anywhere
+        // else either. The Registrar (or Auto Generate Schedule) must
+        // assign this one manually — likely by adding a faculty
+        // member to that College on the Faculty page first.
         return [
-            'recommendations' => $blended,
-            'message' => null,
-            'tier' => 'teaching_qualification',
-            'blended_tier' => $fallbackTier,
+            'recommendations' => [],
+            'message' => $collegeId !== null
+                ? 'No Active faculty exists in this Subject\'s own College, and no qualified faculty exists in any other College either.'
+                : 'No Active General Education faculty exists, and no qualified faculty exists in any College either.',
+            'tier' => null,
+            'fallback' => false,
+            'fallback_reason' => null,
         ];
     }
 
@@ -609,7 +565,7 @@ class RecommendationService
                         ->orWhere('faculty_id', 'like', "%{$search}%");
                 })
                 ->whereNotIn('id', $recommendedIds)
-                ->with(['subjects:id', 'availabilities', 'college:id,name,short_name'])
+                ->with(['subjects:id', 'college:id,name,short_name'])
                 ->limit(20)
                 ->get();
 
@@ -649,7 +605,7 @@ class RecommendationService
     public function scoreArbitraryFaculty(Faculty $faculty, Subject $subject, Section $section, ?SectionSubject $current = null): array
     {
         $subject->loadMissing('major.department');
-        $faculty->loadMissing(['subjects:id', 'availabilities', 'college:id,name,short_name']);
+        $faculty->loadMissing(['subjects:id', 'college:id,name,short_name']);
 
         $isQualified = $faculty->subjects->contains('id', $subject->id);
         $collegeId = $this->subjectCollegeId($subject);
@@ -698,7 +654,7 @@ class RecommendationService
     /**
      * Shared ranking pass for the Priority 1 (Teaching Qualification),
      * Priority 2 (College Match), and Priority 2b (General Education
-     * Match) candidate pools — the criteria checked (Availability,
+     * Match) candidate pools — the criteria checked (Conflicts,
      * Conflicts, Load, Full-time, Preferred Block) are identical in
      * kind, only the point weights and whether "Teaching
      * Qualification"/"College Match"/"General Education
@@ -714,19 +670,18 @@ class RecommendationService
     ): array {
         $isTeachingQualification = $tier === 'teaching_qualification';
         $isGenEdMatch = $tier === 'general_education_match';
-        $hasSchedule = $current && $current->days && $current->start_time && $current->end_time;
 
         // Point weights differ per tier (Teaching Qualification / College
         // Match / General Education Match); the criteria checked are the
         // same in kind for all three, so pick the max-points-per-criterion
         // set up front and share one scoring pass.
-        [$availableMax, $noConflictMax, $lowLoadMax, $fullTimeMax] = match ($tier) {
-            'teaching_qualification' => [self::TQ_POINTS_AVAILABLE, self::TQ_POINTS_NO_CONFLICT, self::TQ_POINTS_LOW_LOAD, self::TQ_POINTS_FULL_TIME],
-            'general_education_match' => [self::GENED_POINTS_AVAILABLE, self::GENED_POINTS_NO_CONFLICT, self::GENED_POINTS_LOW_LOAD, self::GENED_POINTS_FULL_TIME],
-            default => [self::COLLEGE_POINTS_AVAILABLE, self::COLLEGE_POINTS_NO_CONFLICT, self::COLLEGE_POINTS_LOW_LOAD, self::COLLEGE_POINTS_FULL_TIME],
+        [$noConflictMax, $lowLoadMax, $fullTimeMax] = match ($tier) {
+            'teaching_qualification' => [self::TQ_POINTS_NO_CONFLICT, self::TQ_POINTS_LOW_LOAD, self::TQ_POINTS_FULL_TIME],
+            'general_education_match' => [self::GENED_POINTS_NO_CONFLICT, self::GENED_POINTS_LOW_LOAD, self::GENED_POINTS_FULL_TIME],
+            default => [self::COLLEGE_POINTS_NO_CONFLICT, self::COLLEGE_POINTS_LOW_LOAD, self::COLLEGE_POINTS_FULL_TIME],
         };
 
-        $ranked = $candidates->map(function (Faculty $faculty) use ($subject, $current, $hasSchedule, $isTeachingQualification, $isGenEdMatch, $tier, $availableMax, $noConflictMax, $lowLoadMax, $fullTimeMax) {
+        $ranked = $candidates->map(function (Faculty $faculty) use ($subject, $current, $isTeachingQualification, $isGenEdMatch, $tier, $noConflictMax, $lowLoadMax, $fullTimeMax) {
             $currentLoad = $this->currentTeachingLoad($faculty, $current);
             $loadRatio = $faculty->max_teaching_units > 0 ? $currentLoad / $faculty->max_teaching_units : 0;
             $wouldExceedLoad = $this->workloadService->wouldExceed($faculty, $subject, $current?->id);
@@ -734,15 +689,9 @@ class RecommendationService
                 ? $this->workloadService->maxLoad($faculty) - $currentLoad
                 : null;
 
-            [$available, $conflictCount] = $this->facultyAvailabilityAndConflicts($faculty, $current);
+            $conflictCount = $this->facultyConflictCount($faculty, $current);
 
             $isFullTime = $faculty->employment_type === 'Full-time';
-
-            // Criteria "Available" only really applies once the row has
-            // a Day/Time to check against — before that, treat it as
-            // neutral (full points) rather than penalizing every
-            // candidate for a slot that hasn't been picked yet.
-            $availablePoints = (! $hasSchedule || $available) ? $availableMax : 0;
 
             $noConflictPoints = $conflictCount === 0 ? $noConflictMax : 0;
 
@@ -767,9 +716,6 @@ class RecommendationService
                 $reasons[] = ['label' => 'College Match', 'met' => true];
             }
 
-            $points['available'] = $availablePoints;
-            $reasons[] = ['label' => 'Available', 'met' => $availablePoints > 0];
-
             $points['no_conflict'] = $noConflictPoints;
             $reasons[] = ['label' => 'No Schedule Conflicts', 'met' => $conflictCount === 0];
 
@@ -778,13 +724,6 @@ class RecommendationService
 
             $points['full_time'] = $fullTimePoints;
             $reasons[] = ['label' => 'Full-time', 'met' => $isFullTime];
-
-            $preferredBlock = false;
-            if ($isTeachingQualification) {
-                $preferredBlock = $this->prefersTeachingBlock($faculty, $subject);
-                $points['preferred_block'] = $preferredBlock ? self::TQ_POINTS_PREFERRED_BLOCK : 0;
-                $reasons[] = ['label' => 'Preferred Teaching Block', 'met' => $preferredBlock];
-            }
 
             // Teaching Load Limit — surfaced as a reason (not a point
             // criterion; it's a hard-cap flag, not a scoring nudge) so
@@ -809,7 +748,6 @@ class RecommendationService
                 'remaining_load' => $remainingLoad,
                 'exceeds_max_load' => $wouldExceedLoad,
                 'load_ratio' => $loadRatio,
-                'available' => $available,
                 'conflict_count' => $conflictCount,
                 'tier' => $tier,
                 'selected_by_college_match' => $tier === 'college_match',
@@ -847,8 +785,8 @@ class RecommendationService
 
     /**
      * Single-candidate version of the scoring pass rankFacultyCandidates()
-     * runs over a whole pool — same criteria (Availability, Conflicts,
-     * Load, Full-time), generalized across all four tiers
+     * runs over a whole pool — same criteria (Conflicts, Load,
+     * Full-time), generalized across all four tiers
      * ('teaching_qualification', 'college_match',
      * 'general_education_match', 'manual_override') so the Faculty
      * Recommendation Selector's Live Score always uses the exact same
@@ -857,8 +795,6 @@ class RecommendationService
      */
     private function scoreCandidate(Faculty $faculty, Subject $subject, ?SectionSubject $current, string $tier): array
     {
-        $hasSchedule = $current && $current->days && $current->start_time && $current->end_time;
-
         $currentLoad = $this->currentTeachingLoad($faculty, $current);
         $loadRatio = $faculty->max_teaching_units > 0 ? $currentLoad / $faculty->max_teaching_units : 0;
         $wouldExceedLoad = $this->workloadService->wouldExceed($faculty, $subject, $current?->id);
@@ -866,27 +802,23 @@ class RecommendationService
             ? $this->workloadService->maxLoad($faculty) - $currentLoad
             : null;
 
-        [$available, $conflictCount] = $this->facultyAvailabilityAndConflicts($faculty, $current);
+        $conflictCount = $this->facultyConflictCount($faculty, $current);
 
         $isFullTime = $faculty->employment_type === 'Full-time';
 
-        [$matchPoints, $availablePointsMax, $noConflictPointsMax, $lowLoadMax, $fullTimeMax, $matchLabel] = match ($tier) {
-            'teaching_qualification' => [self::TQ_POINTS_QUALIFIED, self::TQ_POINTS_AVAILABLE, self::TQ_POINTS_NO_CONFLICT, self::TQ_POINTS_LOW_LOAD, self::TQ_POINTS_FULL_TIME, 'Teaching Qualification'],
-            'college_match' => [self::COLLEGE_POINTS_MATCH, self::COLLEGE_POINTS_AVAILABLE, self::COLLEGE_POINTS_NO_CONFLICT, self::COLLEGE_POINTS_LOW_LOAD, self::COLLEGE_POINTS_FULL_TIME, 'College Match'],
-            'general_education_match' => [self::GENED_POINTS_MATCH, self::GENED_POINTS_AVAILABLE, self::GENED_POINTS_NO_CONFLICT, self::GENED_POINTS_LOW_LOAD, self::GENED_POINTS_FULL_TIME, 'General Education Match'],
-            default => [self::OVERRIDE_POINTS_MATCH, self::OVERRIDE_POINTS_AVAILABLE, self::OVERRIDE_POINTS_NO_CONFLICT, self::OVERRIDE_POINTS_LOW_LOAD, self::OVERRIDE_POINTS_FULL_TIME, 'Manual Override'],
+        [$matchPoints, $noConflictPointsMax, $lowLoadMax, $fullTimeMax, $matchLabel] = match ($tier) {
+            'teaching_qualification' => [self::TQ_POINTS_QUALIFIED, self::TQ_POINTS_NO_CONFLICT, self::TQ_POINTS_LOW_LOAD, self::TQ_POINTS_FULL_TIME, 'Teaching Qualification'],
+            'college_match' => [self::COLLEGE_POINTS_MATCH, self::COLLEGE_POINTS_NO_CONFLICT, self::COLLEGE_POINTS_LOW_LOAD, self::COLLEGE_POINTS_FULL_TIME, 'College Match'],
+            'general_education_match' => [self::GENED_POINTS_MATCH, self::GENED_POINTS_NO_CONFLICT, self::GENED_POINTS_LOW_LOAD, self::GENED_POINTS_FULL_TIME, 'General Education Match'],
+            default => [self::OVERRIDE_POINTS_MATCH, self::OVERRIDE_POINTS_NO_CONFLICT, self::OVERRIDE_POINTS_LOW_LOAD, self::OVERRIDE_POINTS_FULL_TIME, 'Manual Override'],
         };
 
-        $availablePoints = (! $hasSchedule || $available) ? $availablePointsMax : 0;
         $noConflictPoints = $conflictCount === 0 ? $noConflictPointsMax : 0;
         $lowLoadPoints = (int) round($lowLoadMax * (1 - min($loadRatio, 1)));
         $fullTimePoints = $isFullTime ? $fullTimeMax : 0;
 
         $points = ['match' => $matchPoints];
         $reasons = [['label' => $matchLabel, 'met' => $tier !== 'manual_override']];
-
-        $points['available'] = $availablePoints;
-        $reasons[] = ['label' => 'Available', 'met' => $availablePoints > 0];
 
         $points['no_conflict'] = $noConflictPoints;
         $reasons[] = ['label' => 'No Schedule Conflict', 'met' => $conflictCount === 0];
@@ -896,12 +828,6 @@ class RecommendationService
 
         $points['full_time'] = $fullTimePoints;
         $reasons[] = ['label' => 'Full-time', 'met' => $isFullTime];
-
-        if ($tier === 'teaching_qualification') {
-            $preferredBlock = $this->prefersTeachingBlock($faculty, $subject);
-            $points['preferred_block'] = $preferredBlock ? self::TQ_POINTS_PREFERRED_BLOCK : 0;
-            $reasons[] = ['label' => 'Preferred Teaching Block', 'met' => $preferredBlock];
-        }
 
         $reasons[] = ['label' => $wouldExceedLoad ? 'Higher Teaching Load' : 'Within Teaching Load Limit', 'met' => ! $wouldExceedLoad];
 
@@ -918,7 +844,6 @@ class RecommendationService
             'remaining_load' => $remainingLoad,
             'exceeds_max_load' => $wouldExceedLoad,
             'load_ratio' => $loadRatio,
-            'available' => $available,
             'conflict_count' => $conflictCount,
             'tier' => $tier,
             'selected_by_college_match' => $tier === 'college_match',
@@ -979,28 +904,6 @@ class RecommendationService
         $subject->loadMissing('major.department');
 
         return $subject->major?->department?->college_id;
-    }
-
-    /**
-     * Criteria 6 — "Preferred teaching block based on subject hours".
-     * True when the faculty member has at least one declared weekly
-     * availability window long enough to fit the subject's total
-     * contact hours (Lecture + Laboratory) in a single sitting, so the
-     * subject doesn't have to be awkwardly split across days.
-     */
-    private function prefersTeachingBlock(Faculty $faculty, Subject $subject): bool
-    {
-        $totalHours = max((int) $subject->lecture_hours + (int) $subject->laboratory_hours, 1);
-
-        $faculty->loadMissing('availabilities');
-
-        return $faculty->availabilities->contains(function (FacultyAvailability $window) use ($totalHours) {
-            if (! $window->is_available || ! $window->start_time || ! $window->end_time) {
-                return false;
-            }
-
-            return $this->minutesBetween($window->start_time, $window->end_time) >= $totalHours * 60;
-        });
     }
 
     private function minutesBetween(string $start, string $end): int
@@ -2645,16 +2548,7 @@ class RecommendationService
             $reasons[] = ['label' => 'Student-Friendly Time', 'met' => true, 'type' => 'success'];
         }
 
-        if (! $fitsPattern) {
-            $label = $this->meetingPatternService->label($subject);
-            $reasons[] = [
-                'label' => "{$label} subjects normally meet {$expectedMeetings}x/week",
-                'met' => false,
-                'type' => 'warning',
-            ];
-        }
-
-        $isManualOverride = $facultyConflict || $roomConflict || $sectionConflict || ! $fitsPattern || ! $fitsHours || ! $daysAllowed || ! $withinPolicy;
+        $isManualOverride = $facultyConflict || $roomConflict || $sectionConflict || ! $fitsHours || ! $daysAllowed || ! $withinPolicy;
 
         $overrideReason = null;
         if ($isManualOverride) {
@@ -2667,10 +2561,6 @@ class RecommendationService
             }
             if ($sectionConflict) {
                 $issues[] = 'this section already has another subject at this day/time'.$this->conflictSuffix($sectionConflictRow, null);
-            }
-            if (! $fitsPattern) {
-                $label = $this->meetingPatternService->label($subject);
-                $issues[] = "{$label} subjects normally meet {$expectedMeetings}x/week, not ".count($days).'x';
             }
             if (! $fitsHours) {
                 $issues[] = 'this block is shorter than the subject\'s required weekly hours';
@@ -2779,46 +2669,24 @@ class RecommendationService
     }
 
     /**
-     * Whether a Faculty member is free (per their declared weekly
-     * FacultyAvailability windows) during the row's currently
-     * selected Days/Start/End Time, plus how many existing schedule
-     * conflicts they'd have at that same slot. Ranking factors 4 and
-     * 5 only make sense once a Day/Time is actually on the row — if
-     * the row has no Day/Time yet, both are treated as neutral
-     * (available = true, conflicts = 0) so ranking falls back to
-     * Department + Load alone.
-     *
-     * @return array{0: bool, 1: int}
+     * How many existing schedule conflicts a Faculty member would
+     * have at the row's currently selected Days/Start/End Time. Zero
+     * (neutral) if the row has no Day/Time on it yet — ranking then
+     * falls back to Department + Load alone.
      */
-    private function facultyAvailabilityAndConflicts(Faculty $faculty, ?SectionSubject $current): array
+    private function facultyConflictCount(Faculty $faculty, ?SectionSubject $current): int
     {
         if (! $current || ! $current->days || ! $current->start_time || ! $current->end_time) {
-            return [true, 0];
+            return 0;
         }
 
         $dayTokens = array_filter(explode(',', $current->days));
-
-        $faculty->loadMissing('availabilities');
-
-        $available = true;
-        foreach ($dayTokens as $token) {
-            $dayOfWeek = self::DAY_MAP[$token] ?? $token;
-            $window = $faculty->availabilities->firstWhere('day_of_week', $dayOfWeek);
-
-            if (! $window || ! $window->is_available
-                || $current->start_time < $window->start_time
-                || $current->end_time > $window->end_time
-            ) {
-                $available = false;
-                break;
-            }
-        }
 
         $conflict = $this->conflictService->findFacultyConflict(
             $faculty->id, $current->id, $dayTokens, $current->start_time, $current->end_time
         );
 
-        return [$available, $conflict ? 1 : 0];
+        return $conflict ? 1 : 0;
     }
 
     /**

@@ -10,8 +10,6 @@ import InputNumber from 'primevue/inputnumber';
 import Textarea from 'primevue/textarea';
 import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
-import Checkbox from 'primevue/checkbox';
-import DatePicker from 'primevue/datepicker';
 import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
@@ -195,25 +193,8 @@ const saveQualifications = () => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Availability tab                                                    */
+/* Shared helpers (time formatting used by the Workload tab)           */
 /* ------------------------------------------------------------------ */
-
-const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const allDayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-const availabilityByDay = computed(() => {
-    const map = {};
-    for (const record of props.faculty.availabilities ?? []) {
-        map[record.day_of_week] = record;
-    }
-    return map;
-});
-
-// Days that don't have a record yet — used to keep "Add" from offering duplicates.
-const availableDayOptions = computed(() => {
-    const used = new Set((props.faculty.availabilities ?? []).map((record) => record.day_of_week));
-    return allDayOptions.filter((day) => !used.has(day));
-});
 
 const formatTime = (time) => {
     if (!time) return '—';
@@ -221,118 +202,6 @@ const formatTime = (time) => {
     const period = hour >= 12 ? 'PM' : 'AM';
     const displayHour = hour % 12 === 0 ? 12 : hour % 12;
     return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`;
-};
-
-const timeStringToDate = (time) => {
-    if (!time) return null;
-    const [hour, minute] = time.split(':').map(Number);
-    const date = new Date();
-    date.setHours(hour, minute, 0, 0);
-    return date;
-};
-
-const dateToTimeString = (date) => {
-    if (!date) return null;
-    const hour = String(date.getHours()).padStart(2, '0');
-    const minute = String(date.getMinutes()).padStart(2, '0');
-    return `${hour}:${minute}`;
-};
-
-const availabilityDialogVisible = ref(false);
-const editingAvailability = ref(null); // null => Add mode
-
-const availabilityForm = useForm({
-    day_of_week: null,
-    is_available: true,
-    start_time: null, // stored as HH:mm string
-    end_time: null,
-});
-
-const startTimeModel = ref(null);
-const endTimeModel = ref(null);
-
-watch(startTimeModel, (value) => {
-    availabilityForm.start_time = dateToTimeString(value);
-});
-watch(endTimeModel, (value) => {
-    availabilityForm.end_time = dateToTimeString(value);
-});
-
-const openAddAvailability = () => {
-    editingAvailability.value = null;
-    availabilityForm.clearErrors();
-    availabilityForm.day_of_week = availableDayOptions.value[0] ?? null;
-    availabilityForm.is_available = true;
-    availabilityForm.start_time = null;
-    availabilityForm.end_time = null;
-    startTimeModel.value = null;
-    endTimeModel.value = null;
-    availabilityDialogVisible.value = true;
-};
-
-const openEditAvailability = (record) => {
-    editingAvailability.value = record;
-    availabilityForm.clearErrors();
-    availabilityForm.day_of_week = record.day_of_week;
-    availabilityForm.is_available = !!record.is_available;
-    availabilityForm.start_time = record.start_time ? record.start_time.slice(0, 5) : null;
-    availabilityForm.end_time = record.end_time ? record.end_time.slice(0, 5) : null;
-    startTimeModel.value = timeStringToDate(availabilityForm.start_time);
-    endTimeModel.value = timeStringToDate(availabilityForm.end_time);
-    availabilityDialogVisible.value = true;
-};
-
-const closeAvailabilityDialog = () => {
-    availabilityDialogVisible.value = false;
-    availabilityForm.clearErrors();
-};
-
-// When marked Unavailable, clear + disable the time fields (per spec).
-watch(
-    () => availabilityForm.is_available,
-    (isAvailable) => {
-        if (!isAvailable) {
-            startTimeModel.value = null;
-            endTimeModel.value = null;
-            availabilityForm.start_time = null;
-            availabilityForm.end_time = null;
-        }
-    },
-);
-
-const onSaveAvailability = () => {
-    if (editingAvailability.value) {
-        availabilityForm.put(
-            route('scheduling.faculty.availability.update', [props.faculty.id, editingAvailability.value.id]),
-            {
-                preserveScroll: true,
-                onSuccess: () => closeAvailabilityDialog(),
-            },
-        );
-    } else {
-        availabilityForm.post(route('scheduling.faculty.availability.store', props.faculty.id), {
-            preserveScroll: true,
-            onSuccess: () => closeAvailabilityDialog(),
-        });
-    }
-};
-
-const onDeleteAvailability = (record) => {
-    Swal.fire({
-        title: 'Delete this availability?',
-        text: `${record.day_of_week}'s availability record will be removed.`,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#DC2626',
-        cancelButtonColor: '#64748B',
-        confirmButtonText: 'Yes, delete it',
-    }).then((result) => {
-        if (result.isConfirmed) {
-            router.delete(route('scheduling.faculty.availability.destroy', [props.faculty.id, record.id]), {
-                preserveScroll: true,
-            });
-        }
-    });
 };
 
 /* ------------------------------------------------------------------ */
@@ -374,7 +243,7 @@ const qualifiedUnits = computed(() =>
 // FacultyController@show (evaluate(..., includePlacements: true)).
 const assignedPlacements = computed(() => workload.value?.assigned_placements ?? []);
 
-// Reuses the formatTime(time) declared above (Availability tab) —
+// Reuses the formatTime(time) helper declared above —
 // same 'HH:mm'/'HH:mm:ss' -> 12-hour am/pm formatting applies here.
 
 const placementStatusSeverity = (status) => {
@@ -415,11 +284,10 @@ const placementStatusSeverity = (status) => {
                         <InfoPopover
                             title="Faculty Details"
                             :paragraphs="[
-                                'Manage this faculty member\'s profile, teaching qualifications, weekly availability, and current teaching workload.',
+                                'Manage this faculty member\'s profile, teaching qualifications, and current teaching workload.',
                             ]"
                             :bullets="[
                                 'Teaching Qualifications control which subjects this faculty member can be assigned to when scheduling.',
-                                'Availability limits which days/times the scheduling engine may assign this faculty member — it will never schedule outside these hours.',
                                 'Workload shows units currently assigned against the Max Teaching Units cap set on the Information tab.',
                             ]"
                         />
@@ -446,7 +314,6 @@ const placementStatusSeverity = (status) => {
                         <TabList>
                             <Tab value="information">Information</Tab>
                             <Tab value="qualifications">Teaching Qualifications</Tab>
-                            <Tab value="availability">Availability</Tab>
                             <Tab value="workload">Workload</Tab>
                         </TabList>
 
@@ -572,100 +439,6 @@ const placementStatusSeverity = (status) => {
 
                                 <p v-if="isQualificationsDirty" class="text-xs text-amber-600 mt-2">
                                     You have unsaved changes — click "Save Qualifications" to apply them.
-                                </p>
-                            </TabPanel>
-
-                            <!-- AVAILABILITY -->
-                            <TabPanel value="availability">
-                                <!-- Weekly grid -->
-                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-                                    <div
-                                        v-for="day in weekDays"
-                                        :key="day"
-                                        class="neu-inset rounded-xl p-3"
-                                    >
-                                        <p class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{{ day }}</p>
-                                        <template v-if="availabilityByDay[day]?.is_available">
-                                            <p class="mt-2 text-sm font-medium text-slate-800">
-                                                {{ formatTime(availabilityByDay[day].start_time) }}
-                                            </p>
-                                            <p class="text-xs text-slate-400">to</p>
-                                            <p class="text-sm font-medium text-slate-800">
-                                                {{ formatTime(availabilityByDay[day].end_time) }}
-                                            </p>
-                                        </template>
-                                        <p v-else class="mt-2 text-sm font-medium text-slate-400">
-                                            {{ availabilityByDay[day] ? 'Unavailable' : 'Not set' }}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div class="flex justify-end mb-3">
-                                    <Button
-                                        label="Add Availability"
-                                        icon="pi pi-plus"
-                                        severity="success"
-                                        :disabled="availableDayOptions.length === 0"
-                                        @click="openAddAvailability"
-                                    />
-                                </div>
-
-                                <DataTable
-                                    :value="faculty.availabilities ?? []"
-                                    dataKey="id"
-                                    class="neu-inset neu-table rounded-xl overflow-hidden"
-                                    :class="isDark ? 'neu-table-dark' : ''"
-                                    stripedRows
-                                >
-                                    <template #empty>
-                                        <div class="text-center py-8">
-                                            <p class="text-slate-500 font-medium text-sm">No availability records yet.</p>
-                                        </div>
-                                    </template>
-                                    <Column field="day_of_week" header="Day" style="width: 10rem" />
-                                    <Column header="Available" style="width: 9rem">
-                                        <template #body="{ data }">
-                                            <Tag
-                                                :value="data.is_available ? 'Available' : 'Unavailable'"
-                                                :severity="data.is_available ? 'success' : 'danger'"
-                                            />
-                                        </template>
-                                    </Column>
-                                    <Column header="Start" style="width: 9rem">
-                                        <template #body="{ data }">{{ formatTime(data.start_time) }}</template>
-                                    </Column>
-                                    <Column header="End" style="width: 9rem">
-                                        <template #body="{ data }">{{ formatTime(data.end_time) }}</template>
-                                    </Column>
-                                    <Column header="Actions" style="width: 9rem">
-                                        <template #body="{ data }">
-                                            <div class="flex gap-1">
-                                                <Button
-                                                    icon="pi pi-pencil"
-                                                    text
-                                                    rounded
-                                                    severity="secondary"
-                                                    size="small"
-                                                    aria-label="Edit"
-                                                    @click="openEditAvailability(data)"
-                                                />
-                                                <Button
-                                                    icon="pi pi-trash"
-                                                    text
-                                                    rounded
-                                                    severity="danger"
-                                                    size="small"
-                                                    aria-label="Delete"
-                                                    @click="onDeleteAvailability(data)"
-                                                />
-                                            </div>
-                                        </template>
-                                    </Column>
-                                </DataTable>
-
-                                <p class="text-xs text-slate-400 mt-3">
-                                    <i class="pi pi-info-circle mr-1"></i>
-                                    The scheduling engine will never assign this faculty member outside their available hours.
                                 </p>
                             </TabPanel>
 
@@ -958,88 +731,6 @@ const placementStatusSeverity = (status) => {
             </template>
         </Dialog>
 
-        <!-- Add / Edit Availability Dialog -->
-        <Dialog
-            v-model:visible="availabilityDialogVisible"
-            modal
-            :header="editingAvailability ? 'Edit Availability' : 'Add Availability'"
-            :style="{ width: '480px' }"
-            :breakpoints="{ '640px': '95vw' }"
-            :draggable="false"
-            :pt="{
-                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
-                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
-                content: { class: isDark ? '!bg-[#141D33]' : '' },
-                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
-            }"
-            @hide="closeAvailabilityDialog"
-        >
-            <form class="grid grid-cols-1 gap-4 neu-form" @submit.prevent="onSaveAvailability">
-                <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">Day <span class="text-red-500">*</span></label>
-                    <Select
-                        v-model="availabilityForm.day_of_week"
-                        :options="editingAvailability ? allDayOptions : availableDayOptions"
-                        placeholder="Select a day"
-                        :disabled="!!editingAvailability"
-                        :invalid="!!availabilityForm.errors.day_of_week"
-                        class="w-full"
-                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
-                    />
-                    <small v-if="availabilityForm.errors.day_of_week" class="text-red-500">{{ availabilityForm.errors.day_of_week }}</small>
-                </div>
-
-                <div class="flex items-center gap-2">
-                    <Checkbox v-model="availabilityForm.is_available" binary inputId="is_available" />
-                    <label for="is_available" class="text-sm font-medium text-slate-700">Available</label>
-                </div>
-
-                <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">
-                        Start Time <span v-if="availabilityForm.is_available" class="text-red-500">*</span>
-                    </label>
-                    <DatePicker
-                        v-model="startTimeModel"
-                        timeOnly
-                        hourFormat="12"
-                        placeholder="Select start time"
-                        :disabled="!availabilityForm.is_available"
-                        :invalid="!!availabilityForm.errors.start_time"
-                        class="w-full"
-                        :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
-                    />
-                    <small v-if="availabilityForm.errors.start_time" class="text-red-500">{{ availabilityForm.errors.start_time }}</small>
-                </div>
-
-                <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-slate-700">
-                        End Time <span v-if="availabilityForm.is_available" class="text-red-500">*</span>
-                    </label>
-                    <DatePicker
-                        v-model="endTimeModel"
-                        timeOnly
-                        hourFormat="12"
-                        placeholder="Select end time"
-                        :disabled="!availabilityForm.is_available"
-                        :invalid="!!availabilityForm.errors.end_time"
-                        class="w-full"
-                        :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
-                    />
-                    <small v-if="availabilityForm.errors.end_time" class="text-red-500">{{ availabilityForm.errors.end_time }}</small>
-                </div>
-            </form>
-
-            <template #footer>
-                <Button label="Cancel" severity="secondary" outlined @click="closeAvailabilityDialog" />
-                <Button
-                    label="Save"
-                    icon="pi pi-check"
-                    severity="success"
-                    :loading="availabilityForm.processing"
-                    @click="onSaveAvailability"
-                />
-            </template>
-        </Dialog>
     </AppLayout>
 </template>
 

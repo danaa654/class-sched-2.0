@@ -107,22 +107,6 @@ class Faculty extends Model
     }
 
     /**
-     * Weekly availability windows for this faculty member.
-     *
-     * At most one record per day of week. The scheduling engine's
-     * Genetic Algorithm reads this relationship to ensure it never
-     * assigns a faculty member outside their declared available hours.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<FacultyAvailability>
-     */
-    public function availabilities(): \Illuminate\Database\Eloquent\Relations\HasMany
-    {
-        return $this->hasMany(FacultyAvailability::class)->orderByRaw(
-            "FIELD(day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')"
-        );
-    }
-
-    /**
      * Full display name, formatted "Last, First Middle Suffix".
      */
     public function getFullNameAttribute(): string

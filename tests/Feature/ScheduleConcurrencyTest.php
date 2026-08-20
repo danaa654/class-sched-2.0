@@ -53,8 +53,8 @@ class ScheduleConcurrencyTest extends TestCase
         $department = Department::create(['college_id' => $this->college->id, 'code' => 'CCS-DEPT', 'name' => 'CCS Department', 'status' => 'Active']);
         $this->major = Major::create(['department_id' => $department->id, 'code' => 'BSIT', 'name' => 'BS Information Technology', 'years' => 4, 'status' => 'Active']);
 
-        $this->roomA = Room::create(['room_code' => 'RM-306', 'room_name' => 'Room 306', 'room_type' => 'Lecture', 'capacity' => 40, 'status' => 'Active']);
-        $this->roomB = Room::create(['room_code' => 'RM-307', 'room_name' => 'Room 307', 'room_type' => 'Lecture', 'capacity' => 40, 'status' => 'Active']);
+        $this->roomA = Room::create(['room_code' => 'RM-306', 'room_name' => 'Room 306', 'building' => 'Main Building', 'room_type' => 'Lecture', 'capacity' => 40, 'status' => 'Active']);
+        $this->roomB = Room::create(['room_code' => 'RM-307', 'room_name' => 'Room 307', 'building' => 'Main Building', 'room_type' => 'Lecture', 'capacity' => 40, 'status' => 'Active']);
 
         $this->facultyA = Faculty::create([
             'faculty_id' => 'F-001', 'first_name' => 'Ada', 'last_name' => 'Lovelace',
@@ -91,16 +91,29 @@ class ScheduleConcurrencyTest extends TestCase
 
     private function makeSubject(string $code): Subject
     {
-        return Subject::create([
-            'subject_code' => $code,
-            'subject_title' => $code,
-            'category' => 'Major',
-            'subject_type' => 'lecture',
-            'units' => 3,
-            'lecture_hours' => 3,
-            'laboratory_hours' => 0,
-            'is_active' => true,
-        ]);
+        // Several tests deliberately offer the SAME subject code across
+        // more than one Section (e.g. two sections both needing
+        // CAP102) to exercise cross-section conflicts. subject_code is
+        // unique, so reuse the existing row instead of re-creating it.
+        return Subject::firstOrCreate(
+            ['subject_code' => $code],
+            [
+                'subject_title' => $code,
+                // Ties this Subject to the test's own College (via
+                // Major -> Department -> College), so
+                // RecommendationService::subjectCollegeId() resolves
+                // it correctly and Auto Generate can actually match it
+                // against facultyA/facultyB — both of whom belong to
+                // $this->college, not the college-less GenEd pool.
+                'major_id' => $this->major->id,
+                'category' => 'Major',
+                'subject_type' => 'regular',
+                'units' => 3,
+                'lecture_hours' => 3,
+                'laboratory_hours' => 0,
+                'is_active' => true,
+            ]
+        );
     }
 
     private function placeSubject(Section $section, string $subjectCode): SectionSubject
@@ -594,5 +607,126 @@ class ScheduleConcurrencyTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('schedule_version', 2);
+    }
+
+    /* -------------------------------------------------------------
+     * TEST 13 — AUTO GENERATE CONCURRENCY. Two users (e.g. Admin and
+     * CCS Dean) both open "Auto Generate Schedule" on the same
+     * Section at nearly the same moment and both load
+     * schedule_version 1. Before the AutoScheduleService::generate()
+     * fix, the version check ran in its own short transaction that
+     * released the Section's lock immediately — so BOTH runs could
+     * pass the check and then race each other subject-by-subject at
+     * the database level, meaning whichever request's PHP process
+     * happened to reach a row's lock first "won", not whichever user
+     * actually clicked first. generate() now holds the Section lock
+     * for the ENTIRE run (version check through the final version
+     * bump), so the run built on a version that's already been
+     * superseded is rejected outright with the same 409
+     * SCHEDULE_VERSION_CONFLICT every other stale write already
+     * returns — this proves that guarantee end-to-end through the
+     * real HTTP endpoint, the same way every other test in this file
+     * does.
+     * ----------------------------------------------------------- */
+    public function test_second_concurrent_auto_generate_run_is_rejected_not_racing(): void
+    {
+        $admin = $this->admin();
+        $section = $this->makeSection();
+        $this->placeSubject($section, 'CAP102');
+        $this->placeSubject($section, 'IAS102');
+
+        $loadedVersion = $section->fresh()->schedule_version; // 1, both "users" load this
+
+        $autoGenerateUrl = "/scheduling/section-subjects/{$section->id}/auto-generate";
+
+        // "Admin" runs Auto Generate first — this run is built on the
+        // version both users actually loaded, so it must succeed and
+        // place at least one subject (proving generate() didn't just
+        // reject everything).
+        $first = $this->actingAs($admin)->postJson($autoGenerateUrl, [
+            'expected_schedule_version' => $loadedVersion,
+        ]);
+
+        $first->assertOk();
+        $this->assertGreaterThan(0, $first->json('scheduled'));
+        $this->assertGreaterThan($loadedVersion, $section->fresh()->schedule_version);
+
+        // "CCS Dean" clicked at nearly the same moment and also
+        // loaded version 1 — their run is now stale the instant the
+        // first one committed. Must be rejected outright, never
+        // allowed to silently race/overwrite the first run's results.
+        $second = $this->actingAs($admin)->postJson($autoGenerateUrl, [
+            'expected_schedule_version' => $loadedVersion,
+        ]);
+
+        $second->assertStatus(409);
+        $second->assertJson(['code' => 'SCHEDULE_VERSION_CONFLICT']);
+
+        // The first run's placements are still intact — the rejected
+        // second run never touched anything.
+        $firstRunFacultyIds = collect($first->json('results'))->pluck('section_subject_id');
+        $stillPlaced = SectionSubject::query()
+            ->where('section_id', $section->id)
+            ->whereIn('id', $firstRunFacultyIds)
+            ->whereNotNull('faculty_id')
+            ->count();
+        $this->assertSame($firstRunFacultyIds->count(), $stillPlaced);
+    }
+
+    /* -------------------------------------------------------------
+     * TEST 14 — ROOM GRID MULTI-DAY DRAG. A subject meeting twice a
+     * week (e.g. "Fri,Sat") must keep BOTH meeting days after only
+     * ONE of its two blocks is dragged to a new day on the Room Grid
+     * — previously the move endpoint always sent `days: [newDay]`,
+     * silently replacing the ENTIRE day list with just the day
+     * dropped on and deleting the subject's other weekly meeting
+     * (halving its total scheduled hours). The frontend fix (RoomGrid
+     * .vue's onDrop) now sends the full day list with only the
+     * dragged occurrence's day swapped — this proves the backend
+     * write path accepts and correctly persists that full list,
+     * which is what actually keeps both meetings alive.
+     * ----------------------------------------------------------- */
+    public function test_moving_one_occurrence_of_a_multi_day_class_keeps_the_other_day(): void
+    {
+        $admin = $this->admin();
+        $section = $this->makeSection('BSIT-4B');
+        $row = $this->placeSubject($section, 'SA101');
+
+        // Originally meets Fri AND Sat, same time both days.
+        $this->actingAs($admin)->patch($this->scheduleUrl($section, $row), [
+            'faculty_id' => $this->facultyA->id,
+            'room_id' => $this->roomA->id,
+            'days' => ['Fri', 'Sat'],
+            'start_time' => '08:00',
+            'end_time' => '10:30',
+            'hours_confirmed' => true,
+        ])->assertOk();
+
+        $this->assertSame('Fri,Sat', $row->fresh()->days);
+
+        // Room Grid drags only the FRIDAY block to Thursday — the
+        // frontend now computes the full day list itself (swapping
+        // just the dragged day), so the move endpoint receives
+        // ['Thu', 'Sat'], not just ['Thu'].
+        $move = $this->actingAs($admin)->patch("/scheduling/room-grid/section-subjects/{$row->id}/move", [
+            'room_id' => $this->roomA->id,
+            'days' => ['Thu', 'Sat'],
+            'start_time' => '08:00',
+            'end_time' => '10:30',
+            'hours_confirmed' => true,
+            'current_section_id' => $section->id,
+        ]);
+
+        $move->assertOk();
+
+        $row->refresh();
+        $daysAfter = array_filter(explode(',', $row->days));
+        // Saturday — the meeting nobody dragged — must still be there.
+        $this->assertContains('Sat', $daysAfter);
+        // Friday was swapped for Thursday, not just dropped.
+        $this->assertContains('Thu', $daysAfter);
+        $this->assertNotContains('Fri', $daysAfter);
+        // Still a 2-meetings-per-week subject — total hours preserved.
+        $this->assertCount(2, $daysAfter);
     }
 }
