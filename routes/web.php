@@ -158,6 +158,11 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/section-subjects/{section}/{subject}/faculty-override', [SectionSubjectController::class, 'overrideFaculty'])->name('scheduling.section-subjects.faculty-override');
     Route::get('/scheduling/section-subjects/{section}/{subject}/room-options', [SectionSubjectController::class, 'roomOptions'])->name('scheduling.section-subjects.room-options');
     Route::post('/scheduling/section-subjects/{section}/{subject}/room-override', [SectionSubjectController::class, 'overrideRoom'])->name('scheduling.section-subjects.room-override');
+    // Busy Time Ranges — for the row's selected Room/Faculty + Days,
+    // every already-booked Start/End Time window, so the Start/End
+    // Time dropdowns can grey out slots that would conflict before
+    // the Registrar even picks one.
+    Route::get('/scheduling/section-subjects/{section}/{subject}/busy-times', [SectionSubjectController::class, 'busyTimes'])->name('scheduling.section-subjects.busy-times');
 
     // Room Scheduler (Room-Centric Time Grid) — read-only for now; the
     // drag/drop write path is a later slice of this feature. Nested
@@ -190,6 +195,7 @@ Route::middleware('auth')->group(function () {
     // submits every row at once here; all rows save in a single
     // transaction (Prompt 8.4 — Manual Scheduling Per Subject).
     Route::post('/scheduling/section-subjects/{section}/schedule/batch', [SectionSubjectController::class, 'batchUpdateSchedule'])->name('scheduling.section-subjects.schedule.batch');
+    Route::post('/scheduling/section-subjects/{section}/schedule/clear', [SectionSubjectController::class, 'clearSchedule'])->name('scheduling.section-subjects.schedule.clear');
     // SCHEDULING NOTIFICATION SYSTEM (spec Section 11) — polling API
     // + page. All read/mark-read only; notifications themselves are
     // only ever created server-side by NotificationService from

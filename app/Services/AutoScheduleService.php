@@ -326,15 +326,39 @@ class AutoScheduleService
             }
         }
 
-        $facultyRec = $this->recommendationService->recommendFaculty($subject, $section, $sectionSubject);
+        // TEACHING QUALIFICATION — HARD REQUIREMENT (spec Sections 1-4,
+        // 26). requireQualified: true restricts the candidate pool to
+        // Faculty explicitly linked to this Subject via Teaching
+        // Qualifications — Auto Schedule must never fall back to a
+        // College-Match/GenEd-Match faculty member just because they
+        // happen to be available. That broader pool still exists for
+        // the human-facing selector (RecommendationService::recommendFaculty()
+        // without this flag), where a Registrar can knowingly choose to
+        // override it — never for an unattended automatic assignment.
+        $facultyRec = $this->recommendationService->recommendFaculty($subject, $section, $sectionSubject, requireQualified: true);
         $facultyCandidates = $facultyRec['recommendations'];
 
         if (empty($facultyCandidates)) {
-            return $this->unresolved($sectionSubject, $facultyRec['message'] ?? 'No qualified or college-matched faculty available.', [], $siblingDiagnostics);
+            return $this->unresolved($sectionSubject, $facultyRec['message'] ?? 'No faculty member is qualified (Teaching Qualification) for this subject.', [], $siblingDiagnostics);
         }
 
         $roomRec = $this->recommendationService->recommendRooms($subject, $section, $sectionSubject);
         $roomCandidates = $roomRec['recommendations'];
+
+        // ROOM TYPE COMPATIBILITY — HARD REQUIREMENT (spec Section 11).
+        // recommendRooms() lets an explicit Room recommendation bypass
+        // the Lecture/Laboratory Type filter, which is correct for the
+        // human-facing selector (a Registrar can deliberately override
+        // it) but not for an unattended automatic pick — a recommended
+        // Room must still be the right Type before Auto Schedule will
+        // ever use it. Type-overridden candidates are dropped here
+        // rather than in RecommendationService so the selector's
+        // "Administrator Override" option is untouched.
+        $roomCandidates = array_values(array_filter($roomCandidates, function (array $room) use ($subject) {
+            $preferredType = ((int) $subject->laboratory_hours > 0) ? 'Laboratory' : 'Lecture';
+
+            return ($room['room_type'] ?? null) === $preferredType;
+        }));
 
         if (empty($roomCandidates)) {
             $reasons = $roomRec['reasons'] ?? [];

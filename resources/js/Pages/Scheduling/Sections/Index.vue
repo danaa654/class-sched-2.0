@@ -50,6 +50,7 @@ const props = defineProps({
     },
     activeMajors: { type: Array, default: () => [] },
     curriculums: { type: Array, default: () => [] },
+    colleges: { type: Array, default: () => [] },
     yearLevels: { type: Array, default: () => [] },
     academicTermOptions: { type: Array, default: () => [] },
     termOptions: { type: Array, default: () => [] },
@@ -96,15 +97,47 @@ watch(
 
 const search = ref(props.filters.section_search ?? '');
 const selectedTerm = ref(props.filters.term ?? 'all');
+const selectedCollegeId = ref(props.filters.college_id ?? null);
+const selectedYearLevel = ref(props.filters.year_level || null);
+const selectedSchedulingStatus = ref(props.filters.scheduling_status || 'all');
 const loading = ref(false);
 let searchDebounce = null;
+
+// College dropdown — "All Colleges" plus every College this user is
+// authorized to see (already scoped server-side, see
+// SectionController::index()).
+const collegeFilterOptions = computed(() => [
+    { label: 'All Colleges', value: null },
+    ...props.colleges.map((college) => ({ label: college.name, value: college.id })),
+]);
+
+const yearLevelFilterOptions = computed(() => [
+    { label: 'All Year Levels', value: null },
+    ...props.yearLevels.map((level) => ({ label: level, value: level })),
+]);
+
+const schedulingStatusFilterOptions = [
+    { label: 'All Scheduling Statuses', value: 'all' },
+    { label: 'No Subjects Yet', value: 'no_subjects' },
+    { label: 'In Progress', value: 'in_progress' },
+    { label: 'Fully Scheduled', value: 'fully_scheduled' },
+    { label: 'Finalized / Locked', value: 'finalized' },
+    { label: 'Needs Attention', value: 'needs_attention' },
+];
 
 const reloadSections = (extra = {}) => {
     loading.value = true;
 
     router.get(
         route('scheduling.sections'),
-        { section_search: search.value, term: selectedTerm.value, ...extra },
+        {
+            section_search: search.value,
+            term: selectedTerm.value,
+            college_id: selectedCollegeId.value,
+            year_level: selectedYearLevel.value,
+            scheduling_status: selectedSchedulingStatus.value,
+            ...extra,
+        },
         {
             preserveState: true,
             preserveScroll: true,
@@ -121,7 +154,62 @@ const reloadSections = (extra = {}) => {
 // the text search, which debounces) — it's a deliberate dropdown pick,
 // not something the user is still typing.
 const onTermChange = () => {
-    reloadSections();
+    reloadSections({ section_page: 1 });
+};
+
+// Same as onTermChange — College / Year Level / Scheduling Status are
+// deliberate dropdown picks, so they re-query immediately and reset
+// back to page 1 (a stale page 3 could otherwise land past the end of
+// a much smaller filtered result set).
+const onFilterChange = () => {
+    reloadSections({ section_page: 1 });
+};
+
+// "Filters (n)" / chip count — Academic Year/Semester is deliberately
+// excluded, since it's the page's primary context selector rather than
+// an optional filter (spec: "must remain the primary context for the
+// page").
+const activeFilterChips = computed(() => {
+    const chips = [];
+
+    if (selectedCollegeId.value) {
+        const college = props.colleges.find((item) => item.id === selectedCollegeId.value);
+        chips.push({ key: 'college', label: college?.name ?? 'College' });
+    }
+    if (selectedYearLevel.value) {
+        chips.push({ key: 'yearLevel', label: selectedYearLevel.value });
+    }
+    if (selectedSchedulingStatus.value !== 'all') {
+        const option = schedulingStatusFilterOptions.find((item) => item.value === selectedSchedulingStatus.value);
+        chips.push({ key: 'schedulingStatus', label: option?.label ?? 'Scheduling' });
+    }
+    if (search.value.trim() !== '') {
+        chips.push({ key: 'search', label: `"${search.value.trim()}"` });
+    }
+
+    return chips;
+});
+
+const hasActiveFilters = computed(() => activeFilterChips.value.length > 0);
+
+const removeFilterChip = (key) => {
+    if (key === 'college') selectedCollegeId.value = null;
+    if (key === 'yearLevel') selectedYearLevel.value = null;
+    if (key === 'schedulingStatus') selectedSchedulingStatus.value = 'all';
+    if (key === 'search') search.value = '';
+
+    reloadSections({ section_page: 1 });
+};
+
+// Clears every optional filter (search, College, Year Level,
+// Scheduling Status) but deliberately leaves the selected Academic
+// Year/Semester alone (spec section 10).
+const clearFilters = () => {
+    search.value = '';
+    selectedCollegeId.value = null;
+    selectedYearLevel.value = null;
+    selectedSchedulingStatus.value = 'all';
+    reloadSections({ section_page: 1 });
 };
 
 /**
@@ -840,6 +928,35 @@ const onUnlockSection = (section) => {
                                 />
                             </span>
                             <Select
+                                v-model="selectedCollegeId"
+                                :options="collegeFilterOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="All Colleges"
+                                class="w-full sm:w-52"
+                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                @change="onFilterChange"
+                            />
+                            <Select
+                                v-model="selectedYearLevel"
+                                :options="yearLevelFilterOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="All Year Levels"
+                                class="w-full sm:w-52"
+                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                @change="onFilterChange"
+                            />
+                            <Select
+                                v-model="selectedSchedulingStatus"
+                                :options="schedulingStatusFilterOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                class="w-full sm:w-56"
+                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                @change="onFilterChange"
+                            />
+                            <Select
                                 v-model="selectedTerm"
                                 :options="termOptions"
                                 optionLabel="label"
@@ -877,6 +994,31 @@ const onUnlockSection = (section) => {
                         </template>
                     </Toolbar>
 
+                    <!-- Active Filter Indicator -->
+                    <div v-if="hasActiveFilters" class="flex flex-wrap items-center gap-2 pb-4 -mt-2">
+                        <span class="text-xs font-medium text-slate-500">Filters ({{ activeFilterChips.length }})</span>
+                        <Tag
+                            v-for="chip in activeFilterChips"
+                            :key="chip.key"
+                            severity="secondary"
+                            class="!cursor-pointer"
+                            @click="removeFilterChip(chip.key)"
+                        >
+                            <span class="flex items-center gap-1">
+                                {{ chip.label }}
+                                <i class="pi pi-times text-[10px]"></i>
+                            </span>
+                        </Tag>
+                        <Button
+                            label="Clear Filters"
+                            size="small"
+                            text
+                            severity="secondary"
+                            class="!py-1 !px-2 !text-xs"
+                            @click="clearFilters"
+                        />
+                    </div>
+
                     <!-- Sections Table -->
                     <DataTable
                         :value="sections.data"
@@ -900,9 +1042,24 @@ const onUnlockSection = (section) => {
                             <div class="text-center py-10">
                                 <p class="text-slate-500 font-medium">No sections found.</p>
                                 <p class="text-slate-400 text-sm mt-1">
-                                    Click "Add Section" to create your first section.
+                                    <template v-if="hasActiveFilters">
+                                        Try changing or clearing your filters.
+                                    </template>
+                                    <template v-else>
+                                        Click "Add Section" to create your first section.
+                                    </template>
                                 </p>
                                 <Button
+                                    v-if="hasActiveFilters"
+                                    label="Clear Filters"
+                                    icon="pi pi-filter-slash"
+                                    severity="secondary"
+                                    outlined
+                                    class="mt-3"
+                                    @click="clearFilters"
+                                />
+                                <Button
+                                    v-else
                                     label="Add Section"
                                     icon="pi pi-plus"
                                     severity="success"

@@ -27,6 +27,8 @@ const isDark = computed(() => theme.value === 'dark');
 const props = defineProps({
     curriculums: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
     activeMajors: { type: Array, default: () => [] },
+    colleges: { type: Array, default: () => [] },
+    curriculumYearOptions: { type: Array, default: () => [] },
     filters: {
         type: Object,
         default: () => ({ curriculum_search: '' }),
@@ -77,15 +79,61 @@ const majorOptions = computed(() =>
 /* ------------------------------------------------------------------ */
 
 const search = ref(props.filters.curriculum_search ?? '');
+const selectedCurriculumYear = ref(props.filters.curriculum_year || null);
+const selectedCollegeId = ref(props.filters.college_id ?? null);
+const selectedMajorId = ref(props.filters.major_id ?? null);
 const loading = ref(false);
 let searchDebounce = null;
+
+// Curriculum Year dropdown — real (start_year, end_year) pairs that
+// exist in the data (see CurriculumController::index()), never a
+// hardcoded list.
+const curriculumYearFilterOptions = computed(() => [
+    { label: 'All Curriculum Years', value: null },
+    ...props.curriculumYearOptions.map((option) => ({ label: option.label, value: option.value })),
+]);
+
+const collegeFilterOptions = computed(() => [
+    { label: 'All Colleges', value: null },
+    ...props.colleges.map((college) => ({ label: college.name, value: college.id })),
+]);
+
+const majorFilterOptions = computed(() => {
+    const majors = selectedCollegeId.value
+        ? props.activeMajors.filter((major) => major.college_id === selectedCollegeId.value)
+        : props.activeMajors;
+
+    return [
+        { label: 'All Programs', value: null },
+        ...[...majors].sort((a, b) => a.name.localeCompare(b.name)).map((major) => ({ label: major.name, value: major.id })),
+    ];
+});
+
+// Switching the College filter narrows the Program dropdown down to
+// that College's own Programs (see activeMajors' college_id above) —
+// if the currently selected Program doesn't belong to the newly
+// picked College, clear it first so the reload doesn't ask the
+// backend to combine two contradictory filters.
+const onCollegeFilterChange = () => {
+    const stillValid = majorFilterOptions.value.some((option) => option.value === selectedMajorId.value);
+    if (!stillValid) {
+        selectedMajorId.value = null;
+    }
+    onFilterChange();
+};
 
 const reloadCurriculums = (extra = {}) => {
     loading.value = true;
 
     router.get(
         route('curriculums'),
-        { curriculum_search: search.value, ...extra },
+        {
+            curriculum_search: search.value,
+            curriculum_year: selectedCurriculumYear.value,
+            college_id: selectedCollegeId.value,
+            major_id: selectedMajorId.value,
+            ...extra,
+        },
         {
             preserveState: true,
             preserveScroll: true,
@@ -96,6 +144,58 @@ const reloadCurriculums = (extra = {}) => {
             },
         },
     );
+};
+
+// Dropdown picks re-query immediately (unlike the text search, which
+// debounces below) and reset back to page 1.
+const onFilterChange = () => {
+    reloadCurriculums({ curriculum_page: 1 });
+};
+
+const activeFilterChips = computed(() => {
+    const chips = [];
+
+    if (selectedCurriculumYear.value) {
+        const option = props.curriculumYearOptions.find((item) => item.value === selectedCurriculumYear.value);
+        chips.push({ key: 'curriculumYear', label: option?.label ?? selectedCurriculumYear.value });
+    }
+    if (selectedCollegeId.value) {
+        const college = props.colleges.find((item) => item.id === selectedCollegeId.value);
+        chips.push({ key: 'college', label: college?.name ?? 'College' });
+    }
+    if (selectedMajorId.value) {
+        const major = props.activeMajors.find((item) => item.id === selectedMajorId.value);
+        chips.push({ key: 'major', label: major?.name ?? 'Program' });
+    }
+    if (search.value.trim() !== '') {
+        chips.push({ key: 'search', label: `"${search.value.trim()}"` });
+    }
+
+    return chips;
+});
+
+const hasActiveFilters = computed(() => activeFilterChips.value.length > 0);
+
+const removeFilterChip = (key) => {
+    if (key === 'curriculumYear') selectedCurriculumYear.value = null;
+    if (key === 'college') {
+        selectedCollegeId.value = null;
+        selectedMajorId.value = null;
+    }
+    if (key === 'major') selectedMajorId.value = null;
+    if (key === 'search') search.value = '';
+
+    reloadCurriculums({ curriculum_page: 1 });
+};
+
+// Clears every filter (search, Curriculum Year, College, Program) and
+// restores the default Curriculum list.
+const clearFilters = () => {
+    search.value = '';
+    selectedCurriculumYear.value = null;
+    selectedCollegeId.value = null;
+    selectedMajorId.value = null;
+    reloadCurriculums({ curriculum_page: 1 });
 };
 
 watch(search, () => {
@@ -323,6 +423,37 @@ const onRestore = (curriculum) => {
                                     :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                 />
                             </span>
+                            <Select
+                                v-model="selectedCollegeId"
+                                :options="collegeFilterOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="All Colleges"
+                                class="w-full sm:w-52"
+                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                @change="onCollegeFilterChange"
+                            />
+                            <Select
+                                v-model="selectedMajorId"
+                                :options="majorFilterOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="All Programs"
+                                filter
+                                class="w-full sm:w-56"
+                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                @change="onFilterChange"
+                            />
+                            <Select
+                                v-model="selectedCurriculumYear"
+                                :options="curriculumYearFilterOptions"
+                                optionLabel="label"
+                                optionValue="value"
+                                placeholder="All Curriculum Years"
+                                class="w-full sm:w-52"
+                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                @change="onFilterChange"
+                            />
                         </template>
                         <template #end>
                             <div class="flex items-center gap-2">
@@ -339,6 +470,31 @@ const onRestore = (curriculum) => {
                             </div>
                         </template>
                     </Toolbar>
+
+                    <!-- Active Filter Indicator -->
+                    <div v-if="hasActiveFilters" class="flex flex-wrap items-center gap-2 pb-4 -mt-2">
+                        <span class="text-xs font-medium text-slate-500">Filters ({{ activeFilterChips.length }})</span>
+                        <Tag
+                            v-for="chip in activeFilterChips"
+                            :key="chip.key"
+                            severity="secondary"
+                            class="!cursor-pointer"
+                            @click="removeFilterChip(chip.key)"
+                        >
+                            <span class="flex items-center gap-1">
+                                {{ chip.label }}
+                                <i class="pi pi-times text-[10px]"></i>
+                            </span>
+                        </Tag>
+                        <Button
+                            label="Clear Filters"
+                            size="small"
+                            text
+                            severity="secondary"
+                            class="!py-1 !px-2 !text-xs"
+                            @click="clearFilters"
+                        />
+                    </div>
 
                     <!-- Curriculums Table -->
                     <DataTable
@@ -359,7 +515,20 @@ const onRestore = (curriculum) => {
                         <template #empty>
                             <div class="text-center py-10">
                                 <p class="text-slate-500 font-medium">No curriculums found.</p>
+                                <p v-if="hasActiveFilters" class="text-slate-400 text-sm mt-1">
+                                    Try changing or clearing your filters.
+                                </p>
                                 <Button
+                                    v-if="hasActiveFilters"
+                                    label="Clear Filters"
+                                    icon="pi pi-filter-slash"
+                                    severity="secondary"
+                                    outlined
+                                    class="mt-3"
+                                    @click="clearFilters"
+                                />
+                                <Button
+                                    v-else
                                     label="Add Curriculum"
                                     icon="pi pi-plus"
                                     class="mt-3"

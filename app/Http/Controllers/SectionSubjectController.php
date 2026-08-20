@@ -23,6 +23,7 @@ use App\Services\EDPCodeService;
 use App\Services\FacultyWorkloadService;
 use App\Services\IrregularSectionMergeService;
 use App\Services\RecommendationService;
+use App\Services\RoomUtilizationService;
 use App\Services\NotificationService;
 use App\Services\ScheduleConflictService;
 use Closure;
@@ -44,6 +45,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
         private readonly RecommendationService $recommendationService,
         private readonly AutoScheduleService $autoScheduleService,
         private readonly FacultyWorkloadService $workloadService,
+        private readonly RoomUtilizationService $roomUtilizationService,
         private readonly IrregularSectionMergeService $mergeService,
         private readonly NotificationService $notifications
     ) {
@@ -305,18 +307,43 @@ class SectionSubjectController extends Controller implements HasMiddleware
             ->with('subjects:id')
             ->orderBy('last_name')
             ->orderBy('first_name')
-            ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'college_id'])
+            ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'college_id', 'max_teaching_units'])
             ->map(fn (Faculty $faculty) => [
                 'id' => $faculty->id,
                 'full_name' => $faculty->full_name,
                 'faculty_category' => $faculty->faculty_category,
                 'qualified_subject_ids' => $faculty->subjects->pluck('id'),
+                // Teaching Load, same source (FacultyWorkloadService)
+                // the recommendation ranking and Save Schedule's
+                // workload guard already use — shown next to every
+                // Faculty option (not just recommended ones) so the
+                // Registrar sees at a glance how close to capacity a
+                // manual pick is before assigning them.
+                'current_load' => $this->workloadService->currentLoad($faculty),
+                'max_teaching_units' => $faculty->max_teaching_units,
             ]);
 
-        $activeRooms = Room::query()
+        $activeRoomsList = Room::query()
             ->where('status', 'Active')
             ->orderBy('room_code')
             ->get(['id', 'room_code', 'room_name', 'room_type', 'capacity']);
+
+        // Same source (RoomUtilizationService) the Rooms page and the
+        // recommendation ranking already read — shown next to every
+        // Room option (not just recommended ones), mirroring how
+        // activeFaculty above carries current_load/max_teaching_units
+        // for every Faculty option.
+        $roomUtilization = $this->roomUtilizationService->summarizeRooms($activeRoomsList);
+
+        $activeRooms = $activeRoomsList->map(fn (Room $room) => [
+            'id' => $room->id,
+            'room_code' => $room->room_code,
+            'room_name' => $room->room_name,
+            'room_type' => $room->room_type,
+            'capacity' => $room->capacity,
+            'scheduled_hours' => $roomUtilization[$room->id]['scheduled_hours'] ?? 0,
+            'max_hours' => $roomUtilization[$room->id]['max_hours'] ?? 0,
+        ]);
 
         // Active School Year's Scheduling Window — the hard 8:00 AM–7:00 PM
         // (or whatever's configured) boundary the manual Day & Time editor
@@ -1026,6 +1053,66 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * Room Recommendation Selector — options list (recommended pool +
      * global search, scored via RecommendationService::roomOptionsForSelector()).
      */
+    /**
+     * Busy Time Ranges — for the row's currently selected Room and/or
+     * Faculty, on whichever Days are currently selected on the row
+     * (or passed via ?days=), every OTHER SectionSubject's Start/End
+     * Time already booked against either resource. Powers the Start
+     * Time / End Time dropdowns: rather than only rejecting a
+     * conflicting pick after the fact (validate()/overrideTime()),
+     * the frontend can grey out every time slot that would overlap
+     * one of these ranges before the Registrar even picks it — e.g.
+     * Room 306 already booked 1:00 PM-5:00 PM and 5:00 PM-7:00 PM on
+     * Sat means those slots simply aren't offered.
+     *
+     * Reuses activeSemesterSectionIds()/mergeExclusionIds() — the
+     * exact same scoping ScheduleConflictService::findRoomConflict()/
+     * findFacultyConflict() already use — so "busy" here can never
+     * disagree with what Save/Apply would actually reject.
+     */
+    public function busyTimes(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $roomId = $request->query('room_id', $subject->room_id);
+        $facultyId = $request->query('faculty_id', $subject->faculty_id);
+        $days = array_values(array_filter(explode(',', (string) $request->query('days', $subject->days))));
+
+        if (empty($days) || (! $roomId && ! $facultyId)) {
+            return response()->json(['busy' => []]);
+        }
+
+        $excluding = $this->conflictService->mergeExclusionIds($subject);
+
+        $rows = SectionSubject::query()
+            ->whereIn('section_id', $this->conflictService->activeSemesterSectionIds())
+            ->whereNotIn('id', $excluding)
+            ->whereNotNull('days')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->where(function ($query) use ($roomId, $facultyId) {
+                $query->when($roomId, fn ($q) => $q->orWhere('room_id', $roomId))
+                    ->when($facultyId, fn ($q) => $q->orWhere('faculty_id', $facultyId));
+            })
+            ->get(['id', 'room_id', 'faculty_id', 'days', 'start_time', 'end_time']);
+
+        $busy = [];
+        foreach ($rows as $row) {
+            $rowDays = array_values(array_filter(explode(',', (string) $row->days)));
+            if (empty(array_intersect($rowDays, $days))) {
+                continue;
+            }
+
+            $busy[] = [
+                'start_time' => $row->start_time,
+                'end_time' => $row->end_time,
+                'resource' => (int) $row->room_id === (int) $roomId ? 'room' : 'faculty',
+            ];
+        }
+
+        return response()->json(['busy' => $busy]);
+    }
+
     public function roomOptions(Request $request, Section $section, SectionSubject $subject): JsonResponse
     {
         abort_unless($subject->section_id === $section->id, 404);
@@ -1841,6 +1928,89 @@ class SectionSubjectController extends Controller implements HasMiddleware
     }
 
     /**
+     * "Clear Schedule" — wipes Faculty/Room/Days/Start/End Time back to
+     * empty for every subject in this Section (status back to 'Draft'),
+     * so the Registrar can start scheduling over from a blank slate.
+     *
+     * Distinct from clearAutoGenerated() above, which only removes
+     * *pending, unsaved* Auto Generate suggestions — this clears
+     * everything, including rows that were already Saved/Scheduled.
+     * Only ever allowed while the Section is NOT finalized; the
+     * frontend also gates the button on this, but the real guard is
+     * here, under the same row lock ScheduleConflictService uses
+     * everywhere else, so a finalize that races this request can never
+     * be silently wiped.
+     */
+    public function clearSchedule(Section $section): JsonResponse
+    {
+        DB::beginTransaction();
+
+        try {
+            $lockedSection = Section::whereKey($section->id)->lockForUpdate()->first();
+
+            if ($lockedSection->is_finalized) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => "This section's schedule is finalized and can no longer be cleared.",
+                    'code' => 'SECTION_FINALIZED',
+                ], 423);
+            }
+
+            // Practicum/OJT rows have no Faculty/Room/Days/Time to begin
+            // with (see isPracticum() exemption elsewhere) — leave them
+            // alone rather than "clearing" fields that were never set.
+            // PERFORMANCE — this used to load every row into memory and
+            // ->update() them one at a time (N sequential UPDATE queries
+            // + Eloquent model events, all inside the same transaction),
+            // which is what actually made "Clear Schedule" feel slow on
+            // sections with a lot of subjects. Practicum and merged rows
+            // are excluded via the WHERE clause itself instead of a PHP
+            // loop, so the whole clear is now a single bulk UPDATE.
+            $practicumSubjectIds = Subject::query()
+                ->where('subject_type', 'practicum')
+                ->pluck('id');
+
+            $cleared = $lockedSection->sectionSubjects()
+                ->whereNull('merged_into_section_subject_id')
+                ->when($practicumSubjectIds->isNotEmpty(), fn ($q) => $q->whereNotIn('subject_id', $practicumSubjectIds))
+                ->update([
+                    'faculty_id' => null,
+                    'room_id' => null,
+                    'days' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'status' => 'Draft',
+                    'capacity_confirmed' => false,
+                    'hours_confirmed' => false,
+                    'is_auto_generated' => false,
+                    'auto_generated_meta' => null,
+                    'is_workload_override' => false,
+                    'workload_override_by' => null,
+                ]);
+
+            $this->conflictService->bumpScheduleVersion($lockedSection);
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Failed to clear the schedule. Please try again.',
+            ], 500);
+        }
+
+        return response()->json([
+            'cleared' => $cleared,
+            'message' => $cleared > 0
+                ? "{$cleared} ".($cleared === 1 ? 'subject was' : 'subjects were')." cleared back to blank."
+                : 'Nothing to clear.',
+            'sectionSubjects' => $section->sectionSubjects()->with(['subject', 'faculty', 'room', 'mergedInto.section:id,section_code'])->get(),
+            'schedule_version' => $section->fresh()->schedule_version,
+        ]);
+    }
+
+    /**
      * "Save Schedule" — the manual scheduling workspace's batch save.
      * The Registrar edits Faculty/Room/Days/Start/End Time across as
      * many subject rows as they like *locally* in the table (no
@@ -1850,11 +2020,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * checks updateSchedule() runs for a single cell — including
      * against other rows in this same batch, since rows are saved
      * one at a time inside the transaction and later rows can see
-     * earlier rows' just-saved values on the same connection. If
-     * ANY row fails validation, the whole transaction is rolled
-     * back — nothing is saved — and every row's errors are returned
-     * together so the Registrar can fix them all at once. Only when
-     * every row passes does the transaction commit.
+     * earlier rows' just-saved values on the same connection. A row
+     * with a conflict is skipped (never written) but does NOT block
+     * the rest of the batch — every other row still saves. Only when
+     * every single row in the batch has a conflict does the whole
+     * request roll back with nothing saved.
      */
     public function batchUpdateSchedule(
         BatchUpdateSectionSubjectScheduleRequest $request,
@@ -1877,6 +2047,8 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $errors = [];
         $workloadWarnings = [];
+        $savedIds = [];
+        $skippedIds = [];
         $isAdministrator = (bool) $request->user()?->hasRole('Administrator');
         $expectedVersion = $request->filled('expected_schedule_version')
             ? (int) $request->input('expected_schedule_version')
@@ -1980,9 +2152,13 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 ));
 
                 if (! empty($rowErrors)) {
-                    // Keyed by SectionSubject id so the frontend can
-                    // map each error back to the exact row.
+                    // PARTIAL SAVE — a subject with an overlap/conflict
+                    // error is skipped (never written), but every OTHER
+                    // subject in the same batch that has no error still
+                    // gets saved below. Keyed by SectionSubject id so the
+                    // frontend can map each error back to the exact row.
                     $errors[$subject->id] = $rowErrors;
+                    $skippedIds[] = $subject->id;
 
                     continue;
                 }
@@ -2001,7 +2177,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     $confirmed = ! empty($rowData['workload_confirmed']);
 
                     if (! $isAdministrator || ! $confirmed) {
+                        // Same PARTIAL SAVE rule as overlap errors above —
+                        // this subject is skipped, everyone else in the
+                        // batch still saves.
                         $workloadWarnings[$subject->id] = $workloadWarning;
+                        $skippedIds[] = $subject->id;
 
                         continue;
                     }
@@ -2039,33 +2219,29 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     'is_workload_override' => $isWorkloadOverride,
                     'workload_override_by' => $isWorkloadOverride ? $request->user()?->id : null,
                 ]);
+
+                $savedIds[] = $subject->id;
             }
 
-            if (! empty($errors)) {
+            // PARTIAL SAVE — a row with an overlap/conflict error or an
+            // unconfirmed workload warning is skipped above ($skippedIds)
+            // but never blocks the rest of the batch. Only a batch that
+            // saved NOTHING at all (every row was skipped) is rolled back
+            // whole, since there'd be nothing to commit or bump the
+            // version for anyway.
+            if (empty($savedIds)) {
                 DB::rollBack();
 
                 return response()->json([
                     'errors' => $errors,
-                    'message' => 'Some rows have scheduling conflicts. Nothing was saved — fix the highlighted rows and try again.',
+                    'workload_warnings' => $workloadWarnings,
+                    'can_override' => $isAdministrator,
+                    'message' => 'Every row in this batch has a scheduling conflict. Nothing was saved.',
                 ], 422);
             }
 
-            if (! empty($workloadWarnings)) {
-                DB::rollBack();
-
-                return response()->json([
-                    'workload_warnings' => $workloadWarnings,
-                    'can_override' => $isAdministrator,
-                    'message' => $isAdministrator
-                        ? 'Cannot save schedule. One or more faculty exceed their teaching load. Resolve these conflicts or override manually.'
-                        : 'Cannot save schedule. One or more faculty exceed their teaching load. Only an Administrator may override this validation.',
-                ], 409);
-            }
-
-            // Only reached once every row in the batch passed
-            // validation and was written — the version is never
-            // advanced on a rolled-back/partial batch (spec Section
-            // 20).
+            // Version is bumped whenever at least one row actually
+            // changed, matching how a partial save is still a real write.
             $this->conflictService->bumpScheduleVersion($lockedSection);
 
             DB::commit();
@@ -2097,10 +2273,24 @@ class SectionSubjectController extends Controller implements HasMiddleware
             ->whereIn('id', $rowIds)
             ->get();
 
+        $message = empty($skippedIds)
+            ? 'Schedule saved successfully.'
+            : count($savedIds).' of '.count($rowIds).' subjects saved. '
+                .count($skippedIds).' '.(count($skippedIds) === 1 ? 'subject was' : 'subjects were')
+                .' skipped due to a scheduling conflict — see the highlighted rows.';
+
         return response()->json([
             'sectionSubjects' => $fresh,
             'schedule_version' => $lockedSection->fresh()->schedule_version,
-            'message' => 'Schedule saved successfully.',
+            // Non-empty only on a partial save — the frontend can use
+            // these to keep the skipped rows' conflict highlights visible
+            // even though the request itself succeeded (200), since some
+            // rows genuinely weren't written.
+            'errors' => $errors,
+            'workload_warnings' => $workloadWarnings,
+            'saved_ids' => $savedIds,
+            'skipped_ids' => $skippedIds,
+            'message' => $message,
         ]);
     }
 

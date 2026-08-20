@@ -43,7 +43,12 @@ const props = defineProps({
     // not even as a Manual Override — mirrors the same
     // after_or_equal/before_or_equal check the server enforces in
     // SectionSubjectController::overrideTime().
-    schedulingWindow: { type: Object, default: () => ({ start_time: '08:00', end_time: '19:00' }) },
+    // REQUIRED, no fallback default: this must always come from the
+    // active School Year's Academic Calendar. A silent hardcoded
+    // default here previously caused valid times (e.g. 7:30 PM end)
+    // to be wrongly flagged when a parent forgot to pass this prop —
+    // better to surface that as a missing prop than mask it.
+    schedulingWindow: { type: Object, required: true },
     // Controlled by the parent (Show.vue) — one "Show details" toggle
     // per subject drives Faculty/Room/Time together.
     showDetails: { type: Boolean, default: false },
@@ -294,11 +299,11 @@ const applyPreset = (preset) => {
 // Year's Class Start/End Time is never valid — Apply is disabled
 // outright, exactly like the MAX_MEETINGS day cap above.
 const windowStartMin = computed(() => {
-    const [h, m] = (props.schedulingWindow?.start_time ?? '08:00').split(':').map(Number);
+    const [h, m] = props.schedulingWindow.start_time.split(':').map(Number);
     return h * 60 + m;
 });
 const windowEndMin = computed(() => {
-    const [h, m] = (props.schedulingWindow?.end_time ?? '19:00').split(':').map(Number);
+    const [h, m] = props.schedulingWindow.end_time.split(':').map(Number);
     return h * 60 + m;
 });
 

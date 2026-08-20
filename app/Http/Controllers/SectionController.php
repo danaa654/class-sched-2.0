@@ -7,6 +7,7 @@ use App\Http\Requests\StoreSectionBatchRequest;
 use App\Http\Requests\StoreSectionRequest;
 use App\Http\Requests\UpdateSectionRequest;
 use App\Models\AcademicTerm;
+use App\Models\College;
 use App\Models\Curriculum;
 use App\Models\Major;
 use App\Models\Section;
@@ -65,6 +66,49 @@ class SectionController extends Controller
 
         $term = trim((string) $request->query('term', $defaultTerm));
 
+        // College filter — "college_id" must be one of the Colleges the
+        // current user is actually authorized to see (AccessScope::
+        // visibleCollegeIds()), same server-side authority the Program
+        // dropdown already uses below. A Dean/OIC passing a foreign
+        // college_id simply matches nothing rather than leaking another
+        // College's Sections — never trust the raw query value alone.
+        $collegeId = $request->query('college_id');
+        $collegeId = ($collegeId !== null && $collegeId !== '' && $collegeId !== 'all')
+            ? (int) $collegeId
+            : null;
+
+        if ($collegeId !== null) {
+            $visibleCollegeIds = AccessScope::visibleCollegeIds($request->user());
+            if ($visibleCollegeIds !== null && ! in_array($collegeId, $visibleCollegeIds, true)) {
+                $collegeId = -1; // outside this user's scope — match nothing
+            }
+        }
+
+        // Year Level filter — validated against the same YEAR_LEVELS
+        // enum the Add/Edit Section form already uses, so an invalid
+        // value is simply ignored rather than silently returning zero
+        // rows or leaking a raw SQL value into the query.
+        $yearLevel = trim((string) $request->query('year_level', ''));
+        if ($yearLevel !== '' && ! in_array($yearLevel, StoreSectionRequest::YEAR_LEVELS, true)) {
+            $yearLevel = '';
+        }
+
+        // Scheduling Status filter — derived purely from the same
+        // database facts SectionController::finalize() and the
+        // scheduling-progress withCount() below already use as the
+        // single source of truth (no second/duplicate definition):
+        //   - is_finalized                → Finalized / Locked
+        //   - a section_subjects row with status = 'Conflict'         → Needs Attention
+        //   - no section_subjects rows at all                         → No Subjects Yet
+        //   - every row "assigned" (Faculty/Room/Days/Start/End, or
+        //     Practicum) and none conflicting                         → Fully Scheduled
+        //   - anything else (has subjects, not fully assigned, no
+        //     conflicts, not finalized)                                → In Progress
+        $schedulingStatus = trim((string) $request->query('scheduling_status', 'all'));
+        if (! in_array($schedulingStatus, ['all', 'no_subjects', 'in_progress', 'fully_scheduled', 'finalized', 'needs_attention'], true)) {
+            $schedulingStatus = 'all';
+        }
+
         $sections = Section::query()
             ->visibleTo($request->user())
             ->with(['major:id,name,code', 'curriculum:id,code,name,major_id'])
@@ -75,6 +119,17 @@ class SectionController extends Controller
                     $query->where('academic_year', $termYear)
                         ->where('semester', $termSemester);
                 }
+            })
+            ->when($collegeId !== null, function ($query) use ($collegeId) {
+                $query->whereHas('major.department', function ($inner) use ($collegeId) {
+                    $inner->where('college_id', $collegeId);
+                });
+            })
+            ->when($yearLevel !== '', function ($query) use ($yearLevel) {
+                $query->where('year_level', $yearLevel);
+            })
+            ->when($schedulingStatus !== 'all', function ($query) use ($schedulingStatus) {
+                $this->applySchedulingStatusFilter($query, $schedulingStatus);
             })
             // Scheduling-progress indicator for the list — counts every
             // placement that has Faculty, Room, Days, Start, and End
@@ -151,12 +206,29 @@ class SectionController extends Controller
             ->orderBy('code')
             ->get(['id', 'code', 'name', 'major_id']);
 
+        // College filter dropdown — same visibility scope as the
+        // Program dropdown above (AccessScope::visibleCollegeIds()): a
+        // Dean/OIC only ever sees their own College here, never every
+        // College in the database.
+        $visibleCollegeIds = AccessScope::visibleCollegeIds($request->user());
+        $colleges = College::query()
+            ->when($visibleCollegeIds !== null, fn ($query) => $query->whereIn('id', $visibleCollegeIds))
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
+
         return Inertia::render('Scheduling/Sections/Index', [
             'sections' => $sections,
-            'filters' => ['section_search' => $search, 'term' => $term],
+            'filters' => [
+                'section_search' => $search,
+                'term' => $term,
+                'college_id' => $collegeId,
+                'year_level' => $yearLevel,
+                'scheduling_status' => $schedulingStatus,
+            ],
             'termOptions' => $this->termFilterOptions(),
             'activeMajors' => $activeMajors,
             'curriculums' => $curriculums,
+            'colleges' => $colleges,
             'yearLevels' => StoreSectionRequest::YEAR_LEVELS,
             'sectionTypes' => StoreSectionRequest::SECTION_TYPES,
             'academicTermOptions' => $this->academicTermSectionOptions(),
@@ -459,6 +531,76 @@ class SectionController extends Controller
             'success',
             "Section {$section->section_code}'s schedule has been unlocked. Reason: {$validated['reason']}"
         );
+    }
+
+    /**
+     * Applies the "Scheduling Status" filter (spec: College/Year
+     * Level/Scheduling Status filters on the Sections page) directly
+     * against the database — never against frontend-computed badges.
+     *
+     * Reuses the exact "assigned" definition already used by
+     * index()'s assigned_subjects_count withCount() and by
+     * finalize()'s completeness check, and the 'Conflict' status
+     * SectionSubject rows already carry (see the section_subjects
+     * migration) — no second/competing definition of these states is
+     * introduced here.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Section>  $query
+     */
+    private function applySchedulingStatusFilter($query, string $status): void
+    {
+        $hasConflict = fn ($inner) => $inner->where('status', 'Conflict');
+
+        switch ($status) {
+            case 'no_subjects':
+                $query->whereDoesntHave('sectionSubjects');
+                break;
+
+            case 'finalized':
+                $query->where('is_finalized', true);
+                break;
+
+            case 'needs_attention':
+                $query->where('is_finalized', false)
+                    ->whereHas('sectionSubjects', $hasConflict);
+                break;
+
+            case 'fully_scheduled':
+                $query->where('is_finalized', false)
+                    ->whereHas('sectionSubjects')
+                    ->whereDoesntHave('sectionSubjects', $hasConflict)
+                    ->whereDoesntHave('sectionSubjects', fn ($inner) => $this->unassignedSectionSubjectQuery($inner));
+                break;
+
+            case 'in_progress':
+            default:
+                $query->where('is_finalized', false)
+                    ->whereHas('sectionSubjects')
+                    ->whereDoesntHave('sectionSubjects', $hasConflict)
+                    ->whereHas('sectionSubjects', fn ($inner) => $this->unassignedSectionSubjectQuery($inner));
+                break;
+        }
+    }
+
+    /**
+     * The inverse of index()'s assigned_subjects_count condition: a
+     * SectionSubject row that is NOT fully assigned (missing Faculty/
+     * Room/Days/Start/End) and is NOT a Practicum/OJT row (which never
+     * needs those fields — see Subject::isPracticum()).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\SectionSubject>  $query
+     */
+    private function unassignedSectionSubjectQuery($query)
+    {
+        return $query->where(function ($inner) {
+            $inner->whereNull('faculty_id')
+                ->orWhereNull('room_id')
+                ->orWhereNull('days')
+                ->orWhereNull('start_time')
+                ->orWhereNull('end_time');
+        })->whereDoesntHave('subject', function ($subjectQuery) {
+            $subjectQuery->where('subject_type', 'practicum');
+        });
     }
 
     /**

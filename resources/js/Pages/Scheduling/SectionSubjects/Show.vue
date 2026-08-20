@@ -1,6 +1,6 @@
 <script setup>
 import { Head, useForm, usePage, Link, router } from '@inertiajs/vue3';
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import Swal from 'sweetalert2';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -9,7 +9,6 @@ import Toolbar from 'primevue/toolbar';
 import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
-import DatePicker from 'primevue/datepicker';
 import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
@@ -62,10 +61,12 @@ const props = defineProps({
     // Scheduling table options — Faculty/Room dropdowns.
     activeFaculty: { type: Array, default: () => [] },
     activeRooms: { type: Array, default: () => [] },
-    schedulingWindow: {
-        type: Object,
-        default: () => ({ start_time: '08:00', end_time: '18:00', available_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] }),
-    },
+    // Always supplied by SectionSubjectController from the active School
+    // Year's Academic Calendar (falls back to SchoolYear's own defaults
+    // only when there's genuinely no active term). REQUIRED here, no
+    // local hardcoded default — a hardcoded fallback previously masked
+    // cases where this prop wasn't forwarded to a child component.
+    schedulingWindow: { type: Object, required: true },
 });
 
 const toast = useToast();
@@ -212,7 +213,25 @@ watch(
 const rowState = reactive({});
 const stateFor = (rowId) => {
     if (!rowState[rowId]) {
-        rowState[rowId] = { errors: {}, capacityConfirmed: false, workloadConfirmed: false, hoursConfirmed: false };
+        // BUG FIX — Hours Mismatch reappearing after every refresh.
+        // Previously this always started at `hoursConfirmed: false`,
+        // ignoring the row's own persisted `hours_confirmed` column —
+        // so a mismatch the Registrar had already confirmed AND saved
+        // would still show up in "Scheduling Issues" the moment the
+        // page reloaded, forcing them to reconfirm it forever. Seed
+        // the initial value from the row's persisted flag instead; it
+        // still gets reset to false the moment Days/Start/End Time
+        // change again this session (see onDaysChange/onStartTimeChange/
+        // onEndTimeChange below), so a genuinely NEW mismatch on an
+        // edited row is never silently hidden — only an already-
+        // confirmed-and-saved one stops nagging on reload.
+        const row = rows.value.find((r) => r.id === rowId);
+        rowState[rowId] = {
+            errors: {},
+            capacityConfirmed: Boolean(row?.capacity_confirmed),
+            workloadConfirmed: false,
+            hoursConfirmed: Boolean(row?.hours_confirmed),
+        };
     }
     return rowState[rowId];
 };
@@ -225,12 +244,13 @@ const stateFor = (rowId) => {
 // the full display order regardless of which days are selectable
 // this School Year.
 const allDayDefinitions = [
-    { label: 'Monday', value: 'Mon' },
-    { label: 'Tuesday', value: 'Tue' },
-    { label: 'Wednesday', value: 'Wed' },
-    { label: 'Thursday', value: 'Thu' },
-    { label: 'Friday', value: 'Fri' },
-    { label: 'Saturday', value: 'Sat' },
+    { label: 'Mon', value: 'Mon' },
+    { label: 'Tue', value: 'Tue' },
+    { label: 'Wed', value: 'Wed' },
+    { label: 'Thu', value: 'Thu' },
+    { label: 'Fri', value: 'Fri' },
+    { label: 'Sat', value: 'Sat' },
+    { label: 'Sun', value: 'Sun' },
 ];
 
 // ACADEMIC-CALENDAR-DRIVEN CLASS DAYS — the Days dropdown (and its
@@ -274,8 +294,8 @@ const dayPresets = computed(() => {
 
 // Compact display like "MWF", "TTH", "SAT" instead of PrimeVue's
 // default comma/chip rendering.
-const dayAbbreviations = { Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'TH', Fri: 'F', Sat: 'SAT' };
-const orderedDayTokens = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayAbbreviations = { Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'TH', Fri: 'F', Sat: 'SAT', Sun: 'SUN' };
+const orderedDayTokens = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const formatDays = (selected) => {
     if (!selected || selected.length === 0) return '';
     return orderedDayTokens
@@ -310,14 +330,25 @@ const facultyGroupsFor = (row) => {
     // not the alphabetical roster order.
     const recommended = recs
         .filter((r) => props.activeFaculty.some((f) => f.id === r.id))
-        .map((r) => ({ label: r.name, value: r.id, confidence: r.confidence }));
+        .map((r) => ({
+            label: r.name,
+            value: r.id,
+            confidence: r.confidence,
+            currentLoad: r.current_load,
+            maxUnits: r.max_teaching_units,
+        }));
 
     const qualified = [];
     const others = [];
 
     props.activeFaculty.forEach((faculty) => {
         if (recommendedIds.has(faculty.id)) return;
-        const option = { label: faculty.full_name, value: faculty.id };
+        const option = {
+            label: faculty.full_name,
+            value: faculty.id,
+            currentLoad: faculty.current_load,
+            maxUnits: faculty.max_teaching_units,
+        };
         if (isQualifiedFor(faculty, subject)) {
             qualified.push(option);
         } else {
@@ -326,7 +357,15 @@ const facultyGroupsFor = (row) => {
     });
 
     const groups = [];
-    if (recommended.length) groups.push({ label: 'Recommended', items: recommended, isRecommended: true });
+    if (isRecommendationsLoading(row.id) && !recommended.length) {
+        groups.push({
+            label: 'Recommended',
+            items: [{ label: 'Finding the best matches…', value: '__loading__', disabled: true }],
+            isRecommended: true,
+        });
+    } else if (recommended.length) {
+        groups.push({ label: 'Recommended', items: recommended, isRecommended: true });
+    }
     if (qualified.length) groups.push({ label: 'Qualified for This Subject', items: qualified });
     if (others.length) groups.push({ label: 'Other Active Faculty (Manual Override)', items: others });
     return groups;
@@ -347,14 +386,25 @@ const roomGroupsFor = (row) => {
 
     const recommended = recs
         .filter((r) => props.activeRooms.some((room) => room.id === r.id))
-        .map((r) => ({ label: `${r.name} (${r.capacity})`, value: r.id, confidence: r.confidence }));
+        .map((r) => ({
+            label: `${r.name} (${r.capacity})`,
+            value: r.id,
+            confidence: r.confidence,
+            scheduledHours: r.scheduled_hours,
+            maxHours: r.max_hours,
+        }));
 
     const typeMatched = [];
     const others = [];
 
     props.activeRooms.forEach((room) => {
         if (recommendedIds.has(room.id)) return;
-        const option = { label: `${room.room_code} — ${room.room_name} (${room.capacity})`, value: room.id };
+        const option = {
+            label: `${room.room_code} — ${room.room_name} (${room.capacity})`,
+            value: room.id,
+            scheduledHours: room.scheduled_hours,
+            maxHours: room.max_hours,
+        };
         if (room.room_type === typeMatch) {
             typeMatched.push(option);
         } else {
@@ -363,7 +413,15 @@ const roomGroupsFor = (row) => {
     });
 
     const groups = [];
-    if (recommended.length) groups.push({ label: 'Recommended', items: recommended, isRecommended: true });
+    if (isRecommendationsLoading(row.id) && !recommended.length) {
+        groups.push({
+            label: 'Recommended',
+            items: [{ label: 'Finding the best matches…', value: '__loading__', disabled: true }],
+            isRecommended: true,
+        });
+    } else if (recommended.length) {
+        groups.push({ label: 'Recommended', items: recommended, isRecommended: true });
+    }
     if (typeMatched.length) {
         groups.push({ label: wantsLaboratory ? 'Laboratory Rooms' : 'Lecture Rooms', items: typeMatched });
     }
@@ -371,25 +429,119 @@ const roomGroupsFor = (row) => {
     return groups;
 };
 
-/* --- Time pickers — DatePicker bound to a JS Date, converted to "HH:mm" on save --- */
+/* --- Time pickers — 30-minute interval dropdowns, "HH:mm" strings --- */
 
-const timeStringToDate = (value) => {
-    if (!value) return null;
-    const [hours, minutes] = value.split(':').map(Number);
-    const date = new Date();
-    date.setHours(hours, minutes, 0, 0);
-    return date;
+// --- 30-Minute Interval Time Dropdowns — replaces the old scrolling
+// hour/minute/am-pm DatePicker spinner with a flat, searchable list of
+// times, generated directly from the active School Year's Academic
+// Calendar window (schedulingWindow.start_time/end_time — the same
+// hard boundary overrideTime()/candidateStartTimes() already enforce
+// server-side), so the Registrar can never even open a time outside
+// what the calendar allows. Falls back to a fixed 30-minute step; the
+// School Year's own configured interval isn't sent to this page today
+// (only Room Grid receives interval_minutes), so 30 is the safe,
+// widely-applicable default across every School Year's setup.
+const TIME_OPTION_STEP_MINUTES = 30;
+const formatTimeOptionLabel = (hours, minutes) => {
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+    return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+};
+const timeOptions = computed(() => {
+    const [startH, startM] = props.schedulingWindow.start_time.split(':').map(Number);
+    const [endH, endM] = props.schedulingWindow.end_time.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+
+    // Lunch Break (fixed 12:00 PM-1:00 PM — see SchoolYear::LUNCH_BREAK_START/END)
+    // blocks any class time that would actually fall INSIDE it (e.g.
+    // 12:30 PM), since that would overlap SchoolYear::overlapsLunchBreak().
+    // The boundary marks themselves — 12:00 PM and 1:00 PM — do NOT
+    // overlap lunch (a class can legitimately end right as lunch starts,
+    // at 12:00 PM, or begin right as lunch ends, at 1:00 PM), so they
+    // stay in this base list. Excluding a class from STARTING at 12:00
+    // PM (which would run straight into lunch) is handled separately in
+    // timeOptionsFor() below, since that restriction only applies to
+    // Start Time, not End Time.
+    const [lunchStartH, lunchStartM] = props.schedulingWindow.lunch_start.split(':').map(Number);
+    const [lunchEndH, lunchEndM] = props.schedulingWindow.lunch_end.split(':').map(Number);
+    const lunchStartMinutes = lunchStartH * 60 + lunchStartM;
+    const lunchEndMinutes = lunchEndH * 60 + lunchEndM;
+
+    const options = [];
+    for (let m = startMinutes; m <= endMinutes; m += TIME_OPTION_STEP_MINUTES) {
+        if (m > lunchStartMinutes && m < lunchEndMinutes) continue;
+
+        const h = Math.floor(m / 60);
+        const min = m % 60;
+        const value = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+        options.push({ label: formatTimeOptionLabel(h, min), value });
+    }
+    return options;
+});
+
+// Minutes-since-midnight for the lunch boundary, reused by
+// timeOptionsFor()/endTimeOptionsFor() below to keep the "can't START
+// at 12:00 PM" rule in one place instead of re-parsing lunch_start twice.
+const lunchStartValue = computed(() => props.schedulingWindow.lunch_start?.slice(0, 5));
+
+/* --- Busy Time Ranges — grey out Start/End Time slots that would        */
+/* overlap a schedule the row's currently selected Room and/or Faculty    */
+/* already has on the currently selected Days (e.g. Room 306 already      */
+/* booked 1:00 PM-5:00 PM and 5:00 PM-7:00 PM on Sat), instead of only     */
+/* rejecting the pick after Save. Keyed by row id; refetched whenever     */
+/* Room, Faculty, or Days changes on that row.                            */
+
+const busyTimes = reactive({});
+
+const fetchBusyTimes = async (row) => {
+    if ((!row.room_id && !row.faculty_id) || !row.days || row.days.length === 0) {
+        busyTimes[row.id] = [];
+        return;
+    }
+
+    try {
+        const url = new URL(route('scheduling.section-subjects.busy-times', [props.section.id, row.id]), window.location.origin);
+        if (row.room_id) url.searchParams.set('room_id', row.room_id);
+        if (row.faculty_id) url.searchParams.set('faculty_id', row.faculty_id);
+        url.searchParams.set('days', row.days.join(','));
+        const response = await fetch(url, { headers: { Accept: 'application/json' } });
+        const data = await response.json();
+        busyTimes[row.id] = data.busy ?? [];
+    } catch (e) {
+        busyTimes[row.id] = [];
+    }
 };
 
-const dateToTimeString = (date) => {
-    if (!date) return null;
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
+// Same overlap rule ScheduleConflictService::overlaps() uses server-side
+// (new_start < existing_end AND new_end > existing_start), mirrored here
+// so the dropdown's greyed-out slots can never disagree with what Save
+// would actually reject.
+const rangesOverlap = (startA, endA, startB, endB) => startA < endB && endA > startB;
+
+// A Start Time is unusable if it falls inside an already-booked window
+// for this row's Room/Faculty — the class can't begin while the
+// resource is still occupied by something else.
+const timeOptionsFor = (row) => {
+    const ranges = busyTimes[row.id] ?? [];
+    return timeOptions.value
+        .filter((opt) => opt.value !== lunchStartValue.value)
+        .map((opt) => ({
+            ...opt,
+            disabled: ranges.some((r) => opt.value >= r.start_time && opt.value < r.end_time),
+        }));
 };
 
-const startTimeModel = (row) => timeStringToDate(row.start_time);
-const endTimeModel = (row) => timeStringToDate(row.end_time);
+const endTimeOptionsFor = (row) => {
+    const base = row.start_time ? timeOptions.value.filter((opt) => opt.value > row.start_time) : timeOptions.value;
+    if (!row.start_time) return base;
+
+    const ranges = busyTimes[row.id] ?? [];
+    return base.map((opt) => ({
+        ...opt,
+        disabled: ranges.some((r) => rangesOverlap(row.start_time, opt.value, r.start_time, r.end_time)),
+    }));
+};
 
 /* --- Auto End Time — a Subject's weekly contact hours (Lecture +        */
 /* Laboratory) are split evenly across however many Days are selected,   */
@@ -555,26 +707,14 @@ const tableConflicts = computed(() => {
         // highlight and the Registrar confirm it up front instead of
         // hitting an opaque "Nothing saved" after clicking Save.
         //
-        // Confirmation is THIS-SESSION ONLY (stateFor(...).hoursConfirmed).
-        // A stale persisted `row.hours_confirmed=true` from a PAST save
-        // is never trusted here — see the ROOT-CAUSE FIX note below for
-        // why. It only reappears as unconfirmed if Days/Start/End Time
-        // change again this session (see onDaysChange/onStartTimeChange/
-        // onEndTimeChange, which reset the local confirmation flag).
-        // ROOT-CAUSE FIX — this used to also require `!a.hours_confirmed`
-        // (the PERSISTED flag from a prior save) before the mismatch was
-        // even added to tableConflicts. That let an old confirmation —
-        // saved back when this row's duration still matched the
-        // Subject's required hours — permanently hide a NEW mismatch
-        // (e.g. after the Subject's required hours were edited
-        // elsewhere), even on a row nobody touched this session. Unlike
-        // Capacity above (which always lists the current mismatch and
-        // only checks confirmation state later, via
-        // unconfirmedHoursRowIds/unconfirmedCapacityRowIds), Hours was
-        // the only one of the two withconfirmed-and-forgotten. Now it
-        // always reflects the CURRENT numbers — confirmation status
-        // (fresh, this-session only) is checked exactly once, later, by
-        // unconfirmedHoursRowIds — matching how Capacity already works.
+        // Confirmation now SEEDS from the row's persisted
+        // `hours_confirmed` column (see stateFor() above) so an
+        // already-confirmed-and-saved mismatch doesn't reappear on
+        // every page reload — see the BUG FIX note on stateFor() for
+        // the full reasoning. It still gets reset to unconfirmed the
+        // moment Days/Start/End Time change again this session (see
+        // onDaysChange/onStartTimeChange/onEndTimeChange), so editing
+        // a row always re-surfaces a genuinely new mismatch.
         if (rowIsSchedulable(a) && !stateFor(a.id).hoursConfirmed) {
             const required = weeklyContactHours(a) > 0 ? weeklyContactHours(a) : 3;
             const dayCount = a.days.length;
@@ -745,23 +885,100 @@ const recommendations = reactive({});
 
 const recommendationStateFor = (rowId) => recommendations[rowId] ?? { loading: false, error: null, faculty: null, room: null, time: null };
 
+// CONNECTION-POOL CONTENTION FIX — browsers cap concurrent connections
+// per origin at 6 (HTTP/1.1), and PREFETCH_CONCURRENCY below deliberately
+// uses all 6 to warm up every row's dropdown as fast as possible. That's
+// fine on its own, but it means a user action that needs a fetch of its
+// own (like "Clear Schedule") can end up queued behind still-in-flight
+// prefetch requests instead of firing immediately — the request *looks*
+// slow even though the backend responds fast. Tracking each prefetch's
+// AbortController here lets any higher-priority action cancel the whole
+// queue first and free up a connection slot right away.
+const activeRecommendationRequests = new Set();
+
 const fetchRecommendations = async (row, force = false) => {
     const existing = recommendations[row.id];
     if (!force && (existing?.loading || existing?.faculty)) return;
 
     recommendations[row.id] = { ...(existing ?? {}), loading: true, error: null };
 
+    const controller = new AbortController();
+    activeRecommendationRequests.add(controller);
+
     try {
         const response = await fetch(route('scheduling.section-subjects.recommend', [props.section.id, row.id]), {
             headers: { Accept: 'application/json' },
+            signal: controller.signal,
         });
         if (!response.ok) throw new Error('Request failed');
         const data = await response.json();
         recommendations[row.id] = { loading: false, error: null, ...data };
     } catch (e) {
-        recommendations[row.id] = { loading: false, error: 'Could not load recommendations for this subject.', faculty: null, room: null, time: null };
+        // An aborted prefetch (e.g. because Clear Schedule needed the
+        // connection slot) isn't a real error — leave the row as
+        // "not yet loaded" so a later hover/prefetch can retry it,
+        // instead of permanently flagging it as failed.
+        if (e?.name === 'AbortError') {
+            recommendations[row.id] = { loading: false, error: null, faculty: null, room: null, time: null };
+        } else {
+            recommendations[row.id] = { loading: false, error: 'Could not load recommendations for this subject.', faculty: null, room: null, time: null };
+        }
+    } finally {
+        activeRecommendationRequests.delete(controller);
     }
 };
+
+// Cancels every recommendation prefetch still in flight so an urgent
+// request (Clear Schedule, Clear Auto-Generated, etc.) doesn't have to
+// wait its turn behind the per-origin connection cap.
+const cancelPendingRecommendationPrefetch = () => {
+    activeRecommendationRequests.forEach((controller) => controller.abort());
+    activeRecommendationRequests.clear();
+};
+
+// BUG FIX — "Select faculty"/"Select room" dropdown flashing the
+// unranked full roster/room list first, then re-rendering a few
+// seconds later once fetchRecommendations() resolves. Two things
+// combine to fix this:
+//   1. Prefetch every row's recommendations in the background as
+//      soon as the row list is available/changes (below), AND on
+//      @mouseenter of the field itself (before the click that opens
+//      it even lands) — buying the request extra head start.
+//   2. While a row's fetch is still in flight, facultyGroupsFor()/
+//      roomGroupsFor() surface a "Loading Recommendations…" group
+//      instead of silently falling back to the plain roster, so a
+//      very fast click never reads as "no recommendation exists" —
+//      the panel swaps to the real "Recommended" group the instant
+//      the fetch resolves (recommendations is reactive, so this
+//      happens live even while the dropdown is already open).
+// fetchRecommendations() itself already no-ops once a row is
+// loaded/loading, so prefetch/hover/@show can all call it freely.
+const PREFETCH_CONCURRENCY = 6;
+const prefetchRecommendations = async (targetRows) => {
+    const queue = [...targetRows];
+    const worker = async () => {
+        let row;
+        while ((row = queue.shift())) {
+            await fetchRecommendations(row);
+        }
+    };
+    await Promise.all(Array.from({ length: PREFETCH_CONCURRENCY }, worker));
+};
+
+onMounted(() => {
+    prefetchRecommendations(rows.value);
+    rows.value.forEach((row) => fetchBusyTimes(row));
+});
+
+watch(
+    () => props.sectionSubjects,
+    () => {
+        prefetchRecommendations(rows.value);
+        rows.value.forEach((row) => fetchBusyTimes(row));
+    },
+);
+
+const isRecommendationsLoading = (rowId) => recommendations[rowId]?.loading === true && !recommendations[rowId]?.faculty;
 
 const confidenceSeverity = (label) => {
     switch (label) {
@@ -803,49 +1020,6 @@ const applyTimeRecommendation = (row, rec) => {
 
 const helpPopover = ref(null);
 const toggleHelp = (event) => helpPopover.value?.toggle(event);
-
-const timePopover = ref(null);
-const timePopoverRow = ref(null);
-
-const toggleTimeSuggestions = (event, row) => {
-    timePopoverRow.value = row;
-    fetchRecommendations(row);
-    timePopover.value?.toggle(event);
-};
-
-const applyTimeRecommendationFromPopover = (row, rec) => {
-    applyTimeRecommendation(row, rec);
-    timePopover.value?.hide();
-};
-
-/* --- Inline "Recommended" popovers (Faculty / Room columns) --------- */
-/* Same one-click treatment as the Time popover above, so Faculty and   */
-/* Room get the same sparkle-triggered quick-pick instead of requiring  */
-/* the row's old expand panel.                                          */
-
-const facultyPopover = ref(null);
-const facultyPopoverRow = ref(null);
-const toggleFacultySuggestions = (event, row) => {
-    facultyPopoverRow.value = row;
-    fetchRecommendations(row);
-    facultyPopover.value?.toggle(event);
-};
-const applyFacultyRecommendationFromPopover = (row, rec) => {
-    applyFacultyRecommendation(row, rec);
-    facultyPopover.value?.hide();
-};
-
-const roomPopover = ref(null);
-const roomPopoverRow = ref(null);
-const toggleRoomSuggestions = (event, row) => {
-    roomPopoverRow.value = row;
-    fetchRecommendations(row);
-    roomPopover.value?.toggle(event);
-};
-const applyRoomRecommendationFromPopover = (row, rec) => {
-    applyRoomRecommendation(row, rec);
-    roomPopover.value?.hide();
-};
 
 /* ------------------------------------------------------------------ */
 /* Smart Schedule Recommendation Drawer (Prompt 8.7)                    */
@@ -942,6 +1116,25 @@ const schedulePolling = useSchedulePolling({
 
 schedulePolling.start();
 
+// BUG FIX — switching Sections via the header dropdown above
+// (onSwitchSection()) does a router.visit() to this SAME route
+// component, so Inertia reuses the existing Vue instance instead of
+// remounting it. useSchedulePolling() only reads `initialVersion`
+// ONCE, at setup time, so without this its `currentVersion` stays
+// frozen at whichever Section was loaded first — the very next poll
+// then compares the NEW Section's real version against that stale
+// leftover number, and (since they're essentially never equal)
+// immediately — and wrongly — reports "Another user changed this
+// schedule" on a Section nobody else has touched. resetForSection()
+// exists on the composable for exactly this case; it just needed to
+// be wired up here.
+watch(
+    () => props.section.id,
+    () => {
+        schedulePolling.resetForSection(props.scheduleVersion);
+    },
+);
+
 // Header's "Refresh Schedule" action — re-fetches this Section's page
 // via Inertia (same route, so it's a lightweight partial reload of
 // props only) rather than a hard browser reload, then clears the
@@ -1017,30 +1210,53 @@ const onScheduleStaleFromRoomGrid = (currentVersion) => {
 const dirtyRowIds = ref(new Set());
 const hasUnsavedChanges = computed(() => dirtyRowIds.value.size > 0);
 
+// "Just Saved" — hides the "Clear Schedule" button right after a full
+// Save Schedule succeeds, so there's nothing destructive sitting next
+// to a schedule the Registrar just confirmed is correct. It comes
+// back the moment they touch anything again (markDirty below), since
+// at that point there's unsaved work a Clear could legitimately wipe.
+// "Just Saved" — hides the "Clear Schedule" button once there's
+// nothing dirty/pending left to clear. Unlike a plain ref, this is a
+// COMPUTED derived from the actual row state (dirtyRowIds,
+// hasAutoGeneratedRows), not a one-off flag toggled by the save
+// handler — so it naturally survives a page refresh: freshly-loaded
+// rows from the server start with no dirty edits and no pending
+// Auto Generate suggestions, so this computes to "just saved" again
+// on load too, instead of resetting to false and popping the button
+// back up. It automatically flips back the moment the Registrar
+// edits anything (markDirty) or a new Auto Generate run produces
+// pending rows.
+const justSaved = computed(() => !hasUnsavedChanges.value && !hasAutoGeneratedRows.value);
+
 const markDirty = (row, field) => {
     dirtyRowIds.value.add(row.id);
     delete stateFor(row.id).errors[field];
 };
 
 const onFacultyChange = (row, value) => {
+    if (value === '__loading__') return;
     row.faculty_id = value;
     markDirty(row, 'faculty_id');
     // A new Faculty means any previous Teaching Load Limit
     // confirmation no longer applies — must be re-confirmed.
     stateFor(row.id).workloadConfirmed = false;
+    fetchBusyTimes(row);
 };
 const onRoomChange = (row, value) => {
+    if (value === '__loading__') return;
     row.room_id = value;
     markDirty(row, 'room_id');
     // A new Room means any previous Capacity Warning confirmation no
     // longer applies — it must be re-confirmed against the new Room.
     stateFor(row.id).capacityConfirmed = false;
+    fetchBusyTimes(row);
 };
 const onDaysChange = (row, value) => {
     row.days = value;
     markDirty(row, 'days');
     autoFillEndTime(row);
     clampEndTimeToMax(row);
+    fetchBusyTimes(row);
     stateFor(row.id).hoursConfirmed = false;
     // BUG FIX — row.hours_confirmed is the PERSISTED flag loaded from
     // the server (true if a prior save confirmed an Hours Mismatch at
@@ -1054,16 +1270,16 @@ const onDaysChange = (row, value) => {
     // or Time changes.
     row.hours_confirmed = false;
 };
-const onStartTimeChange = (row, date) => {
-    row.start_time = dateToTimeString(date);
+const onStartTimeChange = (row, value) => {
+    row.start_time = value;
     markDirty(row, 'start_time');
     autoFillEndTime(row);
     clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
     row.hours_confirmed = false; // see onDaysChange's comment above
 };
-const onEndTimeChange = (row, date) => {
-    row.end_time = dateToTimeString(date);
+const onEndTimeChange = (row, value) => {
+    row.end_time = value;
     markDirty(row, 'end_time');
     clampEndTimeToMax(row);
     stateFor(row.id).hoursConfirmed = false;
@@ -1332,7 +1548,27 @@ const saveSchedule = async () => {
                 Object.assign(row, { ...fresh, days: toDaysArray(fresh.days) });
             }
         });
-        dirtyRowIds.value = new Set();
+
+        // PARTIAL SAVE — the request still succeeded (200): every row
+        // WITHOUT a conflict was written. Rows that DID have an overlap
+        // (data.errors) were skipped and never touched in the database,
+        // so re-highlight exactly those rows instead of clearing every
+        // error, and keep them dirty since the user's edits for those
+        // specific rows still haven't been saved.
+        const skippedIds = new Set((data.skipped_ids ?? []).map(Number));
+
+        rows.value.forEach((row) => {
+            const rowState = stateFor(row.id);
+            rowState.errors = {};
+        });
+
+        if (data.errors) {
+            Object.entries(data.errors).forEach(([rowId, fieldErrors]) => {
+                Object.assign(stateFor(Number(rowId)).errors, fieldErrors);
+            });
+        }
+
+        dirtyRowIds.value = new Set([...dirtyRowIds.value].filter((id) => skippedIds.has(id)));
 
         // SAVE SUCCESS — the backend incremented schedule_version by
         // exactly 1 as part of this same transaction; adopt it as the
@@ -1342,7 +1578,28 @@ const saveSchedule = async () => {
             schedulePolling.acceptVersion(data.schedule_version);
         }
 
-        toast.add({ severity: 'success', summary: 'Saved', detail: data.message ?? 'Schedule saved successfully.', life: 4000 });
+        if (skippedIds.size > 0) {
+            toast.add({
+                severity: 'warn',
+                summary: 'Partially saved',
+                detail: data.message ?? `${skippedIds.size} subject(s) were skipped due to a scheduling conflict.`,
+                life: 7000,
+            });
+        } else {
+            // A clean save (nothing skipped) naturally clears
+            // dirtyRowIds below, which is what the `justSaved`
+            // computed above actually keys off of — no manual flag
+            // needed here anymore.
+            await Swal.fire({
+                icon: 'success',
+                title: 'Schedule Saved',
+                text: data.message ?? 'The schedule was saved successfully.',
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#16a34a',
+                timer: 4000,
+                timerProgressBar: true,
+            });
+        }
     } catch (e) {
         toast.add({
             severity: 'error',
@@ -1368,6 +1625,7 @@ const saveSchedule = async () => {
 
 const autoGenerating = ref(false);
 const autoClearing = ref(false);
+const clearingSchedule = ref(false);
 const autoSummaryVisible = ref(false);
 const autoSummary = ref(null); // { total, scheduled, results, unresolved, message }
 
@@ -1647,12 +1905,85 @@ const clearAutoSchedule = async () => {
     }
 };
 
+// "Clear Schedule" — wipes EVERY subject's Faculty/Room/Days/Time back
+// to blank, including already-Saved/Scheduled rows (not just pending
+// Auto Generate suggestions like clearAutoSchedule() above). This is
+// destructive and cannot be undone, so it requires TWO separate
+// confirmations before the request fires. Server also re-checks
+// isSectionFinalized under lock — the :disabled on the button is just
+// the first line of defense, not the real guard.
+const clearWholeSchedule = async () => {
+    if (isSectionFinalized.value) return;
+
+    const first = await Swal.fire({
+        icon: 'warning',
+        title: 'Clear the entire schedule?',
+        html: `This will remove the Faculty, Room, Day, and Time from <strong>all ${rows.value.length} subject(s)</strong> in this section — including ones already saved. This cannot be undone.`,
+        showCancelButton: true,
+        confirmButtonText: 'Continue',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#dc2626',
+    });
+    if (!first.isConfirmed) return;
+
+    const second = await Swal.fire({
+        icon: 'error',
+        title: 'Are you absolutely sure?',
+        html: 'This is your last chance to back out. Every subject in <strong>' + (props.section.section_code ?? 'this section') + '</strong> will go back to blank.',
+        showCancelButton: true,
+        confirmButtonText: 'Yes, clear everything',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#dc2626',
+        focusCancel: true,
+    });
+    if (!second.isConfirmed) return;
+
+    clearingSchedule.value = true;
+
+    // Free up a connection slot immediately instead of queuing behind
+    // whatever's left of the on-mount recommendation prefetch — see
+    // cancelPendingRecommendationPrefetch() above for why this matters.
+    cancelPendingRecommendationPrefetch();
+
+    try {
+        const response = await fetch(route('scheduling.section-subjects.schedule.clear', props.section.id), {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'X-XSRF-TOKEN': csrfToken() },
+        });
+        const data = await response.json();
+
+        if (response.status === 423) {
+            toast.add({ severity: 'error', summary: 'Cannot clear', detail: data.message, life: 6000 });
+            return;
+        }
+        if (!response.ok) throw new Error(data.message ?? 'Clear failed.');
+
+        applyFreshRows(data.sectionSubjects ?? []);
+        rows.value.forEach((row) => {
+            stateFor(row.id).errors = {};
+        });
+        dirtyRowIds.value = new Set();
+        autoSummary.value = null;
+        autoSummaryVisible.value = false;
+
+        if (typeof data.schedule_version === 'number') {
+            schedulePolling.acceptVersion(data.schedule_version);
+        }
+
+        toast.add({ severity: 'info', summary: 'Schedule cleared', detail: data.message, life: 5000 });
+    } catch (e) {
+        toast.add({ severity: 'error', summary: 'Error', detail: e.message ?? 'Could not clear the schedule.', life: 6000 });
+    } finally {
+        clearingSchedule.value = false;
+    }
+};
+
 // Closing the review panel (✕ button, ESC, or clicking outside)
 // WITHOUT clicking "Accept All & Save" must not leave anything
 // behind — the generated rows (and any manual Faculty/Room overrides
 // made while the panel was open) are already persisted as Draft the
 // instant they happen, so "close without accepting" has to actively
-// discard them via the same endpoint "Clear Generated Schedule" uses,
+// discard them via the same endpoint "Discard Suggestions" uses,
 // not just hide the dialog. Only fires for a user-initiated close
 // (the ✕ icon / ESC / mask click all emit @update:visible); the
 // programmatic `autoSummaryVisible.value = false` inside
@@ -2123,13 +2454,24 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     </span>
                     <Button
                         v-if="hasAutoGeneratedRows"
-                        label="Clear Generated Schedule"
+                        label="Discard Suggestions"
                         icon="pi pi-eraser"
                         severity="secondary"
                         outlined
                         :loading="autoClearing"
                         :disabled="isSectionFinalized"
                         @click="clearAutoSchedule"
+                    />
+                    <Button
+                        v-if="!justSaved"
+                        label="Clear Schedule"
+                        icon="pi pi-trash"
+                        severity="danger"
+                        outlined
+                        :loading="clearingSchedule"
+                        :disabled="rows.length === 0 || isSectionFinalized"
+                        :title="isSectionFinalized ? 'This section is finalized and locked.' : 'Wipe every subject\'s Faculty, Room, Day, and Time — including already-saved schedules.'"
+                        @click="clearWholeSchedule"
                     />
                     <Button
                         label="⚡ Auto Generate Schedule"
@@ -2412,7 +2754,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     value="⚡ Auto"
                                                     severity="help"
                                                     class="!text-[0.65rem]"
-                                                    title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Clear Generated Schedule to discard it."
+                                                    title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Discard Suggestions to discard it."
                                                 />
                                                 <i
                                                     v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id)"
@@ -2486,7 +2828,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                         <!-- Faculty -->
                                         <div class="flex-1 min-w-[15rem]">
                                             <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Faculty</p>
-                                            <div class="flex items-start gap-1">
+                                            <div class="flex items-start gap-1" @mouseenter="fetchRecommendations(data)">
                                                 <Select
                                                     v-model="data.faculty_id"
                                                     :options="facultyGroupsFor(data)"
@@ -2494,6 +2836,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     optionValue="value"
                                                     optionGroupLabel="label"
                                                     optionGroupChildren="items"
+                                                    optionDisabled="disabled"
                                                     filter
                                                     showClear
                                                     placeholder="Select faculty"
@@ -2507,25 +2850,24 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     @show="fetchRecommendations(data)"
                                                 >
                                                     <template #optiongroup="{ option }">
-                                                        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
+                                                        <span class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
                                                     </template>
                                                     <template #option="{ option }">
-                                                        <span>{{ option.label }}</span>
-                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
+                                                        <div class="flex items-center justify-between gap-2 w-full" :class="{ 'italic text-slate-400': option.disabled }">
+                                                            <span class="text-xs">{{ option.label }}</span>
+                                                            <span v-if="!option.disabled" class="flex items-center gap-1 shrink-0">
+                                                                <span
+                                                                    v-if="option.maxUnits"
+                                                                    class="text-[0.65rem] text-slate-400 whitespace-nowrap"
+                                                                    :title="'Teaching Load: ' + (option.currentLoad ?? 0) + ' / ' + option.maxUnits + ' units'"
+                                                                >
+                                                                    {{ option.currentLoad ?? 0 }}/{{ option.maxUnits }} units
+                                                                </span>
+                                                                <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="!text-[0.6rem] !py-0.5" />
+                                                            </span>
+                                                        </div>
                                                     </template>
                                                 </Select>
-                                                <Button
-                                                    icon="pi pi-sparkles"
-                                                    text
-                                                    rounded
-                                                    size="small"
-                                                    severity="secondary"
-                                                    class="!p-1.5 shrink-0"
-                                                    aria-label="Suggested faculty"
-                                                    title="Suggested faculty"
-                                                    :disabled="isSectionFinalized"
-                                                    @click="toggleFacultySuggestions($event, data)"
-                                                />
                                             </div>
                                             <p v-if="stateFor(data.id).errors.faculty_id" class="text-red-500 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.faculty_id }}
@@ -2538,7 +2880,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                         <!-- Room -->
                                         <div class="flex-1 min-w-[14rem]">
                                             <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Room</p>
-                                            <div class="flex items-start gap-1">
+                                            <div class="flex items-start gap-1" @mouseenter="fetchRecommendations(data)">
                                                 <Select
                                                     v-model="data.room_id"
                                                     :options="roomGroupsFor(data)"
@@ -2546,6 +2888,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     optionValue="value"
                                                     optionGroupLabel="label"
                                                     optionGroupChildren="items"
+                                                    optionDisabled="disabled"
                                                     filter
                                                     showClear
                                                     placeholder="Select room"
@@ -2559,25 +2902,24 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     @show="fetchRecommendations(data)"
                                                 >
                                                     <template #optiongroup="{ option }">
-                                                        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
+                                                        <span class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
                                                     </template>
                                                     <template #option="{ option }">
-                                                        <span>{{ option.label }}</span>
-                                                        <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="ml-2 !text-[0.65rem]" />
+                                                        <div class="flex items-center justify-between gap-2 w-full" :class="{ 'italic text-slate-400': option.disabled }">
+                                                            <span class="text-xs">{{ option.label }}</span>
+                                                            <span v-if="!option.disabled" class="flex items-center gap-1 shrink-0">
+                                                                <span
+                                                                    v-if="option.maxHours"
+                                                                    class="text-[0.65rem] text-slate-400 whitespace-nowrap"
+                                                                    :title="'Room Utilization: ' + (option.scheduledHours ?? 0) + ' / ' + option.maxHours + ' hrs'"
+                                                                >
+                                                                    {{ option.scheduledHours ?? 0 }}/{{ option.maxHours }} hrs
+                                                                </span>
+                                                                <Tag v-if="option.confidence" :value="option.confidence" :severity="confidenceSeverity(option.confidence)" class="!text-[0.6rem] !py-0.5" />
+                                                            </span>
+                                                        </div>
                                                     </template>
                                                 </Select>
-                                                <Button
-                                                    icon="pi pi-sparkles"
-                                                    text
-                                                    rounded
-                                                    size="small"
-                                                    severity="secondary"
-                                                    class="!p-1.5 shrink-0"
-                                                    aria-label="Suggested rooms"
-                                                    title="Suggested rooms"
-                                                    :disabled="isSectionFinalized"
-                                                    @click="toggleRoomSuggestions($event, data)"
-                                                />
                                             </div>
                                             <p v-if="stateFor(data.id).errors.room_id" class="text-red-500 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.room_id }}
@@ -2591,7 +2933,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                         </div>
 
                                         <!-- Days -->
-                                        <div class="flex-1 min-w-[12rem]">
+                                        <div class="w-28 shrink-0">
                                             <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Days</p>
                                             <div class="flex items-start gap-1">
                                                 <MultiSelect
@@ -2611,6 +2953,9 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                         <span v-if="!value || value.length === 0" class="text-slate-400">{{ placeholder }}</span>
                                                         <span v-else class="font-medium">{{ formatDays(value) }}</span>
                                                     </template>
+                                                    <template #option="{ option }">
+                                                        <span class="text-xs">{{ option.label }}</span>
+                                                    </template>
                                                     <template #header>
                                                         <div class="flex flex-wrap gap-1 px-3 pt-2 pb-1">
                                                             <button
@@ -2625,18 +2970,6 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                         </div>
                                                     </template>
                                                 </MultiSelect>
-                                                <Button
-                                                    icon="pi pi-sparkles"
-                                                    text
-                                                    rounded
-                                                    size="small"
-                                                    severity="secondary"
-                                                    class="!p-1.5 shrink-0"
-                                                    aria-label="Suggested times"
-                                                    title="Suggested times"
-                                                    :disabled="isSectionFinalized"
-                                                    @click="toggleTimeSuggestions($event, data)"
-                                                />
                                             </div>
                                             <p v-if="stateFor(data.id).errors.days" class="text-red-500 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.days }}
@@ -2647,42 +2980,56 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                         </div>
 
                                         <!-- Start Time -->
-                                        <div class="w-36">
+                                        <div class="w-44 shrink-0">
                                             <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">Start Time</p>
-                                            <DatePicker
-                                                :modelValue="startTimeModel(data)"
-                                                timeOnly
-                                                hourFormat="12"
-                                                showIcon
-                                                iconDisplay="input"
+                                            <Select
+                                                :modelValue="data.start_time"
+                                                :options="timeOptionsFor(data)"
+                                                optionLabel="label"
+                                                optionValue="value"
+                                                optionDisabled="disabled"
+                                                filter
+                                                showClear
                                                 placeholder="Start"
                                                 class="w-full"
                                                 :disabled="isSectionFinalized"
                                                 :class="{ 'p-invalid': stateFor(data.id).errors.start_time, 'unscheduled-field': rowIsUnscheduled(data) }"
-                                                :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
+                                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                                 @update:modelValue="(v) => onStartTimeChange(data, v)"
-                                            />
+                                                @show="fetchBusyTimes(data)"
+                                            >
+                                                <template #option="{ option }">
+                                                    <span class="text-xs" :class="{ 'text-slate-300 line-through': option.disabled }" :title="option.disabled ? 'Already booked at this time' : undefined">{{ option.label }}</span>
+                                                </template>
+                                            </Select>
                                             <p v-if="stateFor(data.id).errors.start_time" class="text-red-500 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.start_time }}
                                             </p>
                                         </div>
 
                                         <!-- End Time -->
-                                        <div class="w-36">
+                                        <div class="w-44 shrink-0">
                                             <p class="text-[0.65rem] uppercase tracking-wide text-slate-400 mb-1">End Time</p>
-                                            <DatePicker
-                                                :modelValue="endTimeModel(data)"
-                                                timeOnly
-                                                hourFormat="12"
-                                                showIcon
-                                                iconDisplay="input"
+                                            <Select
+                                                :modelValue="data.end_time"
+                                                :options="endTimeOptionsFor(data)"
+                                                optionLabel="label"
+                                                optionValue="value"
+                                                optionDisabled="disabled"
+                                                filter
+                                                showClear
                                                 placeholder="End"
                                                 class="w-full"
                                                 :disabled="isSectionFinalized"
                                                 :class="{ 'p-invalid': stateFor(data.id).errors.end_time, 'unscheduled-field': rowIsUnscheduled(data) }"
-                                                :pt="{ panel: { class: isDark ? 'dark-scope' : '' } }"
+                                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
                                                 @update:modelValue="(v) => onEndTimeChange(data, v)"
-                                            />
+                                                @show="fetchBusyTimes(data)"
+                                            >
+                                                <template #option="{ option }">
+                                                    <span class="text-xs" :class="{ 'text-slate-300 line-through': option.disabled }" :title="option.disabled ? 'Already booked at this time' : undefined">{{ option.label }}</span>
+                                                </template>
+                                            </Select>
                                             <p v-if="stateFor(data.id).errors.end_time" class="text-red-500 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.end_time }}
                                             </p>
@@ -2709,163 +3056,6 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 
                     </DataTable>
 
-                    <!-- Suggested Time popover (Days column quick-pick) -->
-                    <Popover ref="timePopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
-                        <div class="w-72 max-w-[85vw]">
-                            <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
-                                Suggested Times<span v-if="timePopoverRow?.subject?.subject_code"> — {{ timePopoverRow.subject.subject_code }}</span>
-                            </p>
-                            <div v-if="recommendationStateFor(timePopoverRow?.id).loading" class="text-xs text-slate-500 px-1 py-1.5">
-                                Finding open slots…
-                            </div>
-                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).error" class="text-xs text-red-500 px-1 py-1.5">
-                                {{ recommendationStateFor(timePopoverRow?.id).error }}
-                            </div>
-                            <div v-else-if="recommendationStateFor(timePopoverRow?.id).time?.message" class="text-xs text-slate-500 px-1 py-1.5">
-                                {{ recommendationStateFor(timePopoverRow?.id).time.message }}
-                            </div>
-                            <ul v-else class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-                                <li
-                                    v-for="(rec, idx) in recommendationStateFor(timePopoverRow?.id).time?.recommendations ?? []"
-                                    :key="idx"
-                                    class="flex flex-col gap-1 pb-1.5 border-b border-slate-100 last:border-b-0 last:pb-0"
-                                >
-                                    <div class="flex items-center justify-between gap-2">
-                                        <div class="min-w-0">
-                                            <p class="text-xs font-medium text-slate-700 truncate">
-                                                {{ formatDays(rec.days) }} · {{ formatTimeRange(rec.start_time, rec.end_time) }}
-                                            </p>
-                                            <div class="flex items-center gap-1.5 mt-0.5">
-                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.6rem]" />
-                                                <span class="text-[0.65rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
-                                            </div>
-                                        </div>
-                                        <Button label="Use This" text size="small" class="!text-xs !p-1" @click="applyTimeRecommendationFromPopover(timePopoverRow, rec)" />
-                                    </div>
-                                    <div class="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
-                                        <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
-                                    </div>
-                                    <ul class="flex flex-wrap gap-x-2 gap-y-0.5">
-                                        <li
-                                            v-for="reason in rec.reasons"
-                                            :key="reason.label"
-                                            class="text-[0.65rem] flex items-center gap-1"
-                                            :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
-                                        >
-                                            <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
-                                        </li>
-                                    </ul>
-                                </li>
-                            </ul>
-                            <p class="text-[0.65rem] text-slate-400 mt-1.5 px-1">
-                                <i class="pi pi-info-circle mr-1"></i>Suggestions only — nothing is assigned until you click "Use This".
-                            </p>
-                        </div>
-                    </Popover>
-
-                    <!-- Suggested Faculty popover (Faculty column quick-pick) -->
-                    <Popover ref="facultyPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
-                        <div class="w-72 max-w-[85vw]">
-                            <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
-                                Suggested Faculty<span v-if="facultyPopoverRow?.subject?.subject_code"> — {{ facultyPopoverRow.subject.subject_code }}</span>
-                            </p>
-                            <div v-if="recommendationStateFor(facultyPopoverRow?.id).loading" class="text-xs text-slate-500 px-1 py-1.5">
-                                Finding the best matches…
-                            </div>
-                            <div v-else-if="recommendationStateFor(facultyPopoverRow?.id).error" class="text-xs text-red-500 px-1 py-1.5">
-                                {{ recommendationStateFor(facultyPopoverRow?.id).error }}
-                            </div>
-                            <div v-else-if="recommendationStateFor(facultyPopoverRow?.id).faculty?.message" class="text-xs text-slate-500 px-1 py-1.5">
-                                {{ recommendationStateFor(facultyPopoverRow?.id).faculty.message }}
-                            </div>
-                            <ul v-else class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-                                <li
-                                    v-for="rec in recommendationStateFor(facultyPopoverRow?.id).faculty?.recommendations ?? []"
-                                    :key="rec.id"
-                                    class="flex flex-col gap-1 pb-1.5 border-b border-slate-100 last:border-b-0 last:pb-0"
-                                >
-                                    <div class="flex items-center justify-between gap-2">
-                                        <div class="min-w-0">
-                                            <p class="text-xs font-medium text-slate-700 truncate">{{ rec.name }}</p>
-                                            <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.6rem]" />
-                                                <span class="text-[0.65rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
-                                            </div>
-                                        </div>
-                                        <Button label="Use This" text size="small" class="!text-xs !p-1" @click="applyFacultyRecommendationFromPopover(facultyPopoverRow, rec)" />
-                                    </div>
-                                    <div class="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
-                                        <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
-                                    </div>
-                                    <ul class="flex flex-wrap gap-x-2 gap-y-0.5">
-                                        <li
-                                            v-for="reason in rec.reasons"
-                                            :key="reason.label"
-                                            class="text-[0.65rem] flex items-center gap-1"
-                                            :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
-                                        >
-                                            <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
-                                        </li>
-                                    </ul>
-                                </li>
-                            </ul>
-                            <p class="text-[0.65rem] text-slate-400 mt-1.5 px-1">
-                                <i class="pi pi-info-circle mr-1"></i>Suggestions only — nothing is assigned until you click "Use This".
-                            </p>
-                        </div>
-                    </Popover>
-
-                    <!-- Suggested Room popover (Room column quick-pick) -->
-                    <Popover ref="roomPopover" :pt="{ root: { class: isDark ? 'dark-scope' : '' } }">
-                        <div class="w-72 max-w-[85vw]">
-                            <p class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400 mb-1.5 px-1">
-                                Suggested Rooms<span v-if="roomPopoverRow?.subject?.subject_code"> — {{ roomPopoverRow.subject.subject_code }}</span>
-                            </p>
-                            <div v-if="recommendationStateFor(roomPopoverRow?.id).loading" class="text-xs text-slate-500 px-1 py-1.5">
-                                Finding the best matches…
-                            </div>
-                            <div v-else-if="recommendationStateFor(roomPopoverRow?.id).error" class="text-xs text-red-500 px-1 py-1.5">
-                                {{ recommendationStateFor(roomPopoverRow?.id).error }}
-                            </div>
-                            <div v-else-if="recommendationStateFor(roomPopoverRow?.id).room?.message" class="text-xs text-slate-500 px-1 py-1.5">
-                                {{ recommendationStateFor(roomPopoverRow?.id).room.message }}
-                            </div>
-                            <ul v-else class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-                                <li
-                                    v-for="rec in recommendationStateFor(roomPopoverRow?.id).room?.recommendations ?? []"
-                                    :key="rec.id"
-                                    class="flex flex-col gap-1 pb-1.5 border-b border-slate-100 last:border-b-0 last:pb-0"
-                                >
-                                    <div class="flex items-center justify-between gap-2">
-                                        <div class="min-w-0">
-                                            <p class="text-xs font-medium text-slate-700 truncate">{{ rec.name }}</p>
-                                            <div class="flex items-center gap-1.5 mt-0.5">
-                                                <Tag :value="rec.confidence" :severity="confidenceSeverity(rec.confidence)" class="!text-[0.6rem]" />
-                                                <span class="text-[0.65rem] font-semibold text-slate-500">{{ rec.score }}/{{ rec.score_max }} pts</span>
-                                            </div>
-                                        </div>
-                                        <Button label="Use This" text size="small" class="!text-xs !p-1" @click="applyRoomRecommendationFromPopover(roomPopoverRow, rec)" />
-                                    </div>
-                                    <div class="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
-                                        <div class="h-full rounded-full" :style="{ width: rec.score + '%', backgroundColor: scoreColor(rec.score) }"></div>
-                                    </div>
-                                    <ul class="flex flex-wrap gap-x-2 gap-y-0.5">
-                                        <li
-                                            v-for="reason in rec.reasons"
-                                            :key="reason.label"
-                                            class="text-[0.65rem] flex items-center gap-1"
-                                            :class="reason.met ? 'text-emerald-600' : 'text-slate-400'"
-                                        >
-                                            <i :class="reason.met ? 'pi pi-check-circle' : 'pi pi-times-circle'"></i>{{ reason.label }}
-                                        </li>
-                                    </ul>
-                                </li>
-                            </ul>
-                            <p class="text-[0.65rem] text-slate-400 mt-1.5 px-1">
-                                <i class="pi pi-info-circle mr-1"></i>Suggestions only — nothing is assigned until you click "Use This".
-                            </p>
-                        </div>
-                    </Popover>
                 </template>
             </Card>
             </div>
@@ -3561,6 +3751,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                         :section-id="section.id"
                                         :section-subject-id="result.section_subject_id"
                                         :model-value="result.time"
+                                        :scheduling-window="schedulingWindow"
                                         @updated="onTimeOverride(result, $event)"
                                     />
                                 </div>
@@ -3660,7 +3851,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             </div>
 
             <template #footer>
-                <Button label="Clear Generated Schedule" icon="pi pi-eraser" severity="secondary" outlined :loading="autoClearing" @click="clearAutoSchedule" />
+                <Button label="Discard Suggestions" icon="pi pi-eraser" severity="secondary" outlined :loading="autoClearing" @click="clearAutoSchedule" />
                 <Button label="Regenerate" icon="pi pi-refresh" severity="warning" outlined :loading="autoGenerating" @click="regenerateAutoSchedule" />
                 <Button
                     label="Accept All & Save"

@@ -406,7 +406,7 @@ class RecommendationService
 
     private const OVERRIDE_POINTS_FULL_TIME = 10;
 
-    public function recommendFaculty(Subject $subject, Section $section, ?SectionSubject $current = null): array
+    public function recommendFaculty(Subject $subject, Section $section, ?SectionSubject $current = null, bool $requireQualified = false): array
     {
         // PRIORITY 1 — Teaching Qualifications. Any faculty explicitly
         // linked to this Subject is eligible, full stop; College plays
@@ -428,6 +428,65 @@ class RecommendationService
                 'recommendations' => $tqRanked,
                 'message' => null,
                 'tier' => 'teaching_qualification',
+            ];
+        }
+
+        // HARD QUALIFICATION MODE — used by AutoScheduleService (and any
+        // other caller that must never auto-assign an unqualified
+        // faculty member). Teaching Qualification is the ONLY eligible
+        // pool for a Major Subject here; College Match is a convenience
+        // for the human-facing selector only (a Registrar can knowingly
+        // pick a non-TQ faculty), never for an unattended automatic
+        // pick on a subject that actually belongs to a College. This is
+        // what makes "never assign an unqualified faculty member" an
+        // actual hard constraint instead of something the blend below
+        // could quietly override once the TQ pool is thin.
+        //
+        // GenEd/Minor Subjects (no owning College — subjectCollegeId()
+        // is null, e.g. UTS, GENSOC, PATHFIT1) are the one exception:
+        // they were never meant to require a Teaching-Qualification
+        // link in the first place, since they're explicitly open to
+        // whichever General Education faculty (college_id null, no
+        // department) is available — that pool IS "qualified" for a
+        // GenEd Subject by definition. Without this, Auto Schedule
+        // reported every GenEd/Minor Subject as "Requires Manual
+        // Scheduling" the moment nobody happened to have an explicit
+        // Teaching Qualification row for it, even though the General
+        // Education Faculty Master page exists precisely to staff
+        // these subjects.
+        if ($requireQualified) {
+            if (! empty($tqRanked)) {
+                return [
+                    'recommendations' => array_slice($tqRanked, 0, self::MAX_FACULTY_RESULTS),
+                    'message' => null,
+                    'tier' => 'teaching_qualification',
+                ];
+            }
+
+            if ($this->subjectCollegeId($subject) === null) {
+                $genEdFaculty = Faculty::query()
+                    ->where('status', 'Active')
+                    ->whereNull('college_id')
+                    ->with(['subjects:id', 'availabilities'])
+                    ->get();
+
+                $genEdRanked = $genEdFaculty->isNotEmpty()
+                    ? $this->rankFacultyCandidates($genEdFaculty, $subject, $current, tier: 'general_education_match')
+                    : [];
+
+                return [
+                    'recommendations' => array_slice($genEdRanked, 0, self::MAX_FACULTY_RESULTS),
+                    'message' => empty($genEdRanked)
+                        ? 'No General Education faculty member is available for this subject.'
+                        : null,
+                    'tier' => 'general_education_match',
+                ];
+            }
+
+            return [
+                'recommendations' => [],
+                'message' => 'No faculty member is qualified (Teaching Qualification) for this subject.',
+                'tier' => null,
             ];
         }
 
@@ -490,10 +549,26 @@ class RecommendationService
             ];
         }
 
-        // Blend: TQ candidates keep their higher point tier and sort
-        // first; fallback candidates are appended as alternates so the
-        // pool isn't artificially limited to one or two names.
-        $blended = array_slice(array_merge($tqRanked, $fallbackRanked), 0, self::MAX_FACULTY_RESULTS);
+        // Blend: previously TQ candidates were always concatenated
+        // first regardless of their actual score, so a Teaching-
+        // Qualification-linked faculty member who missed several
+        // criteria (e.g. no Preferred Teaching Block) could still
+        // rank #1 ahead of a College Match candidate who scored
+        // higher on every criterion actually met — not smart, just
+        // "TQ always wins". Now the merged pool is sorted by the
+        // real Recommendation Score (desc), with TQ only used as a
+        // tie-breaker when two candidates land on the exact same
+        // score, so "Best Match" always means the highest score in
+        // the list, matching what the Registrar visually sees.
+        $blended = array_merge($tqRanked, $fallbackRanked);
+        usort($blended, function (array $a, array $b) {
+            if ($a['score'] !== $b['score']) {
+                return $b['score'] <=> $a['score'];
+            }
+
+            return ($b['tier'] === 'teaching_qualification') <=> ($a['tier'] === 'teaching_qualification');
+        });
+        $blended = array_slice($blended, 0, self::MAX_FACULTY_RESULTS);
 
         return [
             'recommendations' => $blended,
@@ -1123,6 +1198,22 @@ class RecommendationService
      * (or wasn't) the top recommendation — the "Why Room 306?" panel
      * from the spec.
      */
+    /**
+     * BUG FIX — display label for a Room. `room_code` and `room_name`
+     * are sometimes set to the exact same value (e.g. "Room 304 (ICT
+     * Workshop)" in both columns), and unconditionally concatenating
+     * "{$code} — {$name}" then shows that value twice, joined by a
+     * dash. Falls back to just the code when the two are identical —
+     * mirrors the same guard RoomRecommendationController already
+     * uses for its own room-name display.
+     */
+    private function roomDisplayName(Room $room): string
+    {
+        return $room->room_code === $room->room_name
+            ? $room->room_code
+            : "{$room->room_code} — {$room->room_name}";
+    }
+
     private function roomExplanation(string $roomLabel, bool $isTopPick, string $tier, float $utilizationPercent, int $score): string
     {
         if (! $isTopPick) {
@@ -1236,41 +1327,115 @@ class RecommendationService
 
         $capacityNeeded = $current?->capacity ?? $section->estimated_students ?? 0;
 
-        $allRooms = Room::query()->where('status', 'Active')->with(['department', 'college'])->get();
-
-        if ($allRooms->isEmpty()) {
-            return ['recommendations' => [], 'message' => 'No active rooms found.', 'reasons' => ['No active rooms are configured in the Room Master.']];
-        }
-
         // Explicit admin recommendations (room_subject_recommendations)
-        // are resolved BEFORE the hard filters so a recommended Room's
-        // Type can be overridden — see the Type-bypass rule below.
+        // are resolved BEFORE the query so a recommended Room's Type/
+        // Scope can be included even when it wouldn't otherwise match —
+        // see the Type/Scope-bypass rule below.
         $recommendedRoomIds = $this->recommendedRoomIdsFor($subject);
 
-        // --- Hard filters (Priorities 1, 5, 6) -----------------------
+        // SCOPE-AWARE QUERY — pushed down to SQL instead of loading
+        // every Active room in the system and filtering Type/Scope in
+        // PHP afterward. A room only comes back from the database at
+        // all if it's the right Room Type (Lecture/Laboratory) AND
+        // properly owned by this Section's Program, College, or fully
+        // Shared (no department_id/college_id) — or explicitly
+        // Administrator-recommended for this Subject, which is the one
+        // case allowed to bypass both. This is what keeps a BSIT
+        // Section's Auto Schedule run from ever even fetching a BSHM
+        // Foods Lab or a Criminology room like "Ground Zero": those
+        // rows never leave the database, they aren't just scored low.
+        // Capacity and Conflict stay PHP-side below — Conflict needs
+        // the placement data anyway, and Capacity is cheap once the
+        // candidate pool is already this small.
+        $allRooms = Room::query()
+            ->where('status', 'Active')
+            ->where(function ($query) use ($preferredType, $sectionDepartmentId, $sectionCollegeId, $recommendedRoomIds) {
+                $query->where(function ($typeScope) use ($preferredType, $sectionDepartmentId, $sectionCollegeId) {
+                    $typeScope->where('room_type', $preferredType)
+                        ->where(function ($scope) use ($sectionDepartmentId, $sectionCollegeId) {
+                            // Shared — no owning Department or College at all.
+                            $scope->where(function ($shared) {
+                                $shared->whereNull('department_id')->whereNull('college_id');
+                            });
+
+                            if ($sectionDepartmentId) {
+                                $scope->orWhere('department_id', $sectionDepartmentId);
+                            }
+
+                            if ($sectionCollegeId) {
+                                $scope->orWhere('college_id', $sectionCollegeId);
+                            }
+                        });
+                });
+
+                if ($recommendedRoomIds->isNotEmpty()) {
+                    $query->orWhereIn('id', $recommendedRoomIds);
+                }
+            })
+            ->with(['department', 'college'])
+            ->get();
+
+        if ($allRooms->isEmpty()) {
+            // Nothing came back from the scope-aware query above — run
+            // the cheap diagnostic counts ONLY on this (rare) empty
+            // path, against every Active room regardless of scope, so
+            // "No suitable room available" can still say *why* (wrong
+            // Type vs. wrong Scope) without paying that cost on every
+            // normal, successful recommendation.
+            return [
+                'recommendations' => [],
+                'message' => 'No suitable room available.',
+                'reasons' => $this->noRoomReasons(
+                    $preferredType,
+                    Room::where('status', 'Active')->where('room_type', '!=', $preferredType)->count(),
+                    0,
+                    0,
+                    Room::where('status', 'Active')
+                        ->where('room_type', $preferredType)
+                        ->when($sectionDepartmentId, fn ($q) => $q->where('department_id', '!=', $sectionDepartmentId))
+                        ->when($sectionCollegeId, fn ($q) => $q->where('college_id', '!=', $sectionCollegeId))
+                        ->where(fn ($q) => $q->whereNotNull('department_id')->orWhereNotNull('college_id'))
+                        ->count()
+                ),
+            ];
+        }
+
+        // --- Hard filters (Priorities 1, 2-4, 5, 6) -------------------
         // A room that fails any of these is never a candidate — EXCEPT
-        // Type, which an explicit administrator recommendation is now
-        // allowed to override (e.g. deliberately assigning a Lecture
-        // subject to a Laboratory room). Scope (College/Program) is
-        // intentionally NOT a hard filter — a cross-college room is
-        // still a valid "Available" candidate, and an administrator
-        // may explicitly recommend one via the Room Details page (see
-        // recommendationLevel()). Capacity and Availability/Conflict
+        // Type and Scope, which an explicit administrator recommendation
+        // is now allowed to override (e.g. deliberately assigning a
+        // Lecture subject to a Laboratory room, or pulling in a
+        // cross-college room). Scope IS a hard filter for every other
+        // room: a room scoped to a *different* College/Program (e.g. a
+        // COC Criminology lab like "Ground Zero" or "Room 201 (Forensic
+        // BSCRIM Lab)") must never be suggested for a BSIT/other-college
+        // Subject just because it happens to be the right Room Type —
+        // only Program tier, College tier, fully Shared (no College/
+        // Department at all) rooms, or an explicit admin recommendation
+        // are valid candidates. Capacity and Availability/Conflict
         // remain hard filters even for a recommended Room — an
         // explicit recommendation can never seat more students than
         // the room holds or double-book an occupied slot.
         $typeExcluded = 0;
         $capacityExcluded = 0;
         $conflictExcluded = 0;
+        $scopeExcluded = 0;
 
         $eligible = $allRooms->filter(function (Room $room) use (
             $preferredType, $capacityNeeded, $current, $recommendedRoomIds,
-            &$typeExcluded, &$capacityExcluded, &$conflictExcluded,
+            $sectionDepartmentId, $sectionCollegeId,
+            &$typeExcluded, &$capacityExcluded, &$conflictExcluded, &$scopeExcluded,
         ) {
             $isRecommended = $recommendedRoomIds->contains($room->id);
 
             if (! $isRecommended && $room->room_type !== $preferredType) {
                 $typeExcluded++;
+
+                return false;
+            }
+
+            if (! $isRecommended && $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId) === 'mismatch') {
+                $scopeExcluded++;
 
                 return false;
             }
@@ -1294,7 +1459,7 @@ class RecommendationService
             return [
                 'recommendations' => [],
                 'message' => 'No suitable room available.',
-                'reasons' => $this->noRoomReasons($preferredType, $typeExcluded, $capacityExcluded, $conflictExcluded, 0),
+                'reasons' => $this->noRoomReasons($preferredType, $typeExcluded, $capacityExcluded, $conflictExcluded, $scopeExcluded),
             ];
         }
 
@@ -1329,11 +1494,13 @@ class RecommendationService
         );
 
         $ranked = $eligible->map(function (Room $room) use (
-            $sectionDepartmentId, $sectionCollegeId, $capacityNeeded, $usageCounts, $recommendedRoomIds, $preferredType,
+            $sectionDepartmentId, $sectionCollegeId, $capacityNeeded, $usageCounts, $recommendedRoomIds, $preferredType, $utilization,
         ) {
             $tier = $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId);
             $isTypeOverride = $room->room_type !== $preferredType;
             $utilizationPercent = round((float) ($usageCounts[$room->id] ?? 0), 1);
+            $scheduledHours = (float) ($utilization[$room->id]['scheduled_hours'] ?? 0);
+            $maxHours = (float) ($utilization[$room->id]['max_hours'] ?? 0);
 
             // Every room reaching this point already cleared the hard
             // filters (Type/Capacity/Availability/Scope), so those
@@ -1402,7 +1569,7 @@ class RecommendationService
 
             return [
                 'id' => $room->id,
-                'name' => "{$room->room_code} — {$room->room_name}",
+                'name' => $this->roomDisplayName($room),
                 'room_type' => $room->room_type,
                 'room_category' => $room->room_category,
                 'department' => $room->department?->name,
@@ -1427,6 +1594,12 @@ class RecommendationService
                 'score_breakdown' => $scored['breakdown'],
                 'reasons' => $reasons,
                 'utilization_percent' => $utilizationPercent,
+                // Same shape as Faculty's "current_load / max_teaching_units"
+                // (see recommendFaculty()) — lets the Room dropdown show
+                // "8 / 63 hrs" right next to each candidate, exactly like
+                // the Rooms page's own Room Utilization column.
+                'scheduled_hours' => $scheduledHours,
+                'max_hours' => $maxHours,
             ];
         })->values()->all();
 
@@ -1648,7 +1821,7 @@ class RecommendationService
 
         return [
             'id' => $room->id,
-            'name' => "{$room->room_code} — {$room->room_name}",
+            'name' => $this->roomDisplayName($room),
             'room_type' => $room->room_type,
             'room_category' => $room->room_category,
             'department' => $room->department?->name,
@@ -1672,7 +1845,8 @@ class RecommendationService
             'status_color' => $this->roomStatusColor($isManualOverride, false, $tier),
             'explanation' => $isManualOverride
                 ? $overrideReason
-                : $this->roomExplanation("{$room->room_code} — {$room->room_name}", false, $tier, $utilizationPercent, $score),
+                : $this->roomExplanation($this->roomDisplayName($room), false, $tier, $utilizationPercent, $score),
+
         ];
     }
 
