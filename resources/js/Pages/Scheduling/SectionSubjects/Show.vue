@@ -2570,7 +2570,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                 :pt="{ body: { class: '!bg-transparent' } }"
             >
                 <template #content>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
                         <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Major</p>
                             <p class="mt-1 text-slate-800 font-medium">{{ section.major?.name || '—' }}</p>
@@ -2582,6 +2582,24 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Academic Year</p>
                             <p class="mt-1 text-slate-800 font-medium">{{ section.academic_year }}</p>
+                        </div>
+                        <!--
+                            Semester — this Section's OWN semester (2nd Sem
+                            BSIT-3A, etc.), distinct from the global "Active
+                            Academic Term" pill in the topbar (AppLayout.vue),
+                            which reflects the institution-wide active term
+                            and is NOT scoped to whichever Section is open
+                            here. Without this card, the only semester text
+                            visible on this page was that topbar pill, which
+                            made it look like Room Grid/Subjects data hadn't
+                            "switched" to the Section's real semester even
+                            though the underlying query ($section->sectionSubjects())
+                            was always correct — this card exists purely to
+                            make that already-correct semester visible.
+                        -->
+                        <div class="neu-inset rounded-xl p-3">
+                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Semester</p>
+                            <p class="mt-1 text-slate-800 font-medium">{{ section.semester || '—' }}</p>
                         </div>
                         <div class="neu-inset rounded-xl p-3">
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Year Level</p>

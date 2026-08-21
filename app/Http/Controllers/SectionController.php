@@ -14,6 +14,7 @@ use App\Models\Section;
 use App\Services\NotificationService;
 use App\Services\SectionBatchGeneratorService;
 use App\Support\AccessScope;
+use App\Support\ViewingTerm;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
@@ -49,18 +50,18 @@ class SectionController extends Controller
         // here — that translation only matters when starting from an
         // AcademicTerm record, which the default below does).
         //
-        // No explicit ?term= given: default to the Active Academic
-        // Term if one exists (day-to-day use only sees the current
-        // term's Sections), otherwise fall back to "all" (nothing to
-        // default to — better to show everything than silently show
-        // nothing).
-        $activeTerm = AcademicTerm::active();
+        // No explicit ?term= given: default to THIS user's Viewing
+        // Term (their session override if Admin/Registrar switched
+        // it, else the real Active term) if one exists, otherwise
+        // fall back to "all" (nothing to default to — better to show
+        // everything than silently show nothing).
+        $viewingTerm = ViewingTerm::resolve($request);
         $defaultTerm = 'all';
-        if ($activeTerm) {
-            $activeTerm->loadMissing('schoolYear:id,name');
-            $activeSemesterValue = $activeTerm->sectionSemesterValue();
-            if ($activeTerm->schoolYear && $activeSemesterValue) {
-                $defaultTerm = "{$activeTerm->schoolYear->name}|{$activeSemesterValue}";
+        if ($viewingTerm) {
+            $viewingTerm->loadMissing('schoolYear:id,name');
+            $viewingSemesterValue = $viewingTerm->sectionSemesterValue();
+            if ($viewingTerm->schoolYear && $viewingSemesterValue) {
+                $defaultTerm = "{$viewingTerm->schoolYear->name}|{$viewingSemesterValue}";
             }
         }
 

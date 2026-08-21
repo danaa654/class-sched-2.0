@@ -3,12 +3,12 @@
 namespace App\Services;
 
 use App\Exceptions\ScheduleVersionConflictException;
-use App\Models\AcademicTerm;
 use App\Models\Faculty;
 use App\Models\Room;
 use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\SectionSubject;
+use App\Support\ViewingTerm;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -17,16 +17,32 @@ use Illuminate\Support\Collection;
  * for the scheduling workspace lives here — controllers never run their
  * own conflict queries.
  *
- * GLOBAL, ACTIVE-SEMESTER SCOPE
+ * SCOPE: THE SECTION BEING EDITED'S OWN TERM, NOT THE GLOBAL ACTIVE TERM
  * ------------------------------------------------------------------
- * Every check in this service is scoped to every Section that belongs
- * to the currently Active Academic Term (School Year + Semester), NOT
- * just the Section currently being edited. A Faculty member, Room, or
- * Section can never end up double-booked anywhere in the active
- * semester, regardless of which Section/Curriculum/College the other
- * placement belongs to. Placements that belong to a past/future
- * semester are intentionally ignored — they cannot conflict with a
- * schedule being built for the active one.
+ * Every check in this service is scoped to every Section that shares
+ * the SAME Academic Year + Semester as the Section currently being
+ * edited/scheduled — via scopedSectionIds()/sectionTermSectionIds()
+ * (Section::academic_year + Section::semester), NOT the single
+ * institution-wide "Active Academic Term" pill shown in the topbar.
+ *
+ * This distinction matters: the Active Academic Term is a global
+ * setting (only ever one at a time — see AcademicTerm::active()) used
+ * for things like which term new records default to. But a
+ * Registrar/Dean can, and routinely does, plan a FUTURE term's
+ * schedule (e.g. 2nd Semester) while the CURRENT term (1st Semester)
+ * is still the one marked Active. If conflict checks stayed scoped to
+ * the Active Term, planning that 2nd-Semester section would compare
+ * it against 1st-Semester bookings (irrelevant noise) while silently
+ * missing real double-bookings against OTHER 2nd-Semester sections
+ * sharing the same Room/Faculty — a false negative that would let two
+ * 2nd-Semester sections get scheduled into the same Room at the same
+ * time undetected. Scoping to the edited Section's own term instead
+ * means a Faculty member, Room, or Section can never end up
+ * double-booked within the semester actually being planned, no matter
+ * which term happens to be globally Active at the time. Placements
+ * belonging to a genuinely different semester are intentionally
+ * ignored — they cannot conflict with a schedule being built for a
+ * different one.
  *
  * Two schedules are considered overlapping when they share at least one
  * Day AND:
@@ -45,10 +61,10 @@ use Illuminate\Support\Collection;
  * important reason first:
  *
  *   1. Faculty availability      (Faculty exists & is Active)
- *   2. Faculty schedule conflict (global, active semester)
+ *   2. Faculty schedule conflict (this Section's own term)
  *   3. Room availability         (Room exists & is Active)
- *   4. Room conflict             (global, active semester)
- *   5. Section conflict          (global, active semester)
+ *   4. Room conflict             (this Section's own term)
+ *   5. Section conflict          (this Section's own term)
  *   6. Lunch break restriction
  *   7. Academic calendar allowed days
  *   8. Time within allowed class hours
@@ -68,10 +84,22 @@ class ScheduleConflictService
      * Per-request cache for activeSemesterSectionIds() — see that
      * method's docblock. Reset is never needed: a single HTTP request
      * (and the single ScheduleConflictService instance Laravel's
-     * container resolves for it) never spans more than one Active
-     * Academic Term.
+     * container resolves for it) never spans more than one resolved
+     * Viewing Term.
      */
     private ?Collection $activeSemesterSectionIdsCache = null;
+
+    /**
+     * Per-request cache for sectionTermSectionIds(), keyed by
+     * "academic_year|semester" since a single request (e.g. Auto
+     * Generate across a whole department) can legitimately touch more
+     * than one Section, and therefore more than one term, even though
+     * each individual conflict check only ever cares about one term at
+     * a time.
+     *
+     * @var array<string, Collection>
+     */
+    private array $termSectionIdsCache = [];
 
     /**
      * Run every conflict/availability check for one schedule slot, in
@@ -119,9 +147,9 @@ class ScheduleConflictService
             return [];
         }
 
-        // 2. Faculty schedule conflict — global, active semester.
+        // 2. Faculty schedule conflict — scoped to this Section's own term.
         if ($facultyId) {
-            $conflict = $this->findFacultyConflict($facultyId, $excludingSectionSubjectId, $dayTokens, $startTime, $endTime);
+            $conflict = $this->findFacultyConflict($facultyId, $excludingSectionSubjectId, $dayTokens, $startTime, $endTime, $sectionId);
             if ($conflict) {
                 $facultyName = $conflict->faculty?->full_name ?? 'This faculty member';
 
@@ -131,9 +159,9 @@ class ScheduleConflictService
             }
         }
 
-        // 4. Room conflict — global, active semester.
+        // 4. Room conflict — scoped to this Section's own term.
         if ($roomId) {
-            $conflict = $this->findRoomConflict($roomId, $excludingSectionSubjectId, $dayTokens, $startTime, $endTime);
+            $conflict = $this->findRoomConflict($roomId, $excludingSectionSubjectId, $dayTokens, $startTime, $endTime, $sectionId);
             if ($conflict) {
                 $roomCode = $conflict->room?->room_code ?? 'selected';
 
@@ -192,7 +220,7 @@ class ScheduleConflictService
     /**
      * A Section cannot have two overlapping classes, regardless of
      * which Faculty or Room is assigned to either one. Scoped to the
-     * active semester.
+     * Section itself, so it needs no term scoping of its own.
      */
     public function findSectionConflict(
         int $sectionId,
@@ -213,19 +241,26 @@ class ScheduleConflictService
     /**
      * A Faculty member cannot teach two overlapping classes, across
      * ANY Section, College, or Curriculum — scoped to every Section
-     * in the active semester.
+     * sharing the acting Section's own term (see class docblock).
+     *
+     * $sectionId is the Section this placement is FOR (i.e.
+     * $slot['section_id'] from validate()) — used only to resolve
+     * WHICH term to scope the search to, not to exclude/include that
+     * Section itself (it's already included, since it shares its own
+     * term with itself).
      */
     public function findFacultyConflict(
         int $facultyId,
         int|array $excludingId,
         array $dayTokens,
         string $startTime,
-        string $endTime
+        string $endTime,
+        ?int $sectionId = null
     ): ?SectionSubject {
         return $this->findOverlap(
             SectionSubject::query()
                 ->where('faculty_id', $facultyId)
-                ->whereIn('section_id', $this->activeSemesterSectionIds()),
+                ->whereIn('section_id', $this->scopedSectionIds($sectionId)),
             $excludingId,
             $dayTokens,
             $startTime,
@@ -235,7 +270,8 @@ class ScheduleConflictService
 
     /**
      * A Room cannot host two overlapping classes, across ANY Section
-     * or College — scoped to every Section in the active semester.
+     * or College — scoped to every Section sharing the acting
+     * Section's own term (see class docblock and findFacultyConflict()).
      * Room is irrelevant to Faculty conflicts and vice versa: each
      * check only ever compares like-for-like (Room vs Room, Faculty
      * vs Faculty).
@@ -245,12 +281,13 @@ class ScheduleConflictService
         int|array $excludingId,
         array $dayTokens,
         string $startTime,
-        string $endTime
+        string $endTime,
+        ?int $sectionId = null
     ): ?SectionSubject {
         return $this->findOverlap(
             SectionSubject::query()
                 ->where('room_id', $roomId)
-                ->whereIn('section_id', $this->activeSemesterSectionIds()),
+                ->whereIn('section_id', $this->scopedSectionIds($sectionId)),
             $excludingId,
             $dayTokens,
             $startTime,
@@ -259,35 +296,94 @@ class ScheduleConflictService
     }
 
     /**
-     * Every Section belonging to the currently Active Academic Term
-     * (School Year + Semester), via AcademicTerm::matchingSectionsQuery()
-     * — never a raw string compare of the Semester name (see that
-     * method's docblock for why: Sections and the Semester model spell
-     * the same Semester differently, and an exact compare silently
-     * matches nothing).
+     * Resolves which set of Section ids a conflict check should run
+     * against: every Section sharing $sectionId's own Academic
+     * Year + Semester, via sectionTermSectionIds(). Falls back to
+     * activeSemesterSectionIds() (the Viewing-Term-aware scope — see
+     * that method's docblock) when $sectionId is null/unresolvable —
+     * e.g. a caller that genuinely doesn't have a Section context yet
+     * — so nothing here throws or silently returns "every Section"
+     * for an unrelated reason.
+     */
+    private function scopedSectionIds(?int $sectionId): Collection
+    {
+        if ($sectionId === null) {
+            return $this->activeSemesterSectionIds();
+        }
+
+        $section = Section::find($sectionId, ['id', 'academic_year', 'semester']);
+
+        if (! $section) {
+            return $this->activeSemesterSectionIds();
+        }
+
+        return $this->sectionTermSectionIds($section);
+    }
+
+    /**
+     * Every Section sharing the given Section's own Academic Year +
+     * Semester (a straight column match against Section's own
+     * academic_year/semester — no AcademicTerm lookup needed, since
+     * the Section already stores both directly). This is the scope
+     * conflict checks actually use now (see class docblock) — public
+     * so controllers (Room Grid display, busy-times lookup) can reuse
+     * the exact same set validate()/Save would use, and so the Grid
+     * can never show/allow something Save would then reject.
+     */
+    public function sectionTermSectionIds(Section $section): Collection
+    {
+        $cacheKey = $section->academic_year.'|'.$section->semester;
+
+        if (isset($this->termSectionIdsCache[$cacheKey])) {
+            return $this->termSectionIdsCache[$cacheKey];
+        }
+
+        return $this->termSectionIdsCache[$cacheKey] = Section::query()
+            ->where('academic_year', $section->academic_year)
+            ->where('semester', $section->semester)
+            ->pluck('id');
+    }
+
+    /**
+     * NOTE: no longer used by findFacultyConflict()/findRoomConflict()
+     * for a resolvable Section (see sectionTermSectionIds() above) —
+     * this remains the fallback for callers with no Section context,
+     * and is still deliberately used as-is by RoomUtilizationService/
+     * FacultyWorkloadService for their dashboard stats.
      *
-     * When there is no Active Academic Term configured, this
-     * deliberately falls back to "every Section" rather than "no
-     * Sections", so conflict detection never silently turns itself
-     * off just because nobody has marked a term Active yet.
+     * Every Section belonging to THIS user's Viewing Academic Term —
+     * their session override if an Administrator/Registrar switched
+     * it (see App\Support\ViewingTerm), else the real system-wide
+     * Active term — via AcademicTerm::matchingSectionsQuery() (never a
+     * raw string compare of the Semester name: Sections and the
+     * Semester model spell the same Semester differently, and an
+     * exact compare silently matches nothing). Using the Viewing Term
+     * here means an Admin/Registrar who's switched their view to plan
+     * a future semester also gets THAT semester's dashboard stats,
+     * without affecting what any other user sees.
+     *
+     * When there's no resolvable term at all, this deliberately falls
+     * back to "every Section" rather than "no Sections", so conflict
+     * detection never silently turns itself off just because nobody
+     * has marked a term Active yet.
      */
     public function activeSemesterSectionIds(): Collection
     {
         // Memoized per-request — a single overrideTime()/save call can
         // invoke this 2-3x (Faculty check, Room check, and indirectly
         // via recommendTimes()'s own candidate scoring). Without this,
-        // every one of those re-runs AcademicTerm::active() plus the
+        // every one of those re-runs ViewingTerm::resolve() plus the
         // full matching-Sections query from scratch even though the
-        // active Academic Term never changes mid-request — the main
-        // reason "Apply" on the Edit Day & Time popover feels slower
-        // than it needs to.
+        // resolved term never changes mid-request — the main reason
+        // "Apply" on the Edit Day & Time popover feels slower than it
+        // needs to.
         if ($this->activeSemesterSectionIdsCache !== null) {
             return $this->activeSemesterSectionIdsCache;
         }
 
-        $activeTerm = AcademicTerm::active();
+        $viewingTerm = ViewingTerm::resolve(request());
 
-        $query = $activeTerm ? $activeTerm->matchingSectionsQuery() : Section::query();
+        $query = $viewingTerm ? $viewingTerm->matchingSectionsQuery() : Section::query();
 
         return $this->activeSemesterSectionIdsCache = $query->pluck('id');
     }
@@ -319,7 +415,8 @@ class ScheduleConflictService
      * edited) already booked on any of the given Days whose
      * Start/End Time overlaps the given window, within an
      * already-scoped query (by section_id, faculty_id, or room_id,
-     * plus — for Faculty/Room — the active semester's Section ids).
+     * plus — for Faculty/Room — the acting Section's own term's
+     * Section ids).
      */
     private function findOverlap(
         Builder $query,

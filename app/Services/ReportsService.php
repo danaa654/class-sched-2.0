@@ -84,7 +84,9 @@ class ReportsService
                         'name' => $m->name,
                     ])->values(),
                 ]),
-            'sections' => Section::query()->orderBy('section_code')->get(['id', 'section_code', 'academic_year', 'semester']),
+            'sections' => Section::query()
+                ->orderBy('section_code')
+                ->get(['id', 'section_code', 'academic_year', 'semester', 'major_id', 'year_level', 'section_type']),
             'yearLevels' => Section::query()->whereNotNull('year_level')->distinct()->orderBy('year_level')->pluck('year_level'),
             'faculty' => Faculty::query()->orderBy('last_name')->get()->map(fn (Faculty $f) => ['id' => $f->id, 'name' => $f->full_name]),
             'rooms' => Room::query()->orderBy('room_code')->get(['id', 'room_code']),
@@ -231,6 +233,7 @@ class ReportsService
     private function scheduleBySection(array $filters): array
     {
         $rows = $this->sectionSubjectsQuery($filters)->get()->map(fn (SectionSubject $ss) => [
+            'EDP Code' => $ss->edp_code,
             'Section' => $ss->section?->section_code,
             'Subject Code' => $ss->subject?->subject_code,
             'Subject' => $ss->subject?->subject_title,

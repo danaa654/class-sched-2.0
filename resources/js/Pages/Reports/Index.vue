@@ -1,6 +1,6 @@
 <script setup>
 import { Head, router } from '@inertiajs/vue3';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
@@ -66,7 +66,42 @@ const majorOptions = computed(() => {
     return [{ label: 'All Majors', value: '' }, ...majors.map((m) => ({ label: m.name, value: m.id }))];
 });
 const yearLevelOptions = computed(() => [{ label: 'All Year Levels', value: '' }, ...props.filterOptions.yearLevels.map((v) => ({ label: v, value: v }))]);
-const sectionOptions = computed(() => [{ label: 'All Sections', value: '' }, ...props.filterOptions.sections.map((s) => ({ label: s.section_code, value: s.id }))]);
+// Section dropdown narrows to whatever's currently selected above it
+// (Academic Year, Semester, College/Program → Major, Year Level,
+// Section Type) — mirrors majorOptions' self-filtering pattern just
+// above. Without this, every Section across every term/college ever
+// created shows here (including duplicate-looking codes like two
+// different terms both having a "BSIT-4A"), which is confusing and
+// lets someone pick a Section that doesn't even match their other
+// filters. collegeToMajorIds resolves College/Program → Major ids
+// since Section only stores major_id, not college_id directly.
+const collegeToMajorIds = computed(() => {
+    if (!form.value.college_id) return null;
+    const college = props.filterOptions.colleges.find((c) => c.id === form.value.college_id);
+    return college ? new Set(college.majors.map((m) => m.id)) : new Set();
+});
+const sectionOptions = computed(() => {
+    const filtered = props.filterOptions.sections.filter((s) => {
+        if (form.value.academic_year && s.academic_year !== form.value.academic_year) return false;
+        if (form.value.semester && s.semester !== form.value.semester) return false;
+        if (form.value.major_id && s.major_id !== form.value.major_id) return false;
+        if (!form.value.major_id && collegeToMajorIds.value && !collegeToMajorIds.value.has(s.major_id)) return false;
+        if (form.value.year_level && s.year_level !== form.value.year_level) return false;
+        if (form.value.section_type && s.section_type !== form.value.section_type) return false;
+        return true;
+    });
+    return [{ label: 'All Sections', value: '' }, ...filtered.map((s) => ({ label: s.section_code, value: s.id }))];
+});
+
+// If a previously selected Section no longer matches the current
+// Academic Year/Semester/College/Major/Year Level/Section Type
+// filters (e.g. the person picked a Section, then changed Semester),
+// clear it rather than silently keep an invalid, now-hidden selection.
+watch(sectionOptions, (options) => {
+    if (form.value.section_id && ! options.some((o) => o.value === form.value.section_id)) {
+        form.value.section_id = '';
+    }
+});
 const sectionTypeOptions = [{ label: 'All Types', value: '' }, { label: 'Regular', value: 'Regular' }, { label: 'Irregular', value: 'Irregular' }];
 const facultyOptions = computed(() => [{ label: 'All Faculty', value: '' }, ...props.filterOptions.faculty.map((f) => ({ label: f.name, value: f.id }))]);
 const roomOptions = computed(() => [{ label: 'All Rooms', value: '' }, ...props.filterOptions.rooms.map((r) => ({ label: r.room_name, value: r.id }))]);
@@ -104,7 +139,14 @@ function resetFilters() {
 }
 
 function printReport() {
-    window.print();
+    // Opens the branded, server-rendered print view (see
+    // ReportsController::print() / resources/views/reports/print.blade.php)
+    // in its own tab, scoped with the exact same filters currently on
+    // screen — rather than window.print()-ing the SPA page itself,
+    // which used to print the app's own chrome/columns instead of a
+    // proper school-letterhead document.
+    const query = { ...form.value, term: selectedTerm.value, report_type: reportType.value };
+    window.open(route('reports.print', query), '_blank');
 }
 
 function exportCsv() {

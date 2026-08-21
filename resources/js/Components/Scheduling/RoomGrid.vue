@@ -1059,20 +1059,91 @@ const loadFacultyRecommendations = async (sectionSubjectId) => {
     }
 };
 
+// This Section's own owning College — e.g. a BSIT Section resolves to
+// the College of Computer Studies (CCS), a BSED Section to the College
+// of Teacher Education (CTE), and so on. Same relation chain the
+// Subjects tab's facultyGroupsFor() uses (section->major->department->college),
+// so the Room Grid's "Schedule Subject" modal groups Faculty by College
+// the exact same way the Subjects tab already does, rather than a flat
+// list with only a small "College Match" tag to notice.
+const sectionCollegeId = computed(() => props.section.major?.department?.college_id ?? null);
+const sectionCollegeName = computed(() => props.section.major?.department?.college?.short_name
+    ?? props.section.major?.department?.college?.name
+    ?? null);
+
+const isQualifiedFor = (faculty, subject) => {
+    if (!subject) return false;
+    if (subject.category === 'General Education') {
+        return faculty.faculty_category === 'General Education Faculty' || faculty.college_id === null;
+    }
+    if (faculty.qualified_subject_ids?.includes(subject.id)) return true;
+    if (sectionCollegeId.value !== null) {
+        return faculty.college_id === sectionCollegeId.value;
+    }
+    return false;
+};
+
+// Grouped Faculty options for the "Schedule Subject" modal's Select —
+// mirrors the Subjects tab's facultyGroupsFor() exactly (Recommended /
+// [This Section's College] Faculty / Other Active Faculty), so a BSED
+// (CTE) subject's Room Grid modal groups faculty under "College of
+// Teacher Education Faculty" the same way a BSIT (CCS) subject's
+// modal — and the Subjects tab itself — groups them under "College of
+// Computer Studies Faculty". Falls back to a flat, ungrouped list
+// (previous behavior) while no subject/row is known yet.
 const facultyOptions = computed(() => {
+    const subject = assignForm.value.row?.subject ?? null;
     const recommended = new Map(facultyRecommendations.value.map((f) => [f.id, f]));
-    return [...props.activeFaculty]
-        .map((f) => {
-            const rec = recommended.get(f.id);
-            return {
-                ...f,
-                recommended: !!rec,
-                badge: rec?.badge ?? null,
-                score: rec?.score ?? null,
-                college: rec?.college ?? f.college_name ?? null,
-            };
-        })
-        .sort((a, b) => (b.recommended - a.recommended) || (b.score ?? -1) - (a.score ?? -1) || a.full_name.localeCompare(b.full_name));
+
+    const decorated = [...props.activeFaculty].map((f) => {
+        const rec = recommended.get(f.id);
+        return {
+            ...f,
+            full_name: f.full_name,
+            recommended: !!rec,
+            badge: rec?.badge ?? null,
+            score: rec?.score ?? null,
+            college: rec?.college ?? f.college_name ?? null,
+        };
+    });
+
+    if (!subject) {
+        return decorated.sort((a, b) => (b.recommended - a.recommended) || (b.score ?? -1) - (a.score ?? -1) || a.full_name.localeCompare(b.full_name));
+    }
+
+    const recommendedItems = [];
+    const qualified = [];
+    const others = [];
+
+    decorated.forEach((faculty) => {
+        if (faculty.recommended) {
+            recommendedItems.push(faculty);
+            return;
+        }
+        if (isQualifiedFor(faculty, subject)) {
+            qualified.push(faculty);
+        } else {
+            others.push(faculty);
+        }
+    });
+
+    recommendedItems.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.full_name.localeCompare(b.full_name));
+    qualified.sort((a, b) => a.full_name.localeCompare(b.full_name));
+    others.sort((a, b) => a.full_name.localeCompare(b.full_name));
+
+    const qualifiedGroupLabel = subject.category === 'General Education'
+        ? 'General Education Faculty'
+        : (sectionCollegeName.value ? `${sectionCollegeName.value} Faculty` : 'Qualified for This Subject');
+
+    const groups = [];
+    if (facultyRecommendationsLoading.value && !recommendedItems.length) {
+        groups.push({ label: 'Recommended', items: [{ full_name: 'Finding the best matches…', id: '__loading__', disabled: true }], isRecommended: true });
+    } else if (recommendedItems.length) {
+        groups.push({ label: 'Recommended', items: recommendedItems, isRecommended: true });
+    }
+    if (qualified.length) groups.push({ label: qualifiedGroupLabel, items: qualified });
+    if (others.length) groups.push({ label: 'Other Active Faculty (Manual Override)', items: others });
+    return groups;
 });
 
 const openAssignModal = (row, day, rowIndex) => {
@@ -1193,9 +1264,63 @@ const perMeetingPreview = computed(() => {
     return minutes / 60;
 });
 
+// SAME-SECTION OWN-SCHEDULE CONFLICT — checked entirely client-side
+// against props.rows (this Section's own SectionSubject rows, already
+// loaded for the Subjects tab), so the Registrar sees "BSIT-3A already
+// has CAP101 at this time" the moment they configure a drop — not only
+// after Save round-trips to the server and ScheduleConflictService's
+// findSectionConflict() (step 5 of validate()) rejects it. That
+// server-side check is still the actual enforcement (this is a warning
+// aid, not a replacement for it) — but a Section can never really be in
+// two classes at once regardless of which Room each is in, so this
+// mirrors that same rule locally using the day/time the modal is
+// currently configured for (assignForm.selectedDays + the dropped
+// start time + the live Hours/Meetings preview), not the numbers last
+// saved.
+const sectionScheduleConflict = computed(() => {
+    const { row, rowIndex, selectedDays, meetingsPerWeek } = assignForm.value;
+    if (!row || !selectedDays.length || selectedDays.length !== meetingsPerWeek) return null;
+
+    const step = intervalMinutes.value;
+    const totalMinutes = (assignForm.value.hoursPerWeek || 0) * 60;
+    const perMeetingMinutes = Math.max(step, Math.round((totalMinutes / meetingsPerWeek) / step) * step);
+    const newStart = toMinutes(hourRows.value[rowIndex]);
+    const newEnd = newStart + perMeetingMinutes;
+
+    for (const other of props.rows) {
+        if (other.id === row.id) continue; // never conflicts with itself
+        if (!other.days || !other.start_time || !other.end_time) continue;
+
+        const otherDays = String(other.days).split(',').filter(Boolean);
+        if (!selectedDays.some((d) => otherDays.includes(d))) continue;
+
+        const otherStart = toMinutes(other.start_time);
+        const otherEnd = toMinutes(other.end_time);
+        if (newStart < otherEnd && newEnd > otherStart) {
+            const sharedDay = selectedDays.find((d) => otherDays.includes(d));
+            return {
+                subject_code: other.subject?.subject_code,
+                room_code: other.room?.room_code,
+                day: sharedDay,
+                start_time: other.start_time,
+                end_time: other.end_time,
+            };
+        }
+    }
+    return null;
+});
+
 const confirmAssign = async () => {
     const { row, rowIndex, hoursPerWeek, meetingsPerWeek, selectedDays, requiredHours } = assignForm.value;
     if (!row || !assignDaysValid.value || !hoursPerWeek || hoursPerWeek <= 0) return;
+
+    // Section Conflict — hard block, not confirmable. Unlike Weekly
+    // Hours Mismatch above, there's no legitimate reason to schedule
+    // the same Section into two classes at the same day/time, so this
+    // stops Save entirely rather than offering "Save Anyway" — the
+    // server would reject it either way (findSectionConflict()), this
+    // just saves the round trip and shows the reason inline instead.
+    if (sectionScheduleConflict.value) return;
 
     // Weekly Hours Mismatch — confirmable, not a hard block. A
     // Registrar may intentionally trim/extend a meeting because of
@@ -1563,6 +1688,29 @@ const removeAssignment = async () => {
                     </div>
                 </div>
 
+                <!--
+                    Section Conflict warning — this Section already has
+                    another Subject scheduled on a day/time this drop
+                    would overlap, regardless of Room (see
+                    sectionScheduleConflict computed above). Shown as
+                    soon as the modal opens/day-time is configured, not
+                    only after Save round-trips to the server.
+                -->
+                <div
+                    v-if="sectionScheduleConflict"
+                    class="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+                >
+                    <i class="pi pi-exclamation-triangle mt-0.5"></i>
+                    <div>
+                        <span class="font-semibold">Section Conflict:</span>
+                        {{ props.section.section_code }} already has {{ sectionScheduleConflict.subject_code }}
+                        <span v-if="sectionScheduleConflict.room_code">in {{ sectionScheduleConflict.room_code }}</span>
+                        on {{ dayLabels[sectionScheduleConflict.day] ?? sectionScheduleConflict.day }}
+                        {{ formatHourLabel(sectionScheduleConflict.start_time) }}–{{ formatHourLabel(sectionScheduleConflict.end_time) }}.
+                        Pick a different day/time before saving.
+                    </div>
+                </div>
+
                 <div>
                     <label class="text-xs font-medium text-slate-500 mb-1 block">
                         Days ({{ assignForm.selectedDays.length }}/{{ assignForm.meetingsPerWeek }} selected)
@@ -1601,13 +1749,19 @@ const removeAssignment = async () => {
                         :options="facultyOptions"
                         optionLabel="full_name"
                         optionValue="id"
+                        optionGroupLabel="label"
+                        optionGroupChildren="items"
+                        optionDisabled="disabled"
                         filter
                         showClear
                         placeholder="Unassigned"
                         class="w-full"
                     >
+                        <template #optiongroup="{ option }">
+                            <span class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
+                        </template>
                         <template #option="{ option }">
-                            <div class="flex flex-col gap-0.5 py-0.5 w-full">
+                            <div class="flex flex-col gap-0.5 py-0.5 w-full" :class="{ 'italic text-slate-400': option.disabled }">
                                 <div class="flex items-center gap-2">
                                     <span>{{ option.full_name }}</span>
                                     <Tag
@@ -1645,7 +1799,7 @@ const removeAssignment = async () => {
                     :label="assignForm.editing ? 'Save Changes' : 'Save Schedule'"
                     icon="pi pi-check"
                     :loading="assignSaving"
-                    :disabled="!assignDaysValid || !assignForm.hoursPerWeek"
+                    :disabled="!assignDaysValid || !assignForm.hoursPerWeek || !!sectionScheduleConflict"
                     @click="confirmAssign"
                 />
             </template>

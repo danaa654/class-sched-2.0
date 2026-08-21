@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\AcademicTerm;
+use App\Models\Section;
 use App\Services\ReportsService;
+use App\Support\ViewingTerm;
 use Illuminate\Http\Request;
+use Illuminate\View\View;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -21,6 +24,69 @@ class ReportsController extends Controller
     {
         $this->authorize('view-reports');
 
+        [$filters, $cleanFilters] = $this->buildFilters($request);
+
+        $reportType = (string) $request->query('report_type', '');
+
+        return Inertia::render('Reports/Index', [
+            'filterOptions' => $this->reports->filterOptions(),
+            'filters' => array_merge($filters, [
+                'term' => $this->resolveTermValue($filters['academic_year'], $filters['semester']),
+            ]),
+            'termOptions' => $this->termFilterOptions(),
+            'reportType' => $reportType,
+            'summary' => $this->reports->dashboardSummary($filters['academic_year'] ?: null, $filters['semester'] ?: null),
+            'report' => $reportType !== '' ? $this->reports->generate($reportType, $cleanFilters) : null,
+            'generatedAt' => now()->toDateTimeString(),
+        ]);
+    }
+
+    /**
+     * Printable version of the current report — a plain server-rendered
+     * Blade page (NOT an Inertia page: it's meant to open in its own
+     * tab/window via Reports/Index.vue's printReport(), untouched by
+     * the SPA's layout/chrome) branded for Professional Academy of the
+     * Philippines, so what actually prints looks like an official
+     * school document rather than a screenshot of the web app.
+     *
+     * Reuses buildFilters() so a printed report is always scoped
+     * identically to whatever the Reports page currently shows —
+     * the print button can never silently print different data than
+     * what's on screen.
+     */
+    public function print(Request $request): View
+    {
+        $this->authorize('view-reports');
+
+        [$filters, $cleanFilters] = $this->buildFilters($request);
+
+        $reportType = (string) $request->query('report_type', '');
+
+        $section = $filters['section_id']
+            ? Section::query()->find($filters['section_id'], ['id', 'section_code'])
+            : null;
+
+        return view('reports.print', [
+            'report' => $reportType !== '' ? $this->reports->generate($reportType, $cleanFilters) : null,
+            'reportType' => $reportType,
+            'academicYear' => $filters['academic_year'],
+            'semester' => $filters['semester'],
+            'sectionLabel' => $section?->section_code,
+            'generatedAt' => now(),
+        ]);
+    }
+
+    /**
+     * Shared filter-resolution logic for index() and print() — see
+     * index()'s original docblock (now here) for the full defaulting
+     * rationale. Kept as one method so the two entry points can never
+     * drift into scoping a printed report differently than the page
+     * that linked to it.
+     *
+     * @return array{0: array<string, string>, 1: array<string, string>}  [$filters, $cleanFilters]
+     */
+    private function buildFilters(Request $request): array
+    {
         $user = $request->user();
 
         // Academic Term default — mirrors SectionController@index: on a
@@ -41,15 +107,21 @@ class ReportsController extends Controller
         $defaultSemester = '';
 
         if (! $termGiven) {
-            $activeTerm = AcademicTerm::active();
+            // Defaults to THIS user's Viewing Term (their session
+            // override if Admin/Registrar switched it, else the real
+            // Active term) rather than always the system-wide Active
+            // term — so Reports opens scoped to whatever term the
+            // Admin/Registrar is currently viewing, while everyone
+            // else keeps defaulting to the real Active term as before.
+            $viewingTerm = ViewingTerm::resolve($request);
 
-            if ($activeTerm) {
-                $activeTerm->loadMissing('schoolYear:id,name');
-                $activeSemesterValue = $activeTerm->sectionSemesterValue();
+            if ($viewingTerm) {
+                $viewingTerm->loadMissing('schoolYear:id,name');
+                $viewingSemesterValue = $viewingTerm->sectionSemesterValue();
 
-                if ($activeTerm->schoolYear && $activeSemesterValue) {
-                    $defaultAcademicYear = $activeTerm->schoolYear->name;
-                    $defaultSemester = $activeSemesterValue;
+                if ($viewingTerm->schoolYear && $viewingSemesterValue) {
+                    $defaultAcademicYear = $viewingTerm->schoolYear->name;
+                    $defaultSemester = $viewingSemesterValue;
                 }
             }
         }
@@ -80,21 +152,9 @@ class ReportsController extends Controller
             'room_id' => $request->query('room_id', ''),
         ];
 
-        $reportType = (string) $request->query('report_type', '');
-
         $cleanFilters = array_filter($filters, fn ($v) => $v !== '' && $v !== null);
 
-        return Inertia::render('Reports/Index', [
-            'filterOptions' => $this->reports->filterOptions(),
-            'filters' => array_merge($filters, [
-                'term' => $this->resolveTermValue($filters['academic_year'], $filters['semester']),
-            ]),
-            'termOptions' => $this->termFilterOptions(),
-            'reportType' => $reportType,
-            'summary' => $this->reports->dashboardSummary($filters['academic_year'] ?: null, $filters['semester'] ?: null),
-            'report' => $reportType !== '' ? $this->reports->generate($reportType, $cleanFilters) : null,
-            'generatedAt' => now()->toDateTimeString(),
-        ]);
+        return [$filters, $cleanFilters];
     }
 
     /**

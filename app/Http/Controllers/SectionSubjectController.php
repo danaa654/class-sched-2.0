@@ -1076,10 +1076,13 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * Room 306 already booked 1:00 PM-5:00 PM and 5:00 PM-7:00 PM on
      * Sat means those slots simply aren't offered.
      *
-     * Reuses activeSemesterSectionIds()/mergeExclusionIds() — the
+     * Reuses sectionTermSectionIds()/mergeExclusionIds() — the
      * exact same scoping ScheduleConflictService::findRoomConflict()/
-     * findFacultyConflict() already use — so "busy" here can never
-     * disagree with what Save/Apply would actually reject.
+     * findFacultyConflict() already use (this Section's OWN Academic
+     * Year + Semester, not whichever term happens to be globally
+     * Active — see ScheduleConflictService's class docblock) — so
+     * "busy" here can never disagree with what Save/Apply would
+     * actually reject.
      */
     public function busyTimes(Request $request, Section $section, SectionSubject $subject): JsonResponse
     {
@@ -1096,7 +1099,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
         $excluding = $this->conflictService->mergeExclusionIds($subject);
 
         $rows = SectionSubject::query()
-            ->whereIn('section_id', $this->conflictService->activeSemesterSectionIds())
+            ->whereIn('section_id', $this->conflictService->sectionTermSectionIds($section))
             ->whereNotIn('id', $excluding)
             ->whereNotNull('days')
             ->whereNotNull('start_time')
@@ -1370,15 +1373,20 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * The Room Grid's core read: every SectionSubject currently
      * assigned to this Room, ACROSS EVERY SECTION (not just the
      * current one — a Room's weekly timetable is institution-wide
-     * occupancy, not per-Section). OTHER Sections are scoped to the
-     * Active Academic Term (activeSemesterSectionIds(), same
-     * convention ScheduleConflictService::findRoomConflict() uses)
-     * so a stale prior-term booking from someone else's Section never
-     * shows as if it were live — but the CURRENT Section (the one
-     * this Room Grid is being viewed for) always shows its own
-     * bookings regardless of which term happens to be marked Active,
-     * so the Grid never silently disagrees with the Subjects tab for
-     * a Section whose own Academic Year isn't the current one.
+     * occupancy, not per-Section). Every Section is scoped to THIS
+     * Section's own Academic Year + Semester
+     * (ScheduleConflictService::sectionTermSectionIds() — the same
+     * convention findRoomConflict()/Save now use, see that service's
+     * class docblock), NOT the single institution-wide "Active
+     * Academic Term". This is what makes the Room Grid correct when
+     * planning ahead: opening a 2nd-Semester Section's Room Grid shows
+     * every OTHER 2nd-Semester Section's bookings for that Room (real
+     * conflicts you need to see) and hides 1st-Semester bookings
+     * (irrelevant noise, even while 1st Semester is still the globally
+     * Active term) — the CURRENT Section's own bookings are included
+     * as part of that same term-scoped set (it always shares its own
+     * term with itself), so the Grid never disagrees with the Subjects
+     * tab for the very Section it's being viewed for.
      *
      * Deliberately reads straight from SectionSubject — no separate
      * "room schedule" table exists or should exist (spec Section 13,
@@ -1397,19 +1405,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $assignments = SectionSubject::query()
             ->where('room_id', $room->id)
-            // The CURRENT Section's own bookings must always appear here,
-            // even if its Academic Year/Semester isn't the one currently
-            // marked Active — the Room Grid is being viewed FOR this
-            // Section, so hiding its own schedule (e.g. because an
-            // Administrator later activated a different term) would make
-            // the Grid disagree with what the Subjects tab shows for the
-            // same row. Other Sections' bookings stay scoped to the
-            // Active Academic Term, so a stale prior-term booking from a
-            // DIFFERENT Section still never appears as if it were live.
-            ->where(function ($query) use ($section) {
-                $query->whereIn('section_id', $this->conflictService->activeSemesterSectionIds())
-                    ->orWhere('section_id', $section->id);
-            })
+            ->whereIn('section_id', $this->conflictService->sectionTermSectionIds($section))
             ->whereNotNull('days')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')

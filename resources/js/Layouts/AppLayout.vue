@@ -4,6 +4,7 @@ import { ref, computed } from 'vue';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
 import NotificationBell from '@/Components/NotificationBell.vue';
 import AmbientBackground from '@/Components/AmbientBackground.vue';
+import TermSwitcher from '@/Components/TermSwitcher.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -24,20 +25,6 @@ const isAdministrator = computed(() => authRoles.value.includes('Administrator')
 // never the actual security boundary, only what decides whether a
 // link is worth showing.
 const can = computed(() => page.props.auth?.can ?? {});
-
-// Currently Active Academic Term (School Year + Semester), shared on
-// every page by HandleInertiaRequests — shown in the top header so
-// it's visible no matter where in the app the user is.
-const activeAcademicTerm = computed(() => page.props.activeAcademicTerm);
-const activeAcademicTermLabel = computed(() => {
-    const term = activeAcademicTerm.value;
-    if (!term) return null;
-
-    const schoolYear = term.school_year?.name;
-    const semester = term.semester?.name;
-
-    return [schoolYear, semester].filter(Boolean).join(' • ');
-});
 
 const sidebarOpen = ref(true);
 
@@ -117,14 +104,7 @@ const isActive = (routeName) => {
             </div>
 
             <div class="flex items-center gap-5">
-                <span
-                    v-if="activeAcademicTermLabel"
-                    class="neu-navy-inset hidden sm:inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-emerald-300"
-                    title="Currently Active Academic Term"
-                >
-                    <i class="pi pi-calendar text-[11px]"></i>
-                    {{ activeAcademicTermLabel }}
-                </span>
+                <TermSwitcher />
                 <span class="neu-navy-raised flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
                     <NotificationBell v-if="user" />
                 </span>

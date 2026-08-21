@@ -26,6 +26,7 @@ use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\TeachingQualificationController;
 use App\Http\Controllers\UsersController;
+use App\Http\Controllers\ViewingTermController;
 use App\Http\Controllers\WelcomeController;
 use Illuminate\Support\Facades\Route;
 
@@ -70,6 +71,12 @@ Route::middleware('auth')->group(function () {
     Route::delete('/academic-terms/{academicTerm}', [AcademicTermController::class, 'destroy'])->name('academic-terms.destroy');
     Route::put('/academic-terms/{academicTerm}/restore', [AcademicTermController::class, 'restore'])->name('academic-terms.restore');
     Route::put('/academic-terms/{academicTerm}/archive', [AcademicTermController::class, 'archive'])->name('academic-terms.archive');
+    // Per-user "Viewing Academic Term" switch — Admin/Registrar only
+    // (enforced again inside the controller). Changes what THIS user
+    // sees (Dashboard/Reports/Settings/Sections default) without
+    // touching the real Active term or any other user's session.
+    Route::put('/viewing-term', [ViewingTermController::class, 'update'])->name('viewing-term.update');
+    Route::delete('/viewing-term', [ViewingTermController::class, 'destroy'])->name('viewing-term.destroy');
     Route::get('/academic-structure', [AcademicStructureController::class, 'index'])->name('academic-structure');
     Route::post('/colleges', [CollegeController::class, 'store'])->name('colleges.store');
     Route::put('/colleges/{college}', [CollegeController::class, 'update'])->name('colleges.update');
@@ -204,6 +211,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/notifications/{notification}/redirect', [NotificationController::class, 'redirect'])->name('notifications.redirect');
 
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports');
+    // Server-rendered, branded printable version — opens in its own
+    // tab from Reports/Index.vue's Print button rather than printing
+    // the SPA page itself. See ReportsController::print().
+    Route::get('/reports/print', [ReportsController::class, 'print'])->name('reports.print');
 
     // SETTINGS — system-wide configuration only (see SettingsController
     // and App\Services\SettingsService). GET renders the page; each PUT

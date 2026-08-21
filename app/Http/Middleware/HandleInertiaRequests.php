@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\AcademicTerm;
 use App\Models\Notification;
+use App\Support\ViewingTerm;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -81,14 +82,44 @@ class HandleInertiaRequests extends Middleware
                 'error' => fn () => $request->session()->get('error'),
             ],
             // The currently Active Academic Term (School Year +
-            // Semester), shown in the top header on every page — see
-            // AppLayout.vue. A closure so it's only queried when a
-            // page actually renders (every full Inertia visit), not
-            // added as dead weight to every partial reload.
+            // Semester) — the real, system-wide one, unaffected by
+            // any user's Viewing Term switch below. Kept for anything
+            // that specifically needs the true Active term regardless
+            // of what the current user is browsing.
             'activeAcademicTerm' => fn () => AcademicTerm::query()
                 ->where('status', 'Active')
                 ->with(['schoolYear:id,name', 'semester:id,name'])
                 ->first(['id', 'school_year_id', 'semester_id', 'status']),
+            // The Academic Term THIS user is currently viewing —
+            // their session override (Admin/Registrar only — see
+            // ViewingTerm) if one is set, else the real Active term.
+            // This is what the header pill in AppLayout.vue displays
+            // and what defaults Reports/Sections/etc. build against,
+            // so switching it never affects any other user.
+            'viewingAcademicTerm' => fn () => ViewingTerm::resolve($request)
+                ?->loadMissing(['schoolYear:id,name', 'semester:id,name']),
+            // True only when the user's session override points at a
+            // genuinely different term than the real Active one — see
+            // ViewingTerm::isDeviatingFromActive(). Lets the header
+            // show a "Planning" badge exactly when it should, not
+            // whenever an override happens to be set (an override
+            // pointed AT the Active term itself must never show
+            // "Planning").
+            'isViewingOverride' => fn () => ViewingTerm::isDeviatingFromActive($request),
+            // Whether this user is even allowed to use the switch
+            // (Administrator/Registrar only) — gates showing the
+            // dropdown affordance at all in the header.
+            'canSwitchViewingTerm' => fn () => ViewingTerm::canSwitch($user),
+            // Every switchable (non-Archived) Academic Term, for the
+            // header dropdown. Only fetched for users who can actually
+            // switch, to avoid the query on every request otherwise.
+            'availableAcademicTerms' => fn () => ViewingTerm::canSwitch($user)
+                ? AcademicTerm::query()
+                    ->where('status', '!=', 'Archived')
+                    ->with(['schoolYear:id,name', 'semester:id,name'])
+                    ->orderByDesc('id')
+                    ->get(['id', 'school_year_id', 'semester_id', 'status'])
+                : [],
             // SCHEDULING NOTIFICATION SYSTEM — unread count for the
             // header bell badge (see NotificationBell.vue), shared on
             // every full Inertia visit so the badge is correct on

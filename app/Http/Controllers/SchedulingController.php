@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AcademicTerm;
 use App\Models\College;
 use App\Models\Section;
 use App\Models\SectionSubject;
+use App\Support\ViewingTerm;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -15,18 +16,21 @@ class SchedulingController extends Controller
     /**
      * Display the Scheduling Dashboard — a read-only control center
      * summarizing scheduling progress, conflicts, and utilization for
-     * the active semester. All actual schedule editing happens on
-     * Scheduling > Sections > Section Subjects; this page never
-     * writes to section_subjects itself.
+     * the term this user is currently viewing. All actual schedule
+     * editing happens on Scheduling > Sections > Section Subjects;
+     * this page never writes to section_subjects itself.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $this->authorize('view-scheduling');
 
-        $activeTerm = AcademicTerm::query()
-            ->where('status', 'Active')
-            ->with(['schoolYear:id,name', 'semester:id,name'])
-            ->first(['id', 'school_year_id', 'semester_id', 'status']);
+        // THIS user's Viewing Term (their session override if
+        // Admin/Registrar switched it, else the real system-wide
+        // Active term) — see App\Support\ViewingTerm. Everyone else
+        // (Dean/OIC/Assistant Dean) always resolves straight to the
+        // real Active term, same as before this feature existed.
+        $activeTerm = ViewingTerm::resolve($request);
+        $activeTerm?->loadMissing(['schoolYear:id,name', 'semester:id,name']);
 
         // Sections/SectionSubjects don't carry a foreign key to
         // AcademicTerm — they're scoped by the plain academic_year /
