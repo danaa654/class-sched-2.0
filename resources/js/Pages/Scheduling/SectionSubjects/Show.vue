@@ -27,7 +27,7 @@ import Divider from 'primevue/divider';
 import FacultyRecommendationSelector from '@/Components/Scheduling/FacultyRecommendationSelector.vue';
 import RoomRecommendationSelector from '@/Components/Scheduling/RoomRecommendationSelector.vue';
 import TimeRecommendationSelector from '@/Components/Scheduling/TimeRecommendationSelector.vue';
-import { dockedEditSectionSubjectId } from '@/Composables/useTimeEditDock';
+import { dockedEditSectionSubjectId } from '@/composables/useTimeEditDock';
 import MergeRecommendationModal from '@/Components/Scheduling/MergeRecommendationModal.vue';
 import RoomGrid from '@/Components/Scheduling/RoomGrid.vue';
 import InfoPopover from '@/Components/InfoPopover.vue';
@@ -1199,6 +1199,11 @@ const csrfToken = () => {
 const schedulePolling = useSchedulePolling({
     sectionId: () => props.section.id,
     initialVersion: () => props.scheduleVersion,
+    // ACTOR-AWARE VERSION — read from the existing shared Inertia
+    // auth prop (HandleInertiaRequests::share()) rather than hardcoding
+    // an id, so the "was this my own change?" check always reflects
+    // whoever is actually logged in.
+    currentUserId: () => page.props.auth?.user?.id ?? null,
     fetchVersion: async (sectionId) => {
         const response = await fetch(route('scheduling.section-subjects.version', sectionId), {
             headers: { Accept: 'application/json' },
@@ -2402,7 +2407,23 @@ const onConfirmCurriculumLoad = () => {
         },
         {
             preserveScroll: true,
-            onSuccess: () => closeAddDialog(),
+            onSuccess: () => {
+                // CONCURRENCY HARDENING — this write goes through
+                // generateCurriculumSubjects()/store(), which returns a
+                // normal Inertia redirect (not a JSON schedule_version
+                // response), but it DOES bump the Section's real
+                // schedule_version server-side. Inertia's default
+                // reload already refreshed `props.scheduleVersion` to
+                // the new value by the time onSuccess runs — without
+                // this, schedulePolling.currentVersion would stay
+                // frozen at the OLD version, so the very next Room Grid
+                // or Subjects tab save would send a stale
+                // expected_schedule_version and fail with a false
+                // SCHEDULE_VERSION_CONFLICT, even though it's the same
+                // admin who just added these subjects.
+                schedulePolling.acceptVersion(props.scheduleVersion);
+                closeAddDialog();
+            },
             onError: (errors) => {
                 curriculumSaveErrors.value = Object.values(errors);
             },
@@ -2434,7 +2455,14 @@ const onAddManual = () => {
         },
         {
             preserveScroll: true,
-            onSuccess: () => closeAddDialog(),
+            onSuccess: () => {
+                // See the matching comment in onConfirmCurriculumLoad()
+                // above — store() also bumps schedule_version via a
+                // plain Inertia redirect, so the local polling baseline
+                // needs to be told about it explicitly here too.
+                schedulePolling.acceptVersion(props.scheduleVersion);
+                closeAddDialog();
+            },
             onError: (errors) => {
                 manualForm.errors.subject_ids = Object.values(errors).flat().join(' ');
             },
@@ -2459,6 +2487,14 @@ const onRemove = (row) => {
         if (result.isConfirmed) {
             router.delete(route('scheduling.section-subjects.destroy', [props.section.id, row.subject_id]), {
                 preserveScroll: true,
+                onSuccess: () => {
+                    // See the matching comment in
+                    // onConfirmCurriculumLoad() above — destroy() also
+                    // bumps schedule_version via a plain Inertia
+                    // redirect, so the local polling baseline needs to
+                    // be told about it explicitly here too.
+                    schedulePolling.acceptVersion(props.scheduleVersion);
+                },
             });
         }
     });
@@ -2500,7 +2536,10 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                     <div>
                         <p class="text-sm font-semibold text-amber-800">Schedule Updated</p>
                         <p class="text-sm text-amber-700">
-                            Another user changed this schedule. Your current view may be outdated — refresh before saving.
+                            {{ schedulePolling.staleUpdatedByName.value
+                                ? `${schedulePolling.staleUpdatedByName.value} changed this schedule.`
+                                : 'Another user changed this schedule.' }}
+                            Your current view may be outdated — refresh before saving.
                         </p>
                     </div>
                 </div>

@@ -217,6 +217,14 @@ class SectionSubjectController extends Controller implements HasMiddleware
      * rejected with HTTP 409 there regardless of what this endpoint
      * last reported.
      *
+     * ACTOR-AWARE VERSION — also returns `schedule_version_updated_by`
+     * (the user id recorded by ScheduleConflictService::
+     * bumpScheduleVersion()) so useSchedulePolling() can tell "the
+     * currently-logged-in user's own write" apart from "a genuinely
+     * different user's write" instead of treating every version bump
+     * as someone else's change. Only the id (plus a display name for
+     * the banner text) is returned — no other user data.
+     *
      * Authorization: SectionPolicy::manageScheduling is already
      * enforced for every action on this controller by
      * self::middleware() above (route-bound {section}), so this
@@ -225,9 +233,13 @@ class SectionSubjectController extends Controller implements HasMiddleware
      */
     public function scheduleVersion(Section $section): JsonResponse
     {
+        $section->loadMissing('scheduleVersionUpdatedBy:id,name');
+
         return response()->json([
             'section_id' => $section->id,
             'schedule_version' => $section->schedule_version,
+            'schedule_version_updated_by' => $section->schedule_version_updated_by,
+            'schedule_version_updated_by_name' => $section->scheduleVersionUpdatedBy?->name,
             'updated_at' => optional($section->updated_at)->toIso8601String(),
         ]);
     }

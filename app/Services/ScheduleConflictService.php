@@ -11,6 +11,8 @@ use App\Models\SectionSubject;
 use App\Support\ViewingTerm;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 /**
  * All Section / Faculty / Room / Time-overlap conflict-detection logic
@@ -580,18 +582,44 @@ class ScheduleConflictService
         }
 
         if ((int) $lockedSection->schedule_version !== (int) $expectedVersion) {
+            // TEMPORARY DIAGNOSTIC LOGGING — see the matching block in
+            // bumpScheduleVersion() below. Remove/reduce both once the
+            // false-conflict issue is confirmed fixed in production.
+            Log::info('[ScheduleVersionConflict]', [
+                'section' => $lockedSection->id,
+                'expected' => (int) $expectedVersion,
+                'current' => (int) $lockedSection->schedule_version,
+                'user' => Auth::id(),
+                'updated_by' => $lockedSection->schedule_version_updated_by,
+                'endpoint' => request()?->path(),
+            ]);
+
             throw new ScheduleVersionConflictException((int) $lockedSection->schedule_version, $expectedVersion);
         }
     }
 
     /**
-     * Advances a Section's schedule_version by exactly 1. MUST only
-     * be called after a successful write, on a $section instance
-     * already locked via lockResources() within the SAME transaction
-     * — so the increment can never race with, or be lost to, another
-     * transaction's own read-check-write of the same counter. A
-     * failed/rolled-back transaction never reaches this call, so the
-     * version is left untouched on failure (spec Section 20).
+     * Advances a Section's schedule_version by exactly 1 and records
+     * WHO made the change. MUST only be called after a successful
+     * write, on a $section instance already locked via
+     * lockResources() within the SAME transaction — so the increment
+     * can never race with, or be lost to, another transaction's own
+     * read-check-write of the same counter. A failed/rolled-back
+     * transaction never reaches this call, so the version is left
+     * untouched on failure (spec Section 20).
+     *
+     * ACTOR-AWARE VERSION — `schedule_version_updated_by` is bumped in
+     * the exact same `increment()` call (a single UPDATE) rather than
+     * a separate ->update() afterward, so this can never introduce a
+     * second query/race on the same locked row. auth()->id() is
+     * resolved fresh from the request that's actually performing this
+     * write; when there's no authenticated user (a console/system
+     * process), it's left null — the frontend treats a null actor as
+     * "unknown" and stays conservative (still warns), never as
+     * "the current user". See the
+     * 2026_08_17_090000_add_schedule_version_to_sections_table
+     * migration's docblock and SectionSubjectController::
+     * scheduleVersion().
      */
     public function bumpScheduleVersion(?Section $section): void
     {
@@ -599,7 +627,22 @@ class ScheduleConflictService
             return;
         }
 
-        $section->increment('schedule_version');
+        $userId = auth()->id();
+
+        $section->increment('schedule_version', 1, [
+            'schedule_version_updated_by' => $userId,
+        ]);
+
+        // TEMPORARY DIAGNOSTIC LOGGING — makes it immediately obvious,
+        // per-request, who advanced the version and to what — remove
+        // or reduce once the false "another user" conflict issue is
+        // confirmed fixed in production.
+        Log::info('[ScheduleVersion]', [
+            'section' => $section->id,
+            'new_version' => $section->schedule_version,
+            'updated_by' => $userId,
+            'endpoint' => request()?->path(),
+        ]);
     }
 
     private function minutesBetween(string $start, string $end): int

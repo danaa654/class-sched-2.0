@@ -80,6 +80,19 @@ class Section extends Model
     }
 
     /**
+     * CONCURRENCY HARDENING — the user who most recently advanced
+     * schedule_version (see ScheduleConflictService::
+     * bumpScheduleVersion() and the
+     * 2026_08_17_090000_add_schedule_version_to_sections_table
+     * migration). Nullable: a bump from a console/system context has
+     * no known actor.
+     */
+    public function scheduleVersionUpdatedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'schedule_version_updated_by');
+    }
+
+    /**
      * SECTION-LEVEL SCHEDULE FINALIZATION — the single source of truth
      * the frontend and backend both defer to for "can this Section's
      * schedule be touched right now?". Backend enforcement lives in

@@ -25,7 +25,7 @@ import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 import ProgressBar from 'primevue/progressbar';
 import RecommendedTimeModal from './RecommendedTimeModal.vue';
-import { dockedEditSectionSubjectId } from '@/Composables/useTimeEditDock';
+import { dockedEditSectionSubjectId } from '@/composables/useTimeEditDock';
 
 const props = defineProps({
     sectionId: { type: [Number, String], required: true },
