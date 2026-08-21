@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\AcademicTerm;
 use App\Models\Notification;
+use App\Services\SettingsService;
 use App\Support\ViewingTerm;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -128,6 +129,26 @@ class HandleInertiaRequests extends Middleware
             'unreadNotificationCount' => fn () => $user
                 ? Notification::query()->where('recipient_user_id', $user->id)->where('is_read', false)->count()
                 : 0,
+            // SCHOOL BRANDING — single source of truth for the school's
+            // identity (Settings → General), shared on every page so the
+            // Welcome/Login pages, Dashboard, and the main app
+            // sidebar/header can all display the configured name/logo
+            // without each controller re-fetching SettingsService
+            // itself. This is intentionally separate from CLASSLY's own
+            // system branding (name/logo/tagline), which is never
+            // driven by these values. Falls back to sensible
+            // defaults (config('app.name') / null logo) when nothing
+            // has been configured yet, so nothing ever errors or shows
+            // a broken image.
+            'schoolBranding' => fn () => (function () {
+                $settings = app(SettingsService::class)->group('general');
+
+                return [
+                    'name' => $settings['general.school_name'] ?: config('app.name', 'Classly'),
+                    'shortName' => $settings['general.school_short_name'] ?: null,
+                    'logoUrl' => $settings['general.school_logo_path'] ?: null,
+                ];
+            })(),
         ];
     }
 }

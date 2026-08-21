@@ -23,6 +23,10 @@ const props = defineProps({
 const page = usePage();
 const user = page.props.auth.user;
 
+// SCHOOL BRANDING — shared globally by HandleInertiaRequests from
+// Settings → General (single source of truth).
+const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null, logoUrl: null });
+
 // Live clock — ticks every second while the Dashboard is mounted.
 const now = ref(new Date());
 let clockInterval = null;
@@ -104,6 +108,18 @@ const roleLabel = computed(() => props.roles.join(', ') || 'No role assigned');
                 class="flex flex-col gap-4 rounded-2xl p-6 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between"
             >
                 <div>
+                    <div v-if="schoolBranding.name" class="mb-1 flex items-center gap-2">
+                        <img
+                            v-if="schoolBranding.logoUrl"
+                            :src="schoolBranding.logoUrl"
+                            alt=""
+                            class="h-5 w-5 rounded-full object-cover"
+                            @error="$event.target.style.display = 'none'"
+                        />
+                        <span class="text-xs font-semibold uppercase tracking-wide" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                            {{ schoolBranding.name }}
+                        </span>
+                    </div>
                     <h1 class="text-xl font-bold flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
                         Welcome, {{ user.name }}
                         <InfoPopover

@@ -85,30 +85,6 @@ const saveGeneral = () => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Academic defaults                                                   */
-/* ------------------------------------------------------------------ */
-const semesterOptions = ['1st Semester', '2nd Semester', 'Summer'];
-const academicForm = useForm({
-    default_academic_year: props.settings['academic.default_academic_year'] ?? '',
-    default_semester: props.settings['academic.default_semester'] ?? '1st Semester',
-});
-const saveAcademic = () => {
-    academicForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.academic.update'), { preserveScroll: true, onError });
-};
-
-/* ------------------------------------------------------------------ */
-/* Meeting frequency                                                   */
-/* ------------------------------------------------------------------ */
-const meetingForm = useForm({
-    allow_1x: props.settings['meeting.allow_1x'] ?? true,
-    allow_2x: props.settings['meeting.allow_2x'] ?? true,
-    allow_3x: props.settings['meeting.allow_3x'] ?? false,
-});
-const saveMeeting = () => {
-    meetingForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.meeting.update'), { preserveScroll: true, onError });
-};
-
-/* ------------------------------------------------------------------ */
 /* Faculty & workload                                                  */
 /* ------------------------------------------------------------------ */
 const workloadForm = useForm({
@@ -259,8 +235,7 @@ const onUpdateAccount = () => {
                             'System-wide configuration that controls how scheduling behaves — not the data itself (Faculty, Rooms, Subjects, Sections, and Curriculum each have their own pages).',
                         ]"
                         :bullets="[
-                            'Academic — the daily class window, lunch break, and available scheduling days used by every section.',
-                            'Meeting Frequency — how many times per week each subject type meets by default (e.g. lectures 2x/week, labs 1x/week).',
+                            'Academic — a read-only summary of the daily class window, lunch break, and available scheduling days; managed on the Academic Calendar page.',
                             'Auto Schedule — rules the recommendation engine follows when proposing Faculty, Room, and Time.',
                             'Irregular Scheduling — controls for merging irregular section subjects into compatible regular sections.',
                             'Changing these settings affects future scheduling; it does not retroactively change schedules already saved.',
@@ -277,7 +252,6 @@ const onUpdateAccount = () => {
                 <TabList>
                     <Tab v-if="has('general')" value="general">General</Tab>
                     <Tab v-if="has('academic')" value="academic">Academic</Tab>
-                    <Tab v-if="has('meeting')" value="meeting">Meeting Frequency</Tab>
                     <Tab v-if="has('workload')" value="workload">Faculty &amp; Workload</Tab>
                     <Tab v-if="has('rooms')" value="rooms">Rooms</Tab>
                     <Tab v-if="has('autoschedule')" value="autoschedule">Auto Schedule</Tab>
@@ -345,35 +319,7 @@ const onUpdateAccount = () => {
 
                     <!-- ============================== ACADEMIC ============================== -->
                     <TabPanel v-if="has('academic')" value="academic">
-                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
-                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
-                            <template #content>
-                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Academic Defaults</h2>
-                                <p class="text-sm text-slate-500 mb-5">
-                                    Default values used when creating new Sections, Schedules, and Reports. The
-                                    <a :href="route('academic-calendar')" class="text-[#2563EB] underline">Academic Calendar</a>
-                                    remains the source of truth for actual School Year / Semester periods and dates.
-                                </p>
-
-                                <fieldset :disabled="!canEdit('academic')" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                                    <FloatLabel variant="on">
-                                        <InputText v-uppercase id="defaultAY" size="large" v-model="academicForm.default_academic_year" class="w-full" placeholder="e.g. 2026-2027" />
-                                        <label for="defaultAY">Default Academic Year</label>
-                                    </FloatLabel>
-                                    <FloatLabel variant="on">
-                                        <Select id="defaultSem" size="large" v-model="academicForm.default_semester" :options="semesterOptions" class="w-full" />
-                                        <label for="defaultSem">Default Semester</label>
-                                    </FloatLabel>
-                                </fieldset>
-
-                                <div v-if="canEdit('academic')" class="flex justify-end mt-6">
-                                    <Button label="Save Changes" icon="pi pi-check" :loading="academicForm.processing" @click="saveAcademic" />
-                                </div>
-                            </template>
-                        </Card>
-                        </div>
-
-                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300 mt-5" v-if="schoolYear">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300" v-if="schoolYear">
                         <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
                             <template #content>
                                 <div class="flex items-center justify-between mb-1">
@@ -393,42 +339,6 @@ const onUpdateAccount = () => {
                                     <div class="sm:col-span-2"><span class="text-slate-400 block">Working Days</span>{{ schoolYear.available_days.join(', ') }}</div>
                                 </div>
                                 <Button as="a" :href="route('academic-calendar')" label="Open Academic Calendar" icon="pi pi-external-link" text class="!mt-4 !px-0" />
-                            </template>
-                        </Card>
-                        </div>
-                    </TabPanel>
-
-                    <!-- ============================== MEETING FREQUENCY ============================== -->
-                    <TabPanel v-if="has('meeting')" value="meeting">
-                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
-                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
-                            <template #content>
-                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Subject Meeting Frequency</h2>
-                                <p class="text-sm text-slate-500 mb-5">
-                                    Controls which meeting patterns Auto Schedule is allowed to use. This does not force
-                                    every subject into the same frequency — each subject's configured hours/week still
-                                    determines the appropriate pattern (e.g. 5 hrs/week as 1×5h or 2×2.5h).
-                                </p>
-
-                                <fieldset :disabled="!canEdit('meeting')" class="space-y-3">
-                                    <div class="flex items-center gap-3">
-                                        <ToggleSwitch v-model="meetingForm.allow_1x" />
-                                        <span>1× per week</span>
-                                    </div>
-                                    <div class="flex items-center gap-3">
-                                        <ToggleSwitch v-model="meetingForm.allow_2x" />
-                                        <span>2× per week</span>
-                                    </div>
-                                    <div class="flex items-center gap-3">
-                                        <ToggleSwitch v-model="meetingForm.allow_3x" />
-                                        <span>3× per week <span class="text-xs text-slate-400">(disabled by default — enable explicitly)</span></span>
-                                    </div>
-                                </fieldset>
-                                <small v-if="meetingForm.errors.allow_1x" class="text-red-500 block mt-2">{{ meetingForm.errors.allow_1x }}</small>
-
-                                <div v-if="canEdit('meeting')" class="flex justify-end mt-6">
-                                    <Button label="Save Changes" icon="pi pi-check" :loading="meetingForm.processing" @click="saveMeeting" />
-                                </div>
                             </template>
                         </Card>
                         </div>

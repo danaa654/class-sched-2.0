@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { useForm, usePage } from '@inertiajs/vue3';
 import InputText from 'primevue/inputtext';
 import Password from 'primevue/password';
 import Checkbox from 'primevue/checkbox';
@@ -71,6 +71,12 @@ const inputClass = computed(() =>
         ? '!text-white placeholder:!text-slate-500'
         : '!text-[#1E293B] placeholder:!text-slate-400'
 );
+
+// SCHOOL BRANDING — shared globally by HandleInertiaRequests from
+// Settings → General. Kept separate from CLASSLY's own system
+// branding (logo/name/tagline) shown above in each card face.
+const page = usePage();
+const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null, logoUrl: null });
 </script>
 
 <template>
@@ -252,5 +258,14 @@ const inputClass = computed(() =>
                 </div>
             </div>
         </div>
+
+        <!-- School branding footer (Settings → General) — separate from CLASSLY's own branding above -->
+        <p
+            v-if="schoolBranding.name"
+            class="mt-6 text-center text-xs"
+            :class="isDark ? 'text-slate-500' : 'text-slate-400'"
+        >
+            &copy; 2026 {{ schoolBranding.name }} — Powered by Classly
+        </p>
     </div>
 </template>

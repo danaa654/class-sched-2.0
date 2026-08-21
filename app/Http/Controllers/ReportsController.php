@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AcademicTerm;
 use App\Models\Section;
 use App\Services\ReportsService;
+use App\Services\SettingsService;
 use App\Support\ViewingTerm;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -13,7 +14,10 @@ use Inertia\Response;
 
 class ReportsController extends Controller
 {
-    public function __construct(private readonly ReportsService $reports) {}
+    public function __construct(
+        private readonly ReportsService $reports,
+        private readonly SettingsService $settings,
+    ) {}
 
     /**
      * Display the Reports page. This is a read-only page: it only
@@ -45,9 +49,10 @@ class ReportsController extends Controller
      * Printable version of the current report — a plain server-rendered
      * Blade page (NOT an Inertia page: it's meant to open in its own
      * tab/window via Reports/Index.vue's printReport(), untouched by
-     * the SPA's layout/chrome) branded for Professional Academy of the
-     * Philippines, so what actually prints looks like an official
-     * school document rather than a screenshot of the web app.
+     * the SPA's layout/chrome) branded dynamically with the configured
+     * School Name/Logo from Settings → General, so what actually
+     * prints looks like an official school document rather than a
+     * screenshot of the web app.
      *
      * Reuses buildFilters() so a printed report is always scoped
      * identically to whatever the Reports page currently shows —
@@ -66,6 +71,8 @@ class ReportsController extends Controller
             ? Section::query()->find($filters['section_id'], ['id', 'section_code'])
             : null;
 
+        $general = $this->settings->group('general');
+
         return view('reports.print', [
             'report' => $reportType !== '' ? $this->reports->generate($reportType, $cleanFilters) : null,
             'reportType' => $reportType,
@@ -73,6 +80,12 @@ class ReportsController extends Controller
             'semester' => $filters['semester'],
             'sectionLabel' => $section?->section_code,
             'generatedAt' => now(),
+            // SCHOOL BRANDING — single source of truth (Settings →
+            // General). Falls back to the app name / placeholder logo
+            // if nothing has been configured yet, so the print view
+            // never errors or shows a broken image.
+            'schoolName' => $general['general.school_name'] ?: config('app.name', 'Classly'),
+            'schoolLogoUrl' => $general['general.school_logo_path'] ?: null,
         ]);
     }
 

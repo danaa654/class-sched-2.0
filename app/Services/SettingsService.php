@@ -16,10 +16,17 @@ use Illuminate\Support\Facades\Cache;
  * today; Settings only links to the Academic Calendar page for them.
  *
  * Everything this service DOES own is genuinely new, system-wide
- * behavior: school identity, academic defaults, faculty workload
- * thresholds, room recommendation behavior, Auto Schedule
- * optimization preferences, meeting-frequency policy, irregular
- * section defaults, and notification toggles.
+ * behavior: school identity, faculty workload thresholds, room
+ * recommendation behavior, Auto Schedule optimization preferences,
+ * irregular section defaults, and notification toggles.
+ *
+ * It does NOT own an "academic defaults" (default academic
+ * year/semester) group or a "meeting frequency" enable/disable
+ * policy — both were removed as redundant: the Academic Calendar
+ * (SchoolYear) is the single source of truth for the active year and
+ * semester, and 1x/2x-per-week meeting patterns are permanently
+ * supported (no 3x option) via MeetingPatternService/config/scheduling.php,
+ * not a toggle here.
  *
  * All values are cached under a single "system_settings" key and
  * invalidated automatically whenever set()/setMany() is called, so
@@ -48,15 +55,6 @@ class SettingsService
             'general.school_contact' => ['group' => 'general', 'type' => 'string', 'default' => ''],
             'general.school_email' => ['group' => 'general', 'type' => 'string', 'default' => ''],
             'general.school_logo_path' => ['group' => 'general', 'type' => 'string', 'default' => ''],
-
-            // ---- Academic defaults (NOT the Academic Calendar itself) ----
-            'academic.default_academic_year' => ['group' => 'academic', 'type' => 'string', 'default' => ''],
-            'academic.default_semester' => ['group' => 'academic', 'type' => 'string', 'default' => '1st Semester'],
-
-            // ---- Meeting frequency policy (Auto Schedule input) ----------
-            'meeting.allow_1x' => ['group' => 'meeting', 'type' => 'bool', 'default' => true],
-            'meeting.allow_2x' => ['group' => 'meeting', 'type' => 'bool', 'default' => true],
-            'meeting.allow_3x' => ['group' => 'meeting', 'type' => 'bool', 'default' => false],
 
             // ---- Faculty & workload ---------------------------------------
             // Mirrors FacultyWorkloadService::WARNING_THRESHOLD /

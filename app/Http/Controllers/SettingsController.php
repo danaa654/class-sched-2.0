@@ -31,8 +31,6 @@ class SettingsController extends Controller
      *  always edit every group regardless of what's listed here. */
     private const EDITABLE_BY = [
         'general' => ['Registrar'],
-        'academic' => ['Registrar'],
-        'meeting' => ['Registrar'],
         'workload' => ['Registrar'],
         'rooms' => ['Registrar'],
         'autoschedule' => ['Registrar'],
@@ -54,8 +52,8 @@ class SettingsController extends Controller
         $isAdministrator = $role === 'Administrator';
         $activeSchoolYear = SchoolYear::active();
 
-        // Every role can see General + Academic defaults + their own
-        // Notification preferences. Everything else is Administrator/
+        // Every role can see General + the read-only Academic Calendar
+        // summary + their own Notification preferences. Everything else is Administrator/
         // Registrar territory (day-to-day scheduling policy), matching
         // "Dean/OIC: only settings relevant to their college" and
         // "Assistant Dean: only settings relevant to their assigned
@@ -63,7 +61,7 @@ class SettingsController extends Controller
         // configuration today.
         $visibleGroups = match (true) {
             $isAdministrator, $role === 'Registrar' => [
-                'general', 'academic', 'meeting', 'workload', 'rooms',
+                'general', 'academic', 'workload', 'rooms',
                 'autoschedule', 'irregular', 'notifications', 'system',
             ],
             default => ['general', 'academic', 'notifications'],
@@ -122,46 +120,6 @@ class SettingsController extends Controller
         $this->settings->setMany($values, $request->user()->id);
 
         return back()->with('success', 'General settings updated.');
-    }
-
-    public function updateAcademic(Request $request): RedirectResponse
-    {
-        $this->authorizeGroup($request, 'academic');
-
-        $data = $request->validate([
-            'default_academic_year' => ['nullable', 'string', 'max:20'],
-            'default_semester' => ['required', Rule::in(['1st Semester', '2nd Semester', 'Summer'])],
-        ]);
-
-        $this->settings->setMany([
-            'academic.default_academic_year' => $data['default_academic_year'] ?? '',
-            'academic.default_semester' => $data['default_semester'],
-        ], $request->user()->id);
-
-        return back()->with('success', 'Academic defaults updated.');
-    }
-
-    public function updateMeetingFrequency(Request $request): RedirectResponse
-    {
-        $this->authorizeGroup($request, 'meeting');
-
-        $data = $request->validate([
-            'allow_1x' => ['required', 'boolean'],
-            'allow_2x' => ['required', 'boolean'],
-            'allow_3x' => ['required', 'boolean'],
-        ]);
-
-        if (! $data['allow_1x'] && ! $data['allow_2x'] && ! $data['allow_3x']) {
-            return back()->withErrors(['allow_1x' => 'At least one meeting frequency must remain enabled.']);
-        }
-
-        $this->settings->setMany([
-            'meeting.allow_1x' => $data['allow_1x'],
-            'meeting.allow_2x' => $data['allow_2x'],
-            'meeting.allow_3x' => $data['allow_3x'],
-        ], $request->user()->id);
-
-        return back()->with('success', 'Meeting frequency policy updated.');
     }
 
     public function updateWorkload(Request $request): RedirectResponse

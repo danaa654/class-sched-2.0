@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{{ $report['title'] ?? 'Report' }} — Professional Academy of the Philippines</title>
+    <title>{{ $report['title'] ?? 'Report' }} — {{ $schoolName }}</title>
     <style>
         * { box-sizing: border-box; }
 
@@ -113,9 +113,9 @@
 <body>
 
     <div class="letterhead">
-        <img src="{{ asset('logo.png') }}" alt="School Logo">
+        <img src="{{ $schoolLogoUrl ?: asset('logo.png') }}" alt="School Logo">
         <div>
-            <h1>Professional Academy of the Philippines</h1>
+            <h1>{{ $schoolName }}</h1>
             <p>{{ $report['title'] ?? 'Report' }}</p>
         </div>
     </div>

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive } from 'vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, usePage } from '@inertiajs/vue3';
 import Button from 'primevue/button';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
 import AmbientBackground from '@/Components/AmbientBackground.vue';
@@ -8,6 +8,13 @@ import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
 const isDark = computed(() => theme.value === 'dark');
+
+// SCHOOL BRANDING — shared globally by HandleInertiaRequests from
+// Settings → General. This is distinct from CLASSLY's own system
+// branding (name/logo/tagline below), which never changes based on
+// this. Falls back gracefully: no logo shown if none configured.
+const page = usePage();
+const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null, logoUrl: null });
 
 const features = [
     {
@@ -70,9 +77,28 @@ const highlightedDot = 16;
                 :class="isDark ? 'border-white/10 bg-white/[0.04]' : 'border-slate-900/5 bg-white/50'"
             >
                 <nav class="mx-auto flex h-16 max-w-7xl items-center justify-between px-6 lg:px-8">
-                    <div class="flex items-center gap-2.5">
-                        <img src="/logo.png" alt="CLASSLY" class="h-8 w-8 drop-shadow-[0_0_12px_rgba(37,99,235,0.55)]" />
-                        <span class="text-lg font-bold tracking-tight">CLASSLY</span>
+                    <div class="flex items-center gap-3">
+                        <div class="flex items-center gap-2.5">
+                            <img src="/logo.png" alt="CLASSLY" class="h-8 w-8 drop-shadow-[0_0_12px_rgba(37,99,235,0.55)]" />
+                            <span class="text-lg font-bold tracking-tight">CLASSLY</span>
+                        </div>
+
+                        <!-- School branding (Settings → General) — kept separate from CLASSLY's own mark above -->
+                        <template v-if="schoolBranding.name">
+                            <span class="h-5 w-px" :class="isDark ? 'bg-white/15' : 'bg-slate-900/10'"></span>
+                            <div class="flex items-center gap-2">
+                                <img
+                                    v-if="schoolBranding.logoUrl"
+                                    :src="schoolBranding.logoUrl"
+                                    alt=""
+                                    class="h-6 w-6 rounded-full object-cover"
+                                    @error="$event.target.style.display = 'none'"
+                                />
+                                <span class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-600'">
+                                    {{ schoolBranding.name }}
+                                </span>
+                            </div>
+                        </template>
                     </div>
 
                     <div class="flex items-center gap-3">
@@ -227,7 +253,8 @@ const highlightedDot = 16;
                 :class="isDark ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/5 bg-white/40'"
             >
                 <div class="mx-auto max-w-7xl px-6 py-6 text-center text-sm lg:px-8" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
-                    CLASSLY &copy; 2026 -DJS
+                    <template v-if="schoolBranding.name">&copy; 2026 {{ schoolBranding.name }} — Powered by CLASSLY</template>
+                    <template v-else>CLASSLY &copy; 2026 -DJS</template>
                 </div>
             </footer>
         </div>

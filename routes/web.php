@@ -231,8 +231,6 @@ Route::middleware('auth')->group(function () {
     // "refresh configuration cache" action for Administrators.
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
     Route::put('/settings/general', [SettingsController::class, 'updateGeneral'])->name('settings.general.update');
-    Route::put('/settings/academic', [SettingsController::class, 'updateAcademic'])->name('settings.academic.update');
-    Route::put('/settings/meeting-frequency', [SettingsController::class, 'updateMeetingFrequency'])->name('settings.meeting.update');
     Route::put('/settings/workload', [SettingsController::class, 'updateWorkload'])->name('settings.workload.update');
     Route::put('/settings/rooms', [SettingsController::class, 'updateRooms'])->name('settings.rooms.update');
     Route::put('/settings/auto-schedule', [SettingsController::class, 'updateAutoSchedule'])->name('settings.autoschedule.update');

@@ -13,6 +13,11 @@ const isDark = computed(() => theme.value === 'dark');
 const page = usePage();
 const user = computed(() => page.props.auth?.user);
 
+// SCHOOL BRANDING — shared globally by HandleInertiaRequests from
+// Settings → General (single source of truth). Kept distinct from
+// CLASSLY's own system branding (logo/name) in the header below.
+const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null, logoUrl: null });
+
 // User Management (create/edit accounts) is Administrator only —
 // Registrar, Dean, OIC and Assistant Dean never see this section, since
 // the backend also blocks them from those routes directly.
@@ -101,6 +106,21 @@ const isActive = (routeName) => {
                 </button>
                 <img src="/logo.png" alt="" class="h-7 w-7" />
                 <span class="text-xl font-bold tracking-tight text-white">CLASSLY</span>
+
+                <!-- School branding (Settings → General) — separate from CLASSLY's own mark above -->
+                <template v-if="schoolBranding.name">
+                    <span class="h-5 w-px bg-white/15"></span>
+                    <div class="hidden items-center gap-2 sm:flex">
+                        <img
+                            v-if="schoolBranding.logoUrl"
+                            :src="schoolBranding.logoUrl"
+                            alt=""
+                            class="h-6 w-6 rounded-full object-cover"
+                            @error="$event.target.style.display = 'none'"
+                        />
+                        <span class="max-w-[220px] truncate text-sm font-medium text-slate-300">{{ schoolBranding.name }}</span>
+                    </div>
+                </template>
             </div>
 
             <div class="flex items-center gap-5">
