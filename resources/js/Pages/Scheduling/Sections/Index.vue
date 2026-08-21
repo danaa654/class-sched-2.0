@@ -1133,6 +1133,7 @@ const onUnlockSection = (section) => {
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                 <InputText
                                     v-model="search"
+                                    v-uppercase
                                     placeholder="Search by code, name, major or year"
                                     class="neu-inset w-full !rounded-xl !border-none !pl-9"
                                     :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
@@ -1621,6 +1622,7 @@ const onUnlockSection = (section) => {
                             <InputText
                                 id="batch_prefix"
                                 v-model="batchForm.section_prefix"
+                                v-uppercase
                                 :placeholder="batchForm.section_type === 'Regular' ? 'e.g. BSIT-1' : 'e.g. BSIT-4-IRREG'"
                                 :invalid="!!batchForm.errors.section_prefix"
                                 class="w-full"
@@ -1859,6 +1861,7 @@ const onUnlockSection = (section) => {
                             <div class="flex-1 flex flex-col gap-1">
                                 <InputText
                                     v-model="row.section_code"
+                                    v-uppercase
                                     class="w-full"
                                     :invalid="previewDuplicates.has(index) || !!nameErrors[index] || !row.section_code?.trim()"
                                 />
@@ -1954,6 +1957,7 @@ const onUnlockSection = (section) => {
                     <InputText
                         id="section_code"
                         v-model="sectionForm.section_code"
+                        v-uppercase
                         placeholder="e.g. BSIT-1A"
                         :invalid="!!sectionForm.errors.section_code"
                         class="w-full"

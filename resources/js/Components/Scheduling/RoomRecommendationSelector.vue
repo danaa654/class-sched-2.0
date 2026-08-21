@@ -221,6 +221,7 @@ const select = async (event) => {
 
         <AutoComplete
             v-model="query"
+            v-uppercase
             :suggestions="suggestions"
             :loading="loadingOptions || applying"
             optionLabel="name"

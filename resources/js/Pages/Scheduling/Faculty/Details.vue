@@ -593,7 +593,7 @@ const placementStatusSeverity = (status) => {
             <form class="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4 neu-form" @submit.prevent="onSaveFaculty">
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">Faculty ID <span class="text-red-500">*</span></label>
-                    <InputText v-model="facultyForm.faculty_id" :invalid="!!facultyForm.errors.faculty_id" class="w-full" />
+                    <InputText v-uppercase v-model="facultyForm.faculty_id" :invalid="!!facultyForm.errors.faculty_id" class="w-full" />
                     <small v-if="facultyForm.errors.faculty_id" class="text-red-500">{{ facultyForm.errors.faculty_id }}</small>
                 </div>
 
@@ -612,24 +612,24 @@ const placementStatusSeverity = (status) => {
 
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">First Name <span class="text-red-500">*</span></label>
-                    <InputText v-model="facultyForm.first_name" :invalid="!!facultyForm.errors.first_name" class="w-full" />
+                    <InputText v-uppercase v-model="facultyForm.first_name" :invalid="!!facultyForm.errors.first_name" class="w-full" />
                     <small v-if="facultyForm.errors.first_name" class="text-red-500">{{ facultyForm.errors.first_name }}</small>
                 </div>
 
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">Middle Name</label>
-                    <InputText v-model="facultyForm.middle_name" :invalid="!!facultyForm.errors.middle_name" class="w-full" />
+                    <InputText v-uppercase v-model="facultyForm.middle_name" :invalid="!!facultyForm.errors.middle_name" class="w-full" />
                 </div>
 
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">Last Name <span class="text-red-500">*</span></label>
-                    <InputText v-model="facultyForm.last_name" :invalid="!!facultyForm.errors.last_name" class="w-full" />
+                    <InputText v-uppercase v-model="facultyForm.last_name" :invalid="!!facultyForm.errors.last_name" class="w-full" />
                     <small v-if="facultyForm.errors.last_name" class="text-red-500">{{ facultyForm.errors.last_name }}</small>
                 </div>
 
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">Suffix</label>
-                    <InputText v-model="facultyForm.suffix" :invalid="!!facultyForm.errors.suffix" class="w-full" />
+                    <InputText v-uppercase v-model="facultyForm.suffix" :invalid="!!facultyForm.errors.suffix" class="w-full" />
                 </div>
 
                 <div class="flex flex-col gap-1">
@@ -716,7 +716,7 @@ const placementStatusSeverity = (status) => {
 
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium text-slate-700">Contact Number</label>
-                    <InputText v-model="facultyForm.contact_number" :invalid="!!facultyForm.errors.contact_number" class="w-full" />
+                    <InputText v-uppercase v-model="facultyForm.contact_number" :invalid="!!facultyForm.errors.contact_number" class="w-full" />
                 </div>
 
                 <div class="flex flex-col gap-1 sm:col-span-2">

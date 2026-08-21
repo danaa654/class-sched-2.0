@@ -243,7 +243,7 @@ async function confirmRemove() {
             :draggable="false"
             @hide="closeAdd"
         >
-            <InputText v-model="search" placeholder="Search subject code or title" class="w-full mb-3" />
+            <InputText v-uppercase v-model="search" placeholder="Search subject code or title" class="w-full mb-3" />
 
             <div v-if="searching" class="py-8 text-center text-slate-400 text-sm">
                 <i class="pi pi-spin pi-spinner"></i>

@@ -190,6 +190,7 @@ const saveQualifications = () => {
                         <span class="relative w-full block mb-4">
                             <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                             <InputText
+                                v-uppercase
                                 v-model="search"
                                 placeholder="Search Faculty"
                                 class="w-full !pl-9"

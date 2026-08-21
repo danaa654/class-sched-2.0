@@ -298,15 +298,15 @@ const onUpdateAccount = () => {
 
                                 <fieldset :disabled="!canEdit('general')" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-7">
                                     <FloatLabel variant="on">
-                                        <InputText id="schoolName" size="large" v-model="generalForm.school_name" class="w-full" :invalid="!!generalForm.errors.school_name" />
+                                        <InputText v-uppercase id="schoolName" size="large" v-model="generalForm.school_name" class="w-full" :invalid="!!generalForm.errors.school_name" />
                                         <label for="schoolName">School Name *</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
-                                        <InputText id="schoolShortName" size="large" v-model="generalForm.school_short_name" class="w-full" />
+                                        <InputText v-uppercase id="schoolShortName" size="large" v-model="generalForm.school_short_name" class="w-full" />
                                         <label for="schoolShortName">Short Name</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
-                                        <InputText id="schoolContact" size="large" v-model="generalForm.school_contact" class="w-full" />
+                                        <InputText v-uppercase id="schoolContact" size="large" v-model="generalForm.school_contact" class="w-full" />
                                         <label for="schoolContact">Contact Number</label>
                                     </FloatLabel>
 
@@ -357,7 +357,7 @@ const onUpdateAccount = () => {
 
                                 <fieldset :disabled="!canEdit('academic')" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                     <FloatLabel variant="on">
-                                        <InputText id="defaultAY" size="large" v-model="academicForm.default_academic_year" class="w-full" placeholder="e.g. 2026-2027" />
+                                        <InputText v-uppercase id="defaultAY" size="large" v-model="academicForm.default_academic_year" class="w-full" placeholder="e.g. 2026-2027" />
                                         <label for="defaultAY">Default Academic Year</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
@@ -656,22 +656,22 @@ const onUpdateAccount = () => {
                                 <form class="pt-1" autocomplete="off" @submit.prevent="onUpdateAccount">
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                         <FloatLabel variant="on">
-                                            <InputText id="accFirstName" size="large" v-model="accountForm.first_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.first_name" />
+                                            <InputText v-uppercase id="accFirstName" size="large" v-model="accountForm.first_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.first_name" />
                                             <label for="accFirstName">First Name *</label>
                                         </FloatLabel>
                                         <FloatLabel variant="on">
-                                            <InputText id="accMiddleName" size="large" v-model="accountForm.middle_name" class="w-full" autocomplete="off" />
+                                            <InputText v-uppercase id="accMiddleName" size="large" v-model="accountForm.middle_name" class="w-full" autocomplete="off" />
                                             <label for="accMiddleName">Middle Name</label>
                                         </FloatLabel>
                                     </div>
 
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
                                         <FloatLabel variant="on">
-                                            <InputText id="accLastName" size="large" v-model="accountForm.last_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.last_name" />
+                                            <InputText v-uppercase id="accLastName" size="large" v-model="accountForm.last_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.last_name" />
                                             <label for="accLastName">Last Name *</label>
                                         </FloatLabel>
                                         <FloatLabel variant="on">
-                                            <InputText id="accSuffix" size="large" v-model="accountForm.suffix" class="w-full" autocomplete="off" />
+                                            <InputText v-uppercase id="accSuffix" size="large" v-model="accountForm.suffix" class="w-full" autocomplete="off" />
                                             <label for="accSuffix">Suffix</label>
                                         </FloatLabel>
                                     </div>

@@ -417,6 +417,7 @@ const helpPopover = ref(null);
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                 <InputText
+                                    v-uppercase
                                     v-model="academicTermSearch"
                                     placeholder="Search by school year or semester"
                                     class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -653,6 +654,7 @@ const helpPopover = ref(null);
                 <div class="grid grid-cols-1 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="academicTermRemarks"
                             v-model="academicTermForm.remarks"
                             class="w-full"

@@ -480,6 +480,7 @@ const closeSchedule = () => {
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                 <InputText
+                                    v-uppercase
                                     v-model="search"
                                     placeholder="Search by code, name, building or type"
                                     class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -780,6 +781,7 @@ const closeSchedule = () => {
                         Room Name <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="room_name"
                         v-model="roomForm.room_name"
                         placeholder="e.g. Computer Laboratory 2"
@@ -797,6 +799,7 @@ const closeSchedule = () => {
                         Building <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="building"
                         v-model="roomForm.building"
                         placeholder="e.g. Main Building"
@@ -812,6 +815,7 @@ const closeSchedule = () => {
                 <div class="flex flex-col gap-1">
                     <label for="floor" class="text-sm font-medium text-slate-700">Floor</label>
                     <InputText
+                        v-uppercase
                         id="floor"
                         v-model="roomForm.floor"
                         placeholder="e.g. 2nd Floor"

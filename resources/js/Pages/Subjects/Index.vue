@@ -332,6 +332,7 @@ const onDeleteSubject = (subject) => {
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                 <InputText
+                                    v-uppercase
                                     v-model="search"
                                     placeholder="Search by code, title, category or major"
                                     class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -498,6 +499,7 @@ const onDeleteSubject = (subject) => {
                         Subject Code <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="subject_code"
                         v-model="subjectForm.subject_code"
                         placeholder="e.g. IT101, GE103, PE1, NSTP2"
@@ -515,6 +517,7 @@ const onDeleteSubject = (subject) => {
                         Subject Title <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="subject_title"
                         v-model="subjectForm.subject_title"
                         placeholder="e.g. Introduction to Computing"

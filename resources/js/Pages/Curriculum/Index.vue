@@ -417,6 +417,7 @@ const onRestore = (curriculum) => {
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                 <InputText
+                                    v-uppercase
                                     v-model="search"
                                     placeholder="Search by code, name, major or start/end year"
                                     class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -685,6 +686,7 @@ const onRestore = (curriculum) => {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="curriculumCode"
                             v-model="form.code"
                             class="w-full"
@@ -717,6 +719,7 @@ const onRestore = (curriculum) => {
                 <div class="grid grid-cols-1 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="curriculumName"
                             v-model="form.name"
                             class="w-full"

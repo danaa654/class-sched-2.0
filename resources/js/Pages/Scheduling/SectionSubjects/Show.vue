@@ -2808,6 +2808,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                 <InputText
+                                    v-uppercase
                                     v-model="search"
                                     placeholder="Search by code, title or category"
                                     class="neu-inset w-full !rounded-xl !border-none !pl-9"

@@ -1485,7 +1485,7 @@ const removeAssignment = async () => {
             <div>
                 <span class="relative w-full block">
                     <i class="pi pi-search absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                    <InputText v-model="roomSearch" placeholder="Search rooms" class="neu-inset w-full !rounded-lg !border-none !pl-8 !text-xs !py-1.5" />
+                    <InputText v-uppercase v-model="roomSearch" placeholder="Search rooms" class="neu-inset w-full !rounded-lg !border-none !pl-8 !text-xs !py-1.5" />
                 </span>
             </div>
 

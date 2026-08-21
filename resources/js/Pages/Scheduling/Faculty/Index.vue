@@ -285,6 +285,7 @@ const fullName = (faculty) => {
                                 <span class="relative w-full sm:w-80">
                                     <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                     <InputText
+                                        v-uppercase
                                         v-model="search"
                                         placeholder="Search by ID, name, or college"
                                         class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -494,6 +495,7 @@ const fullName = (faculty) => {
                         Faculty ID <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="faculty_id"
                         v-model="facultyForm.faculty_id"
                         placeholder="e.g. F-2026-001"
@@ -533,6 +535,7 @@ const fullName = (faculty) => {
                         First Name <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="first_name"
                         v-model="facultyForm.first_name"
                         placeholder="e.g. Juan"
@@ -548,6 +551,7 @@ const fullName = (faculty) => {
                 <div class="flex flex-col gap-1">
                     <label for="middle_name" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Middle Name</label>
                     <InputText
+                        v-uppercase
                         id="middle_name"
                         v-model="facultyForm.middle_name"
                         placeholder="e.g. Santos"
@@ -565,6 +569,7 @@ const fullName = (faculty) => {
                         Last Name <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="last_name"
                         v-model="facultyForm.last_name"
                         placeholder="e.g. Dela Cruz"
@@ -580,6 +585,7 @@ const fullName = (faculty) => {
                 <div class="flex flex-col gap-1">
                     <label for="suffix" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Suffix</label>
                     <InputText
+                        v-uppercase
                         id="suffix"
                         v-model="facultyForm.suffix"
                         placeholder="e.g. Jr., III"
@@ -675,6 +681,7 @@ const fullName = (faculty) => {
                 <div class="flex flex-col gap-1">
                     <label for="contact_number" class="text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">Contact Number</label>
                     <InputText
+                        v-uppercase
                         id="contact_number"
                         v-model="facultyForm.contact_number"
                         placeholder="Optional"

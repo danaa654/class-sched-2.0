@@ -565,6 +565,7 @@ const onRestoreMajor = (major) => {
                                         <span class="relative w-full sm:w-80">
                                             <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
+                                                v-uppercase
                                                 v-model="collegeSearch"
                                                 placeholder="Search by code, name or short name"
                                                 class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -689,6 +690,7 @@ const onRestoreMajor = (major) => {
                                         <span class="relative w-full sm:w-80">
                                             <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
+                                                v-uppercase
                                                 v-model="departmentSearch"
                                                 placeholder="Search by code, name, short name or college"
                                                 class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -818,6 +820,7 @@ const onRestoreMajor = (major) => {
                                         <span class="relative w-full sm:w-80">
                                             <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
+                                                v-uppercase
                                                 v-model="majorSearch"
                                                 placeholder="Search by code, name, department or college"
                                                 class="neu-inset w-full !rounded-xl !border-none !pl-9"
@@ -961,6 +964,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="collegeCode"
                             v-model="collegeForm.code"
                             class="w-full"
@@ -992,6 +996,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="collegeName"
                             v-model="collegeForm.name"
                             class="w-full"
@@ -1007,6 +1012,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="collegeShortName"
                             v-model="collegeForm.short_name"
                             class="w-full"
@@ -1082,6 +1088,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="departmentCode"
                             v-model="departmentForm.code"
                             class="w-full"
@@ -1113,6 +1120,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="departmentName"
                             v-model="departmentForm.name"
                             class="w-full"
@@ -1128,6 +1136,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="departmentShortName"
                             v-model="departmentForm.short_name"
                             class="w-full"
@@ -1217,6 +1226,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="majorCode"
                             v-model="majorForm.code"
                             class="w-full"
@@ -1248,6 +1258,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="majorName"
                             v-model="majorForm.name"
                             class="w-full"
@@ -1263,6 +1274,7 @@ const onRestoreMajor = (major) => {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
                     <FloatLabel variant="on">
                         <InputText
+                            v-uppercase
                             id="majorShortName"
                             v-model="majorForm.short_name"
                             class="w-full"

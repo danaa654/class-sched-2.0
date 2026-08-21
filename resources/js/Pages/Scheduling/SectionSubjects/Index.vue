@@ -289,6 +289,7 @@ const onDeleteSection = (section) => {
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                 <InputText
+                                    v-uppercase
                                     v-model="search"
                                     placeholder="Search by code, name, major or year"
                                     class="w-full !pl-9"
@@ -435,6 +436,7 @@ const onDeleteSection = (section) => {
                         Section Code <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="section_code"
                         v-model="sectionForm.section_code"
                         placeholder="e.g. BSIT-1A, BSIT-2B"
@@ -452,6 +454,7 @@ const onDeleteSection = (section) => {
                         Section Name <span class="text-red-500">*</span>
                     </label>
                     <InputText
+                        v-uppercase
                         id="section_name"
                         v-model="sectionForm.section_name"
                         placeholder="e.g. Section A"
