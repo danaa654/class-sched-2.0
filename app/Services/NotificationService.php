@@ -474,15 +474,36 @@ class NotificationService
     }
 
     /**
-     * RECIPIENT RULES (spec Section 12) — Dean/OIC of the Section's
-     * own College get finalize/unlock/schedule-update/subject/section
-     * notifications. Never every user, never hardcoded ids — always
-     * resolved from the existing role/College-scope system in
-     * AccessScope. Admin/Registrar are deliberately NOT included here
-     * — they get their own separate notification path
-     * (adminRecipients()/dispatchToAdmins()) for conflicts/failures
-     * only, per spec Section 12's Admin/Registrar list being distinct
-     * from the Dean/OIC list.
+     * RECIPIENT RULES (role + College scoping, spec Sections 2, 9,
+     * 18) — every finalize/unlock/schedule-update/subject/section/
+     * auto-schedule notification is resolved from TWO recipient
+     * groups, combined and deduplicated:
+     *
+     *   1. College-scoped: Dean/OIC of the Section's own College
+     *      (AccessScope::COLLEGE_SCOPED_ROLES, filtered by
+     *      users.college_id). A Dean of CTE never sees a CCS event.
+     *   2. Institution-wide: Administrator + Registrar
+     *      (AccessScope::UNRESTRICTED_ROLES) — always included,
+     *      regardless of which College the Section belongs to,
+     *      because both roles operate institution-wide (spec
+     *      Section 9).
+     *
+     * Never hardcoded ids, never "notify every user" — both groups
+     * are resolved live from AccessScope's role/scope model. The two
+     * groups are concatenated and deduped by user id (spec Section
+     * 11 — a user who happens to qualify through both a College role
+     * and an institution-wide role still gets exactly one
+     * notification), then the actor is excluded (spec Section 10 —
+     * enforced here at the backend, never left to the frontend to
+     * hide).
+     *
+     * Assistant Dean is deliberately NOT included: per
+     * RoleSeeder/AccessScope, Assistant Dean is an institution-wide
+     * GenEd/Minor role, not bound to a single College the way
+     * Dean/OIC are — routing Section-level events to them would be
+     * "notify everyone" by another name. If GenEd/Minor-specific
+     * notifications are added later, give them their own resolver
+     * rather than folding them in here.
      *
      * @return Collection<int, User>
      */
@@ -491,15 +512,23 @@ class NotificationService
         $section->loadMissing('major.department.college');
         $collegeId = $section->major?->college()?->id;
 
-        if (! $collegeId) {
-            return collect();
-        }
+        $collegeScoped = $collegeId
+            ? User::query()
+                ->role(AccessScope::COLLEGE_SCOPED_ROLES)
+                ->where('college_id', $collegeId)
+                ->get()
+            : collect();
 
-        return User::query()
-            ->role(AccessScope::COLLEGE_SCOPED_ROLES)
-            ->where('college_id', $collegeId)
-            ->get()
-            // Don't notify someone of their own action.
+        $institutionWide = User::query()->role(AccessScope::UNRESTRICTED_ROLES)->get();
+
+        return $collegeScoped
+            ->concat($institutionWide)
+            // Same user reachable through both groups (e.g. an
+            // Administrator who is also somehow College-scoped) —
+            // exactly one notification, not two (spec Section 11).
+            ->unique('id')
+            // Don't notify someone of their own action (spec
+            // Section 10).
             ->reject(fn (User $u) => $u->is($actor))
             ->values();
     }

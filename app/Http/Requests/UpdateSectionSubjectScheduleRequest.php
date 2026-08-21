@@ -68,6 +68,12 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             // save proceed despite the warning. See
             // SectionSubjectController::updateSchedule().
             'hours_confirmed' => ['sometimes', 'boolean'],
+            // Set true once the Registrar has explicitly acknowledged a
+            // Room Type Mismatch warning (a Lecture-only subject dropped
+            // into a Laboratory room, or vice versa) — lets the save
+            // proceed despite the warning. See
+            // SectionSubjectController::performScheduleAssignmentUpdate().
+            'room_type_confirmed' => ['sometimes', 'boolean'],
             // Set true once an Administrator has explicitly acknowledged
             // a Teaching Load Limit warning ("⚠ Teaching Load Limit
             // Exceeded") — lets the save proceed despite the faculty

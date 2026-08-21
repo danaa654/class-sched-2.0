@@ -485,7 +485,7 @@ const onDragStartBlock = (block) => {
 // OTHER error key (room_id/faculty_id/days — real Room/Faculty/
 // Section/Time conflicts from ScheduleConflictService) is a hard
 // block and must never be offered a "confirm anyway" retry.
-const CONFIRMABLE_WARNING_KEYS = { capacity: 'capacity_confirmed', hours: 'hours_confirmed' };
+const CONFIRMABLE_WARNING_KEYS = { capacity: 'capacity_confirmed', hours: 'hours_confirmed', room_type: 'room_type_confirmed' };
 
 const writeSchedule = async (subjectId, payload, { successMessage, crossSection = false, silent = false } = {}) => {
     try {
@@ -578,7 +578,23 @@ const writeSchedule = async (subjectId, payload, { successMessage, crossSection 
         if (!silent) {
             toast.add({ severity: 'success', summary: 'Scheduled', detail: successMessage ?? data.message ?? 'Schedule updated.', life: 3000 });
         }
-        emit('row-updated', data.sectionSubject);
+        // CONCURRENCY HARDENING — this write just bumped the
+        // Section's real schedule_version server-side (see
+        // performScheduleAssignmentUpdate()'s bumpScheduleVersion()
+        // call). Previously only `sectionSubject` was emitted here,
+        // so the parent page's `schedulePolling.currentVersion` (the
+        // very value re-sent as `expected_schedule_version` on the
+        // NEXT write, including the next Room Grid drag) never
+        // advanced past what the page loaded with. That made every
+        // save AFTER the first one in a session look stale to the
+        // backend's OCC check — a false "Another user changed this
+        // schedule" even when only one person, in one tab, made every
+        // change. Emitting `schedule_version` here lets the parent
+        // (onRoomGridRowUpdated in Show.vue) call
+        // schedulePolling.acceptVersion() and stay in sync with what
+        // was actually just written, exactly like Save Schedule /
+        // Auto Generate / every other write path already does.
+        emit('row-updated', data.sectionSubject, data.schedule_version);
         await loadRoomSchedule(selectedRoom.value);
         return true;
     } catch (e) {
@@ -1257,6 +1273,24 @@ const minHoursPerWeek = computed(() => {
 
 const assignHoursValid = computed(() => Number(assignForm.value.hoursPerWeek) === Number(assignForm.value.requiredHours));
 
+// ROOM TYPE MISMATCH — mirrors assignHoursValid's "check client-side
+// before Save, confirmable, not a hard block" pattern. A Minor/GenEd
+// (or any Lecture-only) subject dropped into a Laboratory room, or a
+// Laboratory subject dropped into a plain Lecture room, still saves
+// once the Registrar explicitly confirms — see confirmAssign()'s
+// "Room Type Mismatch" Swal below. The authoritative check is still
+// server-side (performScheduleAssignmentUpdate()'s room_type error,
+// caught generically by writeSchedule()'s CONFIRMABLE_WARNING_KEYS)
+// — this is only a same-page heads-up so the Registrar sees it the
+// moment they drop, not only after the round trip.
+const assignRoomTypeValid = computed(() => {
+    const room = selectedRoom.value;
+    const subject = assignForm.value.row?.subject;
+    if (!room?.room_type || !subject) return true;
+    const wantsLaboratory = Number(subject.laboratory_hours ?? 0) > 0;
+    return wantsLaboratory ? room.room_type === 'Laboratory' : room.room_type !== 'Laboratory';
+});
+
 const perMeetingPreview = computed(() => {
     const step = intervalMinutes.value;
     const totalMinutes = (assignForm.value.hoursPerWeek || 0) * 60;
@@ -1349,6 +1383,30 @@ const confirmAssign = async () => {
         }
     }
 
+    // Room Type Mismatch — confirmable, not a hard block. Same
+    // "flagged, not blocked" pattern as Weekly Hours Mismatch above:
+    // the Registrar explicitly confirms before a Lecture-only (e.g.
+    // Minor/GenEd) subject saves into a Laboratory room, or vice
+    // versa.
+    if (!assignRoomTypeValid.value) {
+        assignModalVisible.value = false;
+        const wantsLaboratory = Number(row.subject?.laboratory_hours ?? 0) > 0;
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Room Type Mismatch',
+            html: `<div class="text-left text-sm">${row.subject?.subject_code ?? 'This subject'} is a ${wantsLaboratory ? 'Laboratory' : 'Lecture'} subject, but ${roomLabel(selectedRoom.value)} is a ${selectedRoom.value?.room_type ?? 'different type of'} room.</div>`,
+            showCancelButton: true,
+            confirmButtonText: 'Save Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+            customClass: { container: 'roomgrid-swal-on-top' },
+        });
+        if (!result.isConfirmed) {
+            assignModalVisible.value = true; // reopen so they can adjust
+            return;
+        }
+    }
+
     // Duration per meeting, rounded to the nearest 30 minutes so the
     // grid (hourly rows) still reads cleanly, minimum 30 minutes.
     const totalMinutes = hoursPerWeek * 60;
@@ -1368,6 +1426,7 @@ const confirmAssign = async () => {
         end_time: endTime,
         faculty_id: assignForm.value.facultyId,
         hours_confirmed: !assignHoursValid.value,
+        room_type_confirmed: !assignRoomTypeValid.value,
     }, { successMessage: `${row.subject?.subject_code ?? 'Subject'} ${assignForm.value.editing ? 'updated' : 'scheduled'}.` });
     assignSaving.value = false;
 
@@ -1733,6 +1792,9 @@ const removeAssignment = async () => {
                     </div>
                     <p v-if="!assignDaysValid" class="text-xs text-amber-600 mt-1">
                         Select exactly {{ assignForm.meetingsPerWeek }} day(s) to match Meetings/Week.
+                    </p>
+                    <p v-if="!assignRoomTypeValid" class="text-xs text-amber-600 mt-1">
+                        {{ selectedRoom?.room_name ?? 'This room' }} is a {{ selectedRoom?.room_type }} room, but {{ assignForm.row?.subject?.subject_code ?? 'this subject' }} is a {{ Number(assignForm.row?.subject?.laboratory_hours ?? 0) > 0 ? 'Laboratory' : 'Lecture' }} subject — you'll be asked to confirm before saving.
                     </p>
                     <p v-if="!assignHoursValid" class="text-xs text-amber-600 mt-1">
                         Hours/Week doesn't match {{ assignForm.row?.subject?.subject_code ?? 'this subject' }}'s required {{ assignForm.requiredHours }} hrs/week — you'll be asked to confirm before saving.

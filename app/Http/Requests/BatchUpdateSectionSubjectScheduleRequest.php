@@ -58,6 +58,10 @@ class BatchUpdateSectionSubjectScheduleRequest extends FormRequest
             // for a Weekly Hours Mismatch (scheduled Days x Time
             // doesn't add up to the Subject's required weekly hours).
             'rows.*.hours_confirmed' => ['nullable', 'boolean'],
+            // Same acknowledgment pattern as capacity_confirmed above,
+            // for a Room Type Mismatch (a Lecture-only subject dropped
+            // into a Laboratory room, or vice versa).
+            'rows.*.room_type_confirmed' => ['nullable', 'boolean'],
             // CONCURRENCY HARDENING — Optimistic Concurrency Control.
             // One version check for the whole batch: the Section's
             // schedule_version the frontend last loaded (or that the

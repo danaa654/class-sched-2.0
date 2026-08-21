@@ -232,6 +232,12 @@ const stateFor = (rowId) => {
             capacityConfirmed: Boolean(row?.capacity_confirmed),
             workloadConfirmed: false,
             hoursConfirmed: Boolean(row?.hours_confirmed),
+            // Room Type Mismatch (Lecture-only subject in a Laboratory
+            // room, or vice versa) — not persisted server-side (same as
+            // workloadConfirmed above), so it always starts unconfirmed
+            // and must be re-confirmed each session; onRoomChange below
+            // resets it the moment the Room actually changes too.
+            roomTypeConfirmed: false,
         };
     }
     return rowState[rowId];
@@ -734,6 +740,30 @@ const tableConflicts = computed(() => {
             }
         }
 
+        // Room Type Mismatch Warning — a Lecture-only (e.g. Minor/
+        // GenEd) subject manually assigned to a Laboratory room, or a
+        // Laboratory subject assigned to a plain Lecture room.
+        // Confirmable, not a hard block — mirrors the Room Capacity
+        // Warning above exactly, and the same room_type check the
+        // server runs on Save Schedule (SectionSubjectController).
+        if (a.room_id) {
+            const room = roomsById.value[a.room_id];
+            if (room && room.room_type && !stateFor(a.id).roomTypeConfirmed) {
+                const wantsLaboratory = Number(a.subject?.laboratory_hours ?? 0) > 0;
+                const typeMismatch = wantsLaboratory
+                    ? room.room_type !== 'Laboratory'
+                    : room.room_type === 'Laboratory';
+                if (typeMismatch) {
+                    list.push({
+                        type: 'roomType',
+                        rowIds: [a.id],
+                        label: 'Room Type Mismatch',
+                        detail: `${a.subject?.subject_code ?? 'Subject'} is a ${wantsLaboratory ? 'Laboratory' : 'Lecture'} subject, but ${room.room_name} is a ${room.room_type} room.`,
+                    });
+                }
+            }
+        }
+
         // Faculty/Room/Section Double-Booking — set on the row when a
         // manual Time override (see onTimeOverride) was applied
         // against a slot ScheduleConflictService already found
@@ -853,10 +883,16 @@ const unconfirmedHoursRowIds = computed(() =>
     tableConflicts.value.filter((c) => c.type === 'hours').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).hoursConfirmed),
 );
 
+// Rows with an unconfirmed Room Type Mismatch — confirmable, same
+// pattern as unconfirmedCapacityRowIds/unconfirmedHoursRowIds above.
+const unconfirmedRoomTypeRowIds = computed(() =>
+    tableConflicts.value.filter((c) => c.type === 'roomType').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).roomTypeConfirmed),
+);
+
 // A row is "blocking" (true Conflict — Faculty/Room/Section) if it
-// appears in any non-capacity conflict entry.
+// appears in any non-capacity/hours/roomType conflict entry.
 const blockingConflictRowIds = computed(
-    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity' && c.type !== 'hours').flatMap((c) => c.rowIds)),
+    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity' && c.type !== 'hours' && c.type !== 'roomType').flatMap((c) => c.rowIds)),
 );
 
 const rowHasBlockingConflict = (rowId) => blockingConflictRowIds.value.has(rowId);
@@ -887,6 +923,7 @@ const facultyConflictRowIds = computed(() => new Set(tableConflicts.value.filter
 const roomConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'room').flatMap((c) => c.rowIds)));
 const sectionConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'section').flatMap((c) => c.rowIds)));
 const rowHasCapacityWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'capacity' && c.rowIds.includes(rowId));
+const rowHasRoomTypeWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'roomType' && c.rowIds.includes(rowId));
 
 const conflictTooltip = (rowId) => {
     const clientMessages = tableConflicts.value
@@ -1245,11 +1282,34 @@ const pageTab = ref('subjects');
 // save, not staged like the spreadsheet's dirty-row batch), so the
 // fresh row it returns is merged into `rows` the same way Faculty/
 // Room override selectors already do above.
-const onRoomGridRowUpdated = (fresh) => {
-    if (!fresh) return;
-    const row = rows.value.find((r) => r.id === fresh.id);
-    if (row) {
-        Object.assign(row, { ...fresh, days: toDaysArray(fresh.days) });
+//
+// BUG FIX — Room Grid drags kept triggering a false "Another user
+// changed this schedule" on the very next save, even in a single-user
+// session. Each successful drag DOES bump the Section's real
+// schedule_version server-side, but this handler previously only
+// updated the local `rows` array — it never told schedulePolling
+// about the new version. So `schedulePolling.currentVersion` (sent
+// back as `expected_schedule_version` on every subsequent write —
+// see RoomGrid.vue's writeSchedule() and this page's saveSchedule())
+// stayed frozen at whatever the page loaded with, while the DB kept
+// moving forward with every drag. The very next write of ANY kind —
+// another drag, or clicking Save Schedule on the Subjects tab — then
+// failed ScheduleConflictService::checkSectionVersion()'s check
+// against a version that was already stale, purely because of this
+// page's own earlier successful saves, not another user's. Now that
+// RoomGrid.vue emits the fresh schedule_version alongside the row,
+// accepting it here keeps this page's baseline correct after every
+// single drag, the same way saveSchedule()/autoGenerate()/etc. below
+// already do for their own writes.
+const onRoomGridRowUpdated = (fresh, scheduleVersion) => {
+    if (fresh) {
+        const row = rows.value.find((r) => r.id === fresh.id);
+        if (row) {
+            Object.assign(row, { ...fresh, days: toDaysArray(fresh.days) });
+        }
+    }
+    if (typeof scheduleVersion === 'number') {
+        schedulePolling.acceptVersion(scheduleVersion);
     }
 };
 
@@ -1304,9 +1364,11 @@ const onRoomChange = (row, value) => {
     if (value === '__loading__') return;
     row.room_id = value;
     markDirty(row, 'room_id');
-    // A new Room means any previous Capacity Warning confirmation no
-    // longer applies — it must be re-confirmed against the new Room.
+    // A new Room means any previous Capacity Warning / Room Type
+    // Mismatch confirmation no longer applies — both must be
+    // re-confirmed against the new Room.
     stateFor(row.id).capacityConfirmed = false;
+    stateFor(row.id).roomTypeConfirmed = false;
     fetchBusyTimes(row);
 };
 const onDaysChange = (row, value) => {
@@ -1480,6 +1542,34 @@ const saveSchedule = async () => {
         });
     }
 
+    // Room Type Mismatch — also confirmable, not a hard block. Some
+    // rooms legitimately double up as both Lecture and Laboratory
+    // space; this just makes sure the Registrar explicitly sees and
+    // accepts the mismatch before it's saved.
+    const stillUnconfirmedRoomType = unconfirmedRoomTypeRowIds.value;
+    if (stillUnconfirmedRoomType.length > 0) {
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Room Type Mismatch',
+            html: tableConflicts.value
+                .filter((c) => c.type === 'roomType' && stillUnconfirmedRoomType.includes(c.rowIds[0]))
+                .map((c) => `<div class="text-left text-sm">${c.detail}</div>`)
+                .join(''),
+            showCancelButton: true,
+            confirmButtonText: 'Save Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+        });
+
+        if (!result.isConfirmed) {
+            return;
+        }
+
+        stillUnconfirmedRoomType.forEach((rowId) => {
+            stateFor(rowId).roomTypeConfirmed = true;
+        });
+    }
+
     savingSchedule.value = true;
 
     const buildPayload = () =>
@@ -1494,6 +1584,7 @@ const saveSchedule = async () => {
             capacity_confirmed: Boolean(stateFor(row.id).capacityConfirmed),
             workload_confirmed: Boolean(stateFor(row.id).workloadConfirmed),
             hours_confirmed: Boolean(stateFor(row.id).hoursConfirmed),
+            room_type_confirmed: Boolean(stateFor(row.id).roomTypeConfirmed),
         }));
 
     const submit = async () => {
@@ -2631,7 +2722,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         >
                             <Tag
                                 :value="conflict.label"
-                                :severity="conflict.type === 'capacity' || conflict.type === 'hours' ? 'warning' : 'danger'"
+                                :severity="conflict.type === 'capacity' || conflict.type === 'hours' || conflict.type === 'roomType' ? 'warning' : 'danger'"
                                 class="!text-xs shrink-0"
                             />
                             <span class="text-slate-600">{{ conflict.detail }}</span>
@@ -2838,7 +2929,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Discard Suggestions to discard it."
                                                 />
                                                 <i
-                                                    v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id)"
+                                                    v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id) || rowHasRoomTypeWarning(data.id)"
                                                     class="pi pi-exclamation-triangle"
                                                     :class="rowIsInConflict(data) ? 'text-red-500' : 'text-amber-500'"
                                                     :title="rowIsInConflict(data) ? (conflictTooltip(data.id) || 'Conflict — click the row to find the best schedule') : (conflictTooltip(data.id) || 'Unresolved scheduling conflict')"
@@ -3011,6 +3102,9 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                             </p>
                                             <p v-else-if="rowHasCapacityWarning(data.id)" class="text-amber-600 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>Section capacity exceeds this room's capacity.
+                                            </p>
+                                            <p v-else-if="rowHasRoomTypeWarning(data.id)" class="text-amber-600 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>Room type doesn't match this subject — you'll be asked to confirm before saving.
                                             </p>
                                         </div>
 

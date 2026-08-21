@@ -30,6 +30,21 @@ use Illuminate\Support\Facades\Schema;
  * Defaults to 1 (not 0) so "no version supplied yet" (null) can never
  * be confused with "loaded version 0" by an older/partial frontend
  * payload.
+ *
+ * ACTOR-AWARE VERSION — `schedule_version_updated_by` records WHO
+ * most recently advanced schedule_version. Plain version-number
+ * polling can't tell "a different user changed this Section" apart
+ * from "the SAME user bumped it from a second tab, or a different
+ * page like the Subject Assignment screen" — both look identical as
+ * a bare integer change, and the latter would otherwise fire a false
+ * "Another user changed this schedule" warning on a Section nobody
+ * else has touched. The version-check endpoint
+ * (SectionSubjectController::scheduleVersion()) returns this
+ * alongside schedule_version so the frontend can compare it against
+ * the logged-in user and only warn when it's genuinely someone else.
+ * Nullable: a version bump from a system/console context with no
+ * authenticated user has no known actor — treated as "unknown" and
+ * still warned about (fail toward caution, not toward silence).
  */
 return new class extends Migration
 {
@@ -37,12 +52,18 @@ return new class extends Migration
     {
         Schema::table('sections', function (Blueprint $table) {
             $table->unsignedBigInteger('schedule_version')->default(1)->after('remarks');
+            $table->foreignId('schedule_version_updated_by')
+                ->nullable()
+                ->after('schedule_version')
+                ->constrained('users')
+                ->nullOnDelete();
         });
     }
 
     public function down(): void
     {
         Schema::table('sections', function (Blueprint $table) {
+            $table->dropConstrainedForeignId('schedule_version_updated_by');
             $table->dropColumn('schedule_version');
         });
     }

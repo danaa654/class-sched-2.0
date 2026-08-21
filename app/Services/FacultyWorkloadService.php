@@ -108,6 +108,50 @@ class FacultyWorkloadService
     }
 
     /**
+     * BATCHED "current load" LOOKUP — the N+1-free counterpart to
+     * calling currentLoad() once per Faculty in a loop.
+     *
+     * SectionSubjectController::show() needs `current_load` for every
+     * Active Faculty member so the scheduling table's Faculty dropdown
+     * can show it next to each option. Doing that via currentLoad()
+     * inside a ->map() over the whole Faculty roster runs one fresh
+     * SectionSubject query per Faculty member (activePlacements()
+     * queries individually, scoped by faculty_id) — on a roster of
+     * N Active Faculty that's N extra round trips on every single
+     * Section click, which is what was actually making that page slow
+     * to load. RoomUtilizationService::summarizeRooms() already avoids
+     * this for Rooms by loading every placement once and grouping in
+     * memory; this does the same thing for Faculty.
+     *
+     * @param  \Illuminate\Support\Collection<int, Faculty>  $faculty
+     * @return array<int, int> Faculty id => current load
+     */
+    public function currentLoadsFor($faculty): array
+    {
+        $facultyIds = $faculty->pluck('id')->all();
+
+        if (empty($facultyIds)) {
+            return [];
+        }
+
+        $placementsByFaculty = SectionSubject::query()
+            ->whereIn('faculty_id', $facultyIds)
+            ->whereIn('status', ['Scheduled', 'Draft'])
+            ->whereIn('section_id', $this->conflictService->activeSemesterSectionIds())
+            ->whereNull('merged_into_section_subject_id')
+            ->with('subject:id,units,lecture_hours,laboratory_hours')
+            ->get()
+            ->filter(fn (SectionSubject $ss) => $ss->subject !== null)
+            ->groupBy('faculty_id');
+
+        return $faculty->mapWithKeys(function (Faculty $facultyMember) use ($placementsByFaculty) {
+            $placements = $placementsByFaculty->get($facultyMember->id, collect());
+
+            return [$facultyMember->id => $this->sumLoad($facultyMember, $placements)];
+        })->all();
+    }
+
+    /**
      * How many Subjects (placements) this Faculty member is currently
      * carrying in the active semester — the "Number of Assigned
      * Subjects" field the Faculty profile exposes.

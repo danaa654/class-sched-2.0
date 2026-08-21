@@ -302,37 +302,52 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // per-row client-side without a round trip per cell. General
         // Education Faculty are qualified for every "General Education"
         // subject regardless of their explicit pivot rows.
-        $activeFaculty = Faculty::query()
+        $activeFacultyList = Faculty::query()
             ->where('status', 'Active')
             ->with(['subjects:id', 'college:id,name,short_name'])
             ->orderBy('last_name')
             ->orderBy('first_name')
-            ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'college_id', 'max_teaching_units'])
-            ->map(fn (Faculty $faculty) => [
-                'id' => $faculty->id,
-                'full_name' => $faculty->full_name,
-                'faculty_category' => $faculty->faculty_category,
-                'qualified_subject_ids' => $faculty->subjects->pluck('id'),
-                // college_id/college_name — MUST be sent so the
-                // scheduling table's client-side grouping
-                // (facultyGroupsFor in Show.vue) can tell which
-                // College a Faculty member belongs to and group them
-                // the same way Rooms are grouped by type. This was
-                // previously queried but dropped before being handed
-                // to the frontend, which silently broke College-based
-                // grouping (every faculty landed in one flat "Other
-                // Active Faculty" bucket regardless of College).
-                'college_id' => $faculty->college_id,
-                'college_name' => $faculty->college?->short_name ?? $faculty->college?->name ?? 'General Education',
-                // Teaching Load, same source (FacultyWorkloadService)
-                // the recommendation ranking and Save Schedule's
-                // workload guard already use — shown next to every
-                // Faculty option (not just recommended ones) so the
-                // Registrar sees at a glance how close to capacity a
-                // manual pick is before assigning them.
-                'current_load' => $this->workloadService->currentLoad($faculty),
-                'max_teaching_units' => $faculty->max_teaching_units,
-            ]);
+            ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'college_id', 'max_teaching_units']);
+
+        // PERFORMANCE: current_load for every Active Faculty member,
+        // computed in ONE batched query (currentLoadsFor()) instead of
+        // one query per Faculty member. Calling
+        // FacultyWorkloadService::currentLoad($faculty) inside the
+        // ->map() below — as this used to do — re-runs
+        // activePlacements()'s SectionSubject query separately for
+        // each Faculty member, which on a full Active roster meant a
+        // fresh DB round trip per Faculty every time this page loaded.
+        // That N+1 was the actual cause of Section pages taking a
+        // while to open. Mirrors how $roomUtilization below already
+        // batches per-Room figures via summarizeRooms() instead of
+        // calling into RoomUtilizationService per Room.
+        $facultyCurrentLoads = $this->workloadService->currentLoadsFor($activeFacultyList);
+
+        $activeFaculty = $activeFacultyList->map(fn (Faculty $faculty) => [
+            'id' => $faculty->id,
+            'full_name' => $faculty->full_name,
+            'faculty_category' => $faculty->faculty_category,
+            'qualified_subject_ids' => $faculty->subjects->pluck('id'),
+            // college_id/college_name — MUST be sent so the
+            // scheduling table's client-side grouping
+            // (facultyGroupsFor in Show.vue) can tell which
+            // College a Faculty member belongs to and group them
+            // the same way Rooms are grouped by type. This was
+            // previously queried but dropped before being handed
+            // to the frontend, which silently broke College-based
+            // grouping (every faculty landed in one flat "Other
+            // Active Faculty" bucket regardless of College).
+            'college_id' => $faculty->college_id,
+            'college_name' => $faculty->college?->short_name ?? $faculty->college?->name ?? 'General Education',
+            // Teaching Load, same source (FacultyWorkloadService)
+            // the recommendation ranking and Save Schedule's
+            // workload guard already use — shown next to every
+            // Faculty option (not just recommended ones) so the
+            // Registrar sees at a glance how close to capacity a
+            // manual pick is before assigning them.
+            'current_load' => $facultyCurrentLoads[$faculty->id] ?? 0,
+            'max_teaching_units' => $faculty->max_teaching_units,
+        ]);
 
         $activeRoomsList = Room::query()
             ->where('status', 'Active')
@@ -576,10 +591,36 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // Room Capacity Warning — Section Capacity > Room Capacity is not
         // a hard block, but the Registrar must explicitly confirm before
         // it's allowed to save (see UpdateSectionSubjectScheduleRequest).
-        if ($roomId && $capacity) {
+        $room = null;
+        if ($roomId) {
             $room = Room::find($roomId);
-            if ($room && $capacity > $room->capacity && ! $request->boolean('capacity_confirmed')) {
-                $errors['capacity'] = "Section Capacity ({$capacity}) exceeds this room's capacity ({$room->capacity}). "
+        }
+
+        if ($room && $capacity && $capacity > $room->capacity && ! $request->boolean('capacity_confirmed')) {
+            $errors['capacity'] = "Section Capacity ({$capacity}) exceeds this room's capacity ({$room->capacity}). "
+                .'Confirm to save anyway.';
+        }
+
+        // Room Type Mismatch Warning — a Minor/GenEd (or any Lecture-only)
+        // subject dropped into a Laboratory room, or a subject that needs
+        // lab time booked into a plain Lecture room. Not a hard block —
+        // some rooms legitimately double up — so this follows the exact
+        // same "flagged, not blocked" pattern as Room Capacity above:
+        // needs an explicit room_type_confirmed=true to save anyway. See
+        // RoomGrid.vue's confirmAssign()/writeSchedule() and
+        // SectionSubjects/Show.vue's tableConflicts() for where the
+        // Registrar is prompted to confirm.
+        $subject->loadMissing('subject');
+        if ($room && $room->room_type && ! $request->boolean('room_type_confirmed')) {
+            $wantsLaboratory = (int) $subject->subject->laboratory_hours > 0;
+            $typeMismatch = $wantsLaboratory
+                ? $room->room_type !== 'Laboratory'
+                : $room->room_type === 'Laboratory';
+
+            if ($typeMismatch) {
+                $errors['room_type'] = "{$subject->subject->subject_code} is a "
+                    .($wantsLaboratory ? 'Laboratory' : 'Lecture')
+                    ." subject, but {$room->room_name} is a {$room->room_type} room. "
                     .'Confirm to save anyway.';
             }
         }
@@ -1421,6 +1462,19 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 'section:id,section_code,section_name,section_type,major_id,is_finalized',
                 'section.major:id,name,code,department_id',
                 'section.major.department:id,name,college_id',
+                // PERFORMANCE FIX — every row's authorization check below
+                // (Gate::allows('moveScheduleAssignment', ...) ->
+                // SectionPolicy::canAccess() -> Major::college() ->
+                // $this->department?->college) reads the Department's
+                // College. Without eager-loading it here, that single
+                // property access lazy-loads a fresh `colleges` query for
+                // EVERY assignment row in this room — an N+1 that's the
+                // actual cause of Room Grid taking noticeably longer to
+                // load for busy rooms (more scheduled subjects = more
+                // queries = more time). Eager-loading it once up front
+                // turns that into a single extra query no matter how many
+                // rows this room has.
+                'section.major.department.college:id',
             ])
             ->get()
             ->map(function (SectionSubject $assignment) use ($section, $user) {
@@ -2096,10 +2150,28 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 // Room Capacity Warning — not a hard block, but the
                 // Registrar must explicitly confirm this row before it's
                 // allowed to save (see BatchUpdateSectionSubjectScheduleRequest).
-                if ($roomId && $capacity) {
-                    $room = Room::find($roomId);
-                    if ($room && $capacity > $room->capacity && empty($rowData['capacity_confirmed'])) {
-                        $rowErrors['capacity'] = "Section Capacity ({$capacity}) exceeds this room's capacity ({$room->capacity}). "
+                $room = $roomId ? Room::find($roomId) : null;
+
+                if ($room && $capacity && $capacity > $room->capacity && empty($rowData['capacity_confirmed'])) {
+                    $rowErrors['capacity'] = "Section Capacity ({$capacity}) exceeds this room's capacity ({$room->capacity}). "
+                        .'Confirm to save anyway.';
+                }
+
+                // Room Type Mismatch Warning — same rule/gate as
+                // performScheduleAssignmentUpdate() above, run here too
+                // since a batch save can persist rows that never went
+                // through the single-cell endpoint (e.g. Auto Generate
+                // results accepted as-is).
+                if ($room && $room->room_type && empty($rowData['room_type_confirmed'])) {
+                    $wantsLaboratory = (int) $subject->subject->laboratory_hours > 0;
+                    $typeMismatch = $wantsLaboratory
+                        ? $room->room_type !== 'Laboratory'
+                        : $room->room_type === 'Laboratory';
+
+                    if ($typeMismatch) {
+                        $rowErrors['room_type'] = "{$subject->subject->subject_code} is a "
+                            .($wantsLaboratory ? 'Laboratory' : 'Lecture')
+                            ." subject, but {$room->room_name} is a {$room->room_type} room. "
                             .'Confirm to save anyway.';
                     }
                 }
