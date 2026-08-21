@@ -944,12 +944,145 @@ const closeAddSection = () => {
     manualSubjectsError.value = '';
 };
 
-const onSaveBatch = () => {
+// ARCHIVED-SECTION DETECTION (Rule 10) — called once per preview row
+// right before Save. Returns the archived Section payload from
+// checkArchived(), or null when no match exists for that row.
+const checkArchivedFor = async (row) => {
+    try {
+        const response = await fetch(route('scheduling.sections.check-archived'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-XSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({
+                major_id: batchForm.major_id,
+                section_code: (row.section_code || '').trim(),
+                academic_year: batchForm.academic_year,
+                semester: batchForm.semester,
+                year_level: batchForm.year_level,
+            }),
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const body = await response.json();
+        return body?.archived ?? null;
+    } catch (error) {
+        // A failed check should never block Save outright — worst
+        // case, the admin just doesn't get the Restore prompt for
+        // this one row and ends up creating a fresh instance, exactly
+        // like today's behavior before this feature existed.
+        return null;
+    }
+};
+
+// Presents the Restore Existing Section / Create New Section Instance
+// / Cancel choice (Rule 3, Rule 10) for ONE row that matched an
+// archived Section. Returns 'restore' | 'new' | 'cancel'.
+const promptArchivedChoice = async (row, archived) => {
+    const subjectCount = archived.section_subjects_count ?? 0;
+    const result = await Swal.fire({
+        title: `${row.section_code} was previously archived`,
+        html: `This section was deleted before${subjectCount ? ` with <b>${subjectCount}</b> subject${subjectCount === 1 ? '' : 's'} and their original EDP codes` : ''}. Restore it, or create a brand-new section instance instead?`,
+        icon: 'question',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: 'Restore Existing Section',
+        denyButtonText: 'Create New Section Instance',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#16A34A',
+        denyButtonColor: '#4F46E5',
+        reverseButtons: true,
+        // STACKING FIX — see the matching comment in
+        // SectionSubjects/Index.vue's promptArchivedChoice(): without
+        // this, the prompt renders behind this page's own "Add
+        // Section" PrimeVue Dialog (still open behind it mid-submit)
+        // instead of on top of it.
+        customClass: { container: 'swal-above-dialog' },
+        didOpen: (popup) => {
+            const container = popup.closest('.swal2-container');
+            if (container) {
+                container.style.zIndex = 20000;
+            }
+        },
+    });
+
+    if (result.isConfirmed) return 'restore';
+    if (result.isDenied) return 'new';
+    return 'cancel';
+};
+
+// Runs the archived-section check across every row in the current
+// preview batch, resolving each conflict with the admin one at a
+// time. Rows the admin restores are handled immediately via the
+// restore endpoint and dropped from the batch (their original
+// subjects/EDP codes are already in place — nothing left to create);
+// rows left as "new instance" continue through storeBatch() exactly
+// as before. Returns false if the admin cancels out of Save entirely.
+const resolveArchivedConflicts = async () => {
+    const remaining = [];
+
+    for (const row of previewSections.value) {
+        const archived = await checkArchivedFor(row);
+
+        if (!archived) {
+            remaining.push(row);
+            continue;
+        }
+
+        const choice = await promptArchivedChoice(row, archived);
+
+        if (choice === 'cancel') {
+            return false;
+        }
+
+        if (choice === 'restore') {
+            await new Promise((resolve) => {
+                router.put(route('scheduling.sections.restore', archived.id), {}, {
+                    preserveScroll: true,
+                    onFinish: resolve,
+                });
+            });
+            continue; // restored — not part of the create batch
+        }
+
+        remaining.push(row); // 'new' — keep creating a fresh instance
+    }
+
+    previewSections.value = remaining;
+    return true;
+};
+
+const onSaveBatch = async () => {
     if (batchForm.processing || !canSaveBatch.value) {
         return;
     }
 
     nameErrors.value = {};
+
+    const shouldContinue = await resolveArchivedConflicts();
+    if (!shouldContinue) {
+        return;
+    }
+
+    if (previewSections.value.length === 0) {
+        // Every row in the batch was restored — nothing left to
+        // create, so skip straight to a fresh list instead of
+        // posting an empty "sections" array.
+        closeAddSection();
+        Swal.fire({
+            title: 'Section restored',
+            text: 'The archived section was restored with its original EDP codes.',
+            icon: 'success',
+            confirmButtonColor: '#16A34A',
+        });
+        onRefresh();
+        return;
+    }
 
     batchForm
         .transform((data) => ({
@@ -1010,22 +1143,84 @@ const removePreviewRow = (index) => {
     previewSections.value.splice(index, 1);
 };
 
+// DELETE CONFIRMATION — three tiers, per what's actually at stake:
+//
+//   1. Finalized schedule: deletion is blocked outright (also
+//      enforced server-side in SectionController::destroy() — this
+//      is just the friendlier, immediate frontend message). Must be
+//      unlocked first.
+//   2. No subjects placed yet: single confirmation is enough —
+//      there's no scheduling work to lose.
+//   3. Has subjects placed (partial OR fully scheduled — Draft/
+//      Scheduled/Conflict rows all count, since any of them
+//      represents real work): a first confirmation explaining the
+//      section is archived (not permanently destroyed) and can be
+//      restored later, THEN a second step requiring the admin to
+//      type the section's own name to proceed — the typed-confirmation
+//      pattern used for genuinely destructive actions elsewhere in
+//      the app, here specifically to prevent a stray misclick from
+//      wiping out a section someone has already been scheduling.
+const performSectionDelete = (section) => {
+    router.delete(route('scheduling.sections.destroy', section.id), {
+        preserveScroll: true,
+        onSuccess: () => onRefresh(),
+    });
+};
+
 const onDeleteSection = (section) => {
+    if (section.is_finalized) {
+        Swal.fire({
+            title: 'Schedule is finalized',
+            html: `<strong>${section.section_code}</strong>'s schedule is finalized and locked. Unlock it first (Actions → Unlock Schedule) before it can be deleted.`,
+            icon: 'info',
+            confirmButtonColor: '#4F46E5',
+            confirmButtonText: 'Got it',
+        });
+        return;
+    }
+
+    const hasSubjects = (section.total_subjects_count ?? 0) > 0;
+
     Swal.fire({
         title: 'Delete this section?',
-        text: `${section.section_name} will be permanently deleted.`,
+        html: `<p>${section.section_code} — ${section.section_name} will be <strong>archived</strong>, not permanently deleted.</p>
+               <p style="margin-top:8px;">Its subjects and EDP codes stay on record and can be brought back later — re-enter the same section name on Add Section and you'll be offered the option to restore it.</p>
+               ${hasSubjects ? `<p style="margin-top:8px;color:#DC2626;">This section already has ${section.total_subjects_count} subject${section.total_subjects_count === 1 ? '' : 's'} placed on it — you'll be asked to confirm once more.</p>` : ''}`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
         cancelButtonColor: '#64748B',
-        confirmButtonText: 'Yes, delete it',
-    }).then((result) => {
-        if (result.isConfirmed) {
-            router.delete(route('scheduling.sections.destroy', section.id), {
-                preserveScroll: true,
-                onSuccess: () => onRefresh(),
-            });
+        confirmButtonText: hasSubjects ? 'Continue' : 'Yes, delete it',
+        cancelButtonText: 'Cancel',
+    }).then((firstResult) => {
+        if (!firstResult.isConfirmed) {
+            return;
         }
+
+        if (!hasSubjects) {
+            performSectionDelete(section);
+            return;
+        }
+
+        Swal.fire({
+            title: 'Type the section name to confirm',
+            html: `To confirm deleting <strong>${section.section_code}</strong>, type its name below exactly.`,
+            input: 'text',
+            inputPlaceholder: section.section_code,
+            showCancelButton: true,
+            confirmButtonText: 'Delete Section',
+            confirmButtonColor: '#DC2626',
+            cancelButtonText: 'Cancel',
+            inputValidator: (value) => {
+                if ((value || '').trim() !== section.section_code) {
+                    return "That doesn't match — type the section name exactly to confirm.";
+                }
+            },
+        }).then((secondResult) => {
+            if (secondResult.isConfirmed) {
+                performSectionDelete(section);
+            }
+        });
     });
 };
 

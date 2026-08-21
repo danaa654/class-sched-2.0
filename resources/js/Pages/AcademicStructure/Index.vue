@@ -170,10 +170,16 @@ const onSaveCollege = () => {
     }
 };
 
+// DELETE GATE — CollegeController::destroy() blocks this (errors.code)
+// when the college still has active Departments/Faculty/Subjects/
+// Rooms/Users attached — see that method's docblock. Confirmation
+// here is just a heads-up; the follow-up alert on rejection names
+// exactly what's still attached.
 const onDeleteCollege = (college) => {
     Swal.fire({
-        title: 'Are you sure you want to delete this college?',
-        text: college.name,
+        title: 'Delete this college?',
+        html: `<p>${college.name} will be archived, not permanently deleted — it can be restored later.</p>
+               <p style="margin-top:8px;">If it still has departments, faculty, subjects, rooms, or users attached, deletion will be blocked until those are removed or reassigned.</p>`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
@@ -184,6 +190,15 @@ const onDeleteCollege = (college) => {
             router.delete(route('colleges.destroy', college.id), {
                 preserveScroll: true,
                 preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't delete this college",
+                        text: errors.code ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#DC2626',
+                        confirmButtonText: 'Got it',
+                    });
+                },
             });
         }
     });
@@ -310,10 +325,14 @@ const onSaveDepartment = () => {
     }
 };
 
+// DELETE GATE — DepartmentController::destroy() blocks this
+// (errors.code) when the department still has active Majors/Rooms/
+// Users attached — see that method's docblock.
 const onDeleteDepartment = (department) => {
     Swal.fire({
-        title: 'Are you sure you want to delete this department?',
-        text: department.name,
+        title: 'Delete this department?',
+        html: `<p>${department.name} will be archived, not permanently deleted — it can be restored later.</p>
+               <p style="margin-top:8px;">If it still has majors, rooms, or users attached, deletion will be blocked until those are removed or reassigned.</p>`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
@@ -324,6 +343,15 @@ const onDeleteDepartment = (department) => {
             router.delete(route('departments.destroy', department.id), {
                 preserveScroll: true,
                 preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't delete this department",
+                        text: errors.code ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#DC2626',
+                        confirmButtonText: 'Got it',
+                    });
+                },
             });
         }
     });
@@ -483,10 +511,14 @@ const onSaveMajor = () => {
     }
 };
 
+// DELETE GATE — MajorController::destroy() blocks this (errors.code)
+// when the major still has active Sections/Curriculums/Subjects
+// attached — see that method's docblock.
 const onDeleteMajor = (major) => {
     Swal.fire({
-        title: 'Are you sure you want to delete this major?',
-        text: major.name,
+        title: 'Delete this major?',
+        html: `<p>${major.name} will be archived, not permanently deleted — it can be restored later.</p>
+               <p style="margin-top:8px;">If it still has sections, curriculums, or subjects attached, deletion will be blocked until those are removed or reassigned.</p>`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
@@ -497,6 +529,15 @@ const onDeleteMajor = (major) => {
             router.delete(route('majors.destroy', major.id), {
                 preserveScroll: true,
                 preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't delete this major",
+                        text: errors.code ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#DC2626',
+                        confirmButtonText: 'Got it',
+                    });
+                },
             });
         }
     });

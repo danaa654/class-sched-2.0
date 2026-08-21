@@ -560,14 +560,118 @@ class SectionController extends Controller
 
     /**
      * Delete a section.
+     *
+     * ARCHIVE, NOT DESTROY — Section already uses SoftDeletes, so this
+     * is a soft delete: the row and its EDP-code history stay in the
+     * database (only `deleted_at` is set), and its SectionSubject
+     * rows are left completely untouched (SectionSubject has no
+     * cascadeOnDelete trigger on a soft delete — only on a real one),
+     * so every historical edp_code on this Section survives intact
+     * for audit purposes. See checkArchived()/restore() below for how
+     * the Add Section modal detects and reopens this later.
+     *
+     * FINALIZED SECTIONS CANNOT BE DELETED — mirrors the frontend
+     * guard in onDeleteSection() (both Sections/Index.vue and
+     * SectionSubjects/Index.vue), but enforced here too since the
+     * frontend check alone can't be trusted against a direct/scripted
+     * request. A finalized schedule represents work the Dean/OIC
+     * signed off on; it must be explicitly unlocked (see unlock()
+     * above) before it's eligible for deletion at all.
      */
     public function destroy(Section $section): RedirectResponse
     {
         $this->authorize('delete', $section);
 
+        if ($section->is_finalized) {
+            return back()->with('error', "Section {$section->section_code}'s schedule is finalized — unlock it first before it can be deleted.");
+        }
+
         $section->delete();
 
-        return redirect()->route('scheduling.sections')->with('success', 'Section deleted successfully.');
+        return redirect()->route('scheduling.sections')->with('success', 'Section archived successfully.');
+    }
+
+    /**
+     * Add Section modal — "does an archived Section already exist for
+     * this exact Department/Major/Year Level/Section Name/Academic
+     * Year/Semester?" (Rule 10). Called right before the modal's
+     * Save, once per section name about to be created, so the admin
+     * can be offered Restore Existing Section / Create New Section
+     * Instance / Cancel instead of silently spawning a second
+     * instance next to a section they may have only meant to bring
+     * back.
+     *
+     * Matches on section_code, not section_name — section_code is
+     * what's actually unique-per-term (see the sections migration's
+     * section_code_active generated column) and what the modal's
+     * preview list edits; section_name mirrors section_code at
+     * creation time today but isn't the identity key.
+     *
+     * Read-only — nothing is created, restored, or modified here.
+     */
+    public function checkArchived(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'major_id' => ['required', 'integer', 'exists:majors,id'],
+            'section_code' => ['required', 'string', 'max:20'],
+            'academic_year' => ['required', 'string', 'max:20'],
+            'semester' => [Rule::in(StoreSectionRequest::SEMESTERS)],
+            'year_level' => [Rule::in(StoreSectionRequest::YEAR_LEVELS)],
+        ]);
+
+        $this->authorizeSectionCollege($request, (int) $validated['major_id']);
+
+        $archived = Section::onlyTrashed()
+            ->where('major_id', $validated['major_id'])
+            ->where('section_code', $validated['section_code'])
+            ->where('academic_year', $validated['academic_year'])
+            ->where('semester', $validated['semester'])
+            ->where('year_level', $validated['year_level'])
+            ->withCount('sectionSubjects')
+            ->orderByDesc('deleted_at')
+            ->first();
+
+        if (! $archived) {
+            return response()->json(['archived' => null]);
+        }
+
+        return response()->json([
+            'archived' => [
+                'id' => $archived->id,
+                'section_code' => $archived->section_code,
+                'deleted_at' => $archived->deleted_at?->toIso8601String(),
+                'section_subjects_count' => $archived->section_subjects_count,
+            ],
+        ]);
+    }
+
+    /**
+     * Restore a previously archived (soft-deleted) Section — Rule 3.
+     *
+     * Deliberately just `$section->restore()`: because destroy() above
+     * never touched SectionSubject rows in the first place, restoring
+     * the Section is all that's needed to bring its original subject
+     * list and every original edp_code straight back exactly as they
+     * were — no separate "restore the subjects too" step, no
+     * regeneration of EDP Codes (EDPCodeService::generateForSection
+     * Subject() is a no-op once edp_code is already set, and it's
+     * never called here at all).
+     *
+     * $sectionId is resolved manually (not route-model-bound) since
+     * implicit binding only ever finds non-trashed rows.
+     */
+    public function restore(Request $request, int $section): RedirectResponse
+    {
+        $trashedSection = Section::onlyTrashed()->findOrFail($section);
+
+        $this->authorize('restore', $trashedSection);
+
+        $trashedSection->restore();
+
+        return redirect()->route('scheduling.sections')->with(
+            'success',
+            "Section {$trashedSection->section_code} restored, with its original EDP codes intact."
+        );
     }
 
     /**

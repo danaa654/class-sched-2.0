@@ -45,6 +45,17 @@ class SectionPolicy
     }
 
     /**
+     * Restoring an archived (soft-deleted) Section — same rule as
+     * delete() above, since restoring is really "undo the delete"
+     * and should require the same authority that could delete it in
+     * the first place.
+     */
+    public function restore(User $user, Section $section): bool
+    {
+        return $this->delete($user, $section);
+    }
+
+    /**
      * Assistant Dean and Dean/OIC may manage GenEd/Minor SUBJECT
      * ASSIGNMENTS and scheduling for a section they can see, without
      * full Section CRUD rights (spec §8, §15).

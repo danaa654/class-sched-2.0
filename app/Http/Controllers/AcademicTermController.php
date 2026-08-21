@@ -105,9 +105,58 @@ class AcademicTermController extends Controller
 
     /**
      * Soft delete the specified academic term.
+     *
+     * DELETE GATE — mirrors archive()'s "End Semester" gate below,
+     * but stricter: deleting the term itself must never be usable as
+     * a backdoor around a finalized/in-progress section that the
+     * corresponding Section-delete flow (SectionController::destroy())
+     * already protects with its own confirmation/typed-name steps.
+     * Blocks outright (no override) when this term has any Section
+     * that is either:
+     *   - finalized (is_finalized), or
+     *   - already has real scheduling progress on it (any subject
+     *     with Faculty/Room/Days/Start/End assigned — the exact same
+     *     "assigned" definition SectionController::index()'s
+     *     assigned_subjects_count and finalize() already use, so
+     *     there's no second/competing definition of "scheduled"
+     *     introduced here).
+     *
+     * A term with no Sections, or only Sections that have no subjects
+     * yet or subjects that were never actually scheduled, deletes
+     * normally — there's nothing at risk to protect there.
      */
     public function destroy(AcademicTerm $academicTerm): RedirectResponse
     {
+        $finalizedSectionCodes = $academicTerm->matchingSectionsQuery()
+            ->where('is_finalized', true)
+            ->orderBy('section_code')
+            ->pluck('section_code');
+
+        if ($finalizedSectionCodes->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'status' => "This term can't be deleted — the following sections have a finalized schedule: "
+                    .$finalizedSectionCodes->implode(', ').'. Unlock them first if this term truly needs to be removed.',
+            ]);
+        }
+
+        $scheduledSectionCodes = $academicTerm->matchingSectionsQuery()
+            ->whereHas('sectionSubjects', function ($query) {
+                $query->whereNotNull('faculty_id')
+                    ->whereNotNull('room_id')
+                    ->whereNotNull('days')
+                    ->whereNotNull('start_time')
+                    ->whereNotNull('end_time');
+            })
+            ->orderBy('section_code')
+            ->pluck('section_code');
+
+        if ($scheduledSectionCodes->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'status' => "This term can't be deleted — the following sections already have subjects scheduled: "
+                    .$scheduledSectionCodes->implode(', ').'. Clear their schedules first, or delete those sections individually if they\'re no longer needed.',
+            ]);
+        }
+
         $academicTerm->delete();
 
         return redirect()->route('academic-calendar')->with('success', 'Academic term deleted successfully.');

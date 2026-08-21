@@ -131,6 +131,13 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/sections/batch', [SectionController::class, 'storeBatch'])->name('scheduling.sections.store-batch');
     Route::put('/scheduling/sections/{section}', [SectionController::class, 'update'])->name('scheduling.sections.update');
     Route::delete('/scheduling/sections/{section}', [SectionController::class, 'destroy'])->name('scheduling.sections.destroy');
+    // Archived-section detection + restore for the Add Section modal
+    // (SectionController::checkArchived()/restore()) — {section} here
+    // is intentionally NOT route-model-bound, since the whole point of
+    // both endpoints is finding/acting on a SOFT-DELETED Section that
+    // Laravel's default implicit binding would 404 on.
+    Route::post('/scheduling/sections/check-archived', [SectionController::class, 'checkArchived'])->name('scheduling.sections.check-archived');
+    Route::put('/scheduling/sections/{section}/restore', [SectionController::class, 'restore'])->name('scheduling.sections.restore');
     Route::post('/scheduling/sections/{section}/finalize', [SectionController::class, 'finalize'])->name('scheduling.sections.finalize');
     Route::post('/scheduling/sections/{section}/unlock', [SectionController::class, 'unlock'])->name('scheduling.sections.unlock');
     Route::get('/scheduling/section-subjects', [SectionSubjectController::class, 'index'])->name('scheduling.section-subjects');

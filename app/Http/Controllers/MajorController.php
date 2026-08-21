@@ -4,9 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreMajorRequest;
 use App\Http\Requests\UpdateMajorRequest;
+use App\Models\Curriculum;
 use App\Models\Major;
+use App\Models\Section;
+use App\Models\Subject;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -76,9 +80,47 @@ class MajorController extends Controller
 
     /**
      * Soft delete the specified major.
+     *
+     * DELETE GATE — blocked outright when this Major still has any
+     * active (non-trashed) dependents: Sections, Curriculums, or
+     * Subjects. This matters more here than at College/Department:
+     * `sections.major_id`'s foreign key has no cascade/restrict
+     * behavior configured at the DB level, so without this
+     * application-level check, deleting a Major with existing
+     * Sections would surface as a raw, unfriendly DB constraint
+     * error instead of a clear message. `curriculums.major_id` DOES
+     * cascadeOnDelete at the DB level — but that only fires on a
+     * real row delete, never on this soft delete, so Curriculums are
+     * never silently destroyed by this action; the check below is
+     * purely to stop the Registrar from archiving a Major that's
+     * still actively in use, not to prevent DB-level data loss that
+     * couldn't happen here anyway.
      */
     public function destroy(Major $major): RedirectResponse
     {
+        $blockers = [];
+
+        $sectionCount = Section::query()->where('major_id', $major->id)->count();
+        if ($sectionCount > 0) {
+            $blockers[] = $sectionCount === 1 ? '1 section' : "{$sectionCount} sections";
+        }
+
+        $curriculumCount = Curriculum::query()->where('major_id', $major->id)->count();
+        if ($curriculumCount > 0) {
+            $blockers[] = $curriculumCount === 1 ? '1 curriculum' : "{$curriculumCount} curriculums";
+        }
+
+        $subjectCount = Subject::query()->where('major_id', $major->id)->count();
+        if ($subjectCount > 0) {
+            $blockers[] = $subjectCount === 1 ? '1 subject' : "{$subjectCount} subjects";
+        }
+
+        if (! empty($blockers)) {
+            throw ValidationException::withMessages([
+                'code' => "This major can't be deleted — it still has ".implode(', ', $blockers).' attached to it. Remove or reassign those first.',
+            ]);
+        }
+
         $major->delete();
 
         return redirect()->route('academic-structure')->with('success', 'Major deleted successfully.');

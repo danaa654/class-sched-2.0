@@ -5,8 +5,12 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreDepartmentRequest;
 use App\Http\Requests\UpdateDepartmentRequest;
 use App\Models\Department;
+use App\Models\Major;
+use App\Models\Room;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -71,9 +75,42 @@ class DepartmentController extends Controller
 
     /**
      * Soft delete the specified department.
+     *
+     * DELETE GATE — same reasoning as MajorController::destroy():
+     * blocked while any active (non-trashed) Major, Room, or User
+     * still belongs to this Department, so the Registrar gets a
+     * clear message instead of either a silent orphaning or a raw DB
+     * constraint error (majors.department_id cascadeOnDelete only
+     * fires on a real row delete, never on this soft delete, so
+     * nothing is actually at risk of being destroyed here — this
+     * check exists purely to stop archiving a Department that's
+     * still in active use).
      */
     public function destroy(Department $department): RedirectResponse
     {
+        $blockers = [];
+
+        $majorCount = Major::query()->where('department_id', $department->id)->count();
+        if ($majorCount > 0) {
+            $blockers[] = $majorCount === 1 ? '1 major' : "{$majorCount} majors";
+        }
+
+        $roomCount = Room::query()->where('department_id', $department->id)->count();
+        if ($roomCount > 0) {
+            $blockers[] = $roomCount === 1 ? '1 room' : "{$roomCount} rooms";
+        }
+
+        $userCount = User::query()->where('department_id', $department->id)->count();
+        if ($userCount > 0) {
+            $blockers[] = $userCount === 1 ? '1 user' : "{$userCount} users";
+        }
+
+        if (! empty($blockers)) {
+            throw ValidationException::withMessages([
+                'code' => "This department can't be deleted — it still has ".implode(', ', $blockers).' attached to it. Remove or reassign those first.',
+            ]);
+        }
+
         $department->delete();
 
         return redirect()->route('academic-structure')->with('success', 'Department deleted successfully.');

@@ -279,10 +279,18 @@ const onSaveAcademicTerm = () => {
     }
 };
 
+// DELETE GATE — the controller (AcademicTermController::destroy())
+// independently blocks this when any Section under the term is
+// finalized or already has subjects scheduled — see that method's
+// docblock. That's the real enforcement; this confirmation is just a
+// heads-up. A rejected delete comes back as errors.status and is
+// shown in a follow-up alert (same pattern as onArchiveAcademicTerm
+// below), naming exactly which sections are in the way.
 const onDeleteAcademicTerm = (academicTerm) => {
     Swal.fire({
-        title: 'Are you sure you want to delete this academic term?',
-        text: `${academicTerm.school_year?.name ?? ''} - ${academicTerm.semester?.name ?? ''}`,
+        title: 'Delete this academic term?',
+        html: `<p><strong>${academicTerm.school_year?.name ?? ''} - ${academicTerm.semester?.name ?? ''}</strong> will be archived, not permanently deleted — it can be restored later from this same list.</p>
+               <p style="margin-top:8px;">If any section under this term is finalized or already has subjects scheduled, deletion will be blocked until that's resolved.</p>`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
@@ -293,6 +301,15 @@ const onDeleteAcademicTerm = (academicTerm) => {
             router.delete(route('academic-terms.destroy', academicTerm.id), {
                 preserveScroll: true,
                 preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't delete this term",
+                        text: errors.status ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#DC2626',
+                        confirmButtonText: 'Got it',
+                    });
+                },
             });
         }
     });

@@ -197,7 +197,126 @@ const closeAddSection = () => {
     sectionForm.clearErrors();
 };
 
-const onSaveSection = () => {
+// Mirrors the identical helper in Scheduling/Sections/Index.vue —
+// needed here too since a fetch() call (checkArchivedFor below) can't
+// piggyback on Inertia's own CSRF handling the way sectionForm.post()
+// does.
+const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+};
+
+// ARCHIVED-SECTION DETECTION (Rule 10) — same check used by the Add
+// Section batch modal on the Sections list page. This page's Add
+// Section form creates one Section at a time via
+// SectionController::store() (not storeBatch()), so the check is
+// wired in here separately rather than assuming the batch modal is
+// the only way a Section gets created.
+const checkArchivedFor = async () => {
+    try {
+        const response = await fetch(route('scheduling.sections.check-archived'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-XSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({
+                major_id: sectionForm.major_id,
+                section_code: (sectionForm.section_code || '').trim(),
+                academic_year: sectionForm.academic_year,
+                semester: sectionForm.semester,
+                year_level: sectionForm.year_level,
+            }),
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const body = await response.json();
+        return body?.archived ?? null;
+    } catch (error) {
+        // A failed check should never block Save outright.
+        return null;
+    }
+};
+
+// Restore Existing Section / Create New Section Instance / Cancel —
+// returns 'restore' | 'new' | 'cancel'.
+const promptArchivedChoice = async (archived) => {
+    const subjectCount = archived.section_subjects_count ?? 0;
+    const result = await Swal.fire({
+        title: `${sectionForm.section_code} was previously archived`,
+        html: `This section was deleted before${subjectCount ? ` with <b>${subjectCount}</b> subject${subjectCount === 1 ? '' : 's'} and their original EDP codes` : ''}. Restore it, or create a brand-new section instance instead?`,
+        icon: 'question',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: 'Restore Existing Section',
+        denyButtonText: 'Create New Section Instance',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#16A34A',
+        denyButtonColor: '#4F46E5',
+        reverseButtons: true,
+        // STACKING FIX — SweetAlert2's default z-index (1060) sits
+        // BEHIND PrimeVue's Dialog mask (the "Add Section" modal this
+        // prompt is triggered from mid-submit), so without this the
+        // prompt renders but is visually trapped under the still-open
+        // dialog until the admin closes it manually. Forcing the
+        // popup's own stacking context above PrimeVue's dialog layer
+        // fixes that — see the matching customClass in
+        // Sections/Index.vue's promptArchivedChoice() for the same
+        // issue there.
+        customClass: { container: 'swal-above-dialog' },
+        didOpen: (popup) => {
+            const container = popup.closest('.swal2-container');
+            if (container) {
+                container.style.zIndex = 20000;
+            }
+        },
+    });
+
+    if (result.isConfirmed) return 'restore';
+    if (result.isDenied) return 'new';
+    return 'cancel';
+};
+
+const onSaveSection = async () => {
+    // Only relevant when creating — editing an existing (non-trashed)
+    // Section can never collide with an archived one under the same
+    // code/term, since that combination can only belong to one row
+    // at a time.
+    if (!editingSection.value) {
+        const archived = await checkArchivedFor();
+
+        if (archived) {
+            const choice = await promptArchivedChoice(archived);
+
+            if (choice === 'cancel') {
+                return;
+            }
+
+            if (choice === 'restore') {
+                router.put(route('scheduling.sections.restore', archived.id), {}, {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        closeAddSection();
+                        Swal.fire({
+                            title: 'Section restored',
+                            text: 'The archived section was restored with its original EDP codes.',
+                            icon: 'success',
+                            confirmButtonColor: '#16A34A',
+                        });
+                        onRefresh();
+                    },
+                });
+                return; // restored — don't also fall through to create
+            }
+
+            // choice === 'new' — fall through to the normal create below
+        }
+    }
+
     const options = {
         preserveScroll: true,
         onSuccess: () => {
@@ -230,22 +349,76 @@ const onSaveSection = () => {
     }
 };
 
+// DELETE CONFIRMATION — same three-tier pattern as
+// Sections/Index.vue's onDeleteSection() (see that file's comment for
+// the full reasoning): finalized sections are blocked outright, an
+// empty section needs one confirmation, a section with subjects
+// already placed needs a first confirmation plus a typed-name second
+// step. This page only has `subjects_count` (not a separate assigned/
+// scheduled breakdown) — that's enough, since "partial or full
+// schedule" both just mean "has subjects", which is what actually
+// matters here.
+const performSectionDelete = (section) => {
+    router.delete(route('scheduling.sections.destroy', section.id), {
+        preserveScroll: true,
+        onSuccess: () => onRefresh(),
+    });
+};
+
 const onDeleteSection = (section) => {
+    if (section.is_finalized) {
+        Swal.fire({
+            title: 'Schedule is finalized',
+            html: `<strong>${section.section_code}</strong>'s schedule is finalized and locked. Unlock it first before it can be deleted.`,
+            icon: 'info',
+            confirmButtonColor: '#4F46E5',
+            confirmButtonText: 'Got it',
+        });
+        return;
+    }
+
+    const hasSubjects = (section.subjects_count ?? 0) > 0;
+
     Swal.fire({
         title: 'Delete this section?',
-        text: `${section.section_code} — ${section.section_name} will be permanently deleted.`,
+        html: `<p>${section.section_code} — ${section.section_name} will be <strong>archived</strong>, not permanently deleted.</p>
+               <p style="margin-top:8px;">Its subjects and EDP codes stay on record and can be brought back later — re-enter the same section name on Add Section and you'll be offered the option to restore it.</p>
+               ${hasSubjects ? `<p style="margin-top:8px;color:#DC2626;">This section already has ${section.subjects_count} subject${section.subjects_count === 1 ? '' : 's'} placed on it — you'll be asked to confirm once more.</p>` : ''}`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
         cancelButtonColor: '#64748B',
-        confirmButtonText: 'Yes, delete it',
-    }).then((result) => {
-        if (result.isConfirmed) {
-            router.delete(route('scheduling.sections.destroy', section.id), {
-                preserveScroll: true,
-                onSuccess: () => onRefresh(),
-            });
+        confirmButtonText: hasSubjects ? 'Continue' : 'Yes, delete it',
+        cancelButtonText: 'Cancel',
+    }).then((firstResult) => {
+        if (!firstResult.isConfirmed) {
+            return;
         }
+
+        if (!hasSubjects) {
+            performSectionDelete(section);
+            return;
+        }
+
+        Swal.fire({
+            title: 'Type the section name to confirm',
+            html: `To confirm deleting <strong>${section.section_code}</strong>, type its name below exactly.`,
+            input: 'text',
+            inputPlaceholder: section.section_code,
+            showCancelButton: true,
+            confirmButtonText: 'Delete Section',
+            confirmButtonColor: '#DC2626',
+            cancelButtonText: 'Cancel',
+            inputValidator: (value) => {
+                if ((value || '').trim() !== section.section_code) {
+                    return "That doesn't match — type the section name exactly to confirm.";
+                }
+            },
+        }).then((secondResult) => {
+            if (secondResult.isConfirmed) {
+                performSectionDelete(section);
+            }
+        });
     });
 };
 </script>
