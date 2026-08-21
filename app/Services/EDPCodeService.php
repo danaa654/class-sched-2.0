@@ -22,9 +22,9 @@ use Illuminate\Support\Facades\DB;
  *   Semester     = 1 First Semester, 2 Second Semester, 3 Summer
  *   Year Level   = 1 First Year, 2 Second Year, 3 Third Year, 4 Fourth Year
  *   Sequence     = 3-digit running number, unique within Major + Academic
- *                  Year + Semester (shared across year levels within that
- *                  scope, matching how the Registrar's EDP ledger has
- *                  always numbered them)
+ *                  Year + Semester + Year Level (each year level starts
+ *                  its own count at 001, matching how the Registrar's
+ *                  EDP ledger has always numbered them)
  *
  * The running number itself lives in edp_code_sequences, not in a
  * COUNT() over section_subjects — so deleting a scheduled row can
@@ -85,7 +85,7 @@ class EDPCodeService
 
         $yy = $this->academicYearShort($section->academic_year);
 
-        $sequence = $this->nextSequence($major->id, $section->academic_year, $semesterCode);
+        $sequence = $this->nextSequence($major->id, $section->academic_year, $semesterCode, $yearLevelCode);
 
         $code = sprintf(
             '%s-%s%s%s%s',
@@ -115,17 +115,19 @@ class EDPCodeService
 
     /**
      * Atomically claim the next sequence number for this
-     * Major + Academic Year + Semester scope. Row-locked so two
-     * schedules saved at the same moment never get handed the same
-     * number.
+     * Major + Academic Year + Semester + Year Level scope. Row-locked
+     * so two schedules saved at the same moment never get handed the
+     * same number, and each year level's count starts independently
+     * at 001 instead of continuing on from the previous year level.
      */
-    private function nextSequence(int $majorId, string $academicYear, string $semesterCode): int
+    private function nextSequence(int $majorId, string $academicYear, string $semesterCode, string $yearLevelCode): int
     {
-        return DB::transaction(function () use ($majorId, $academicYear, $semesterCode) {
+        return DB::transaction(function () use ($majorId, $academicYear, $semesterCode, $yearLevelCode) {
             $scope = EdpCodeSequence::query()
                 ->where('major_id', $majorId)
                 ->where('academic_year', $academicYear)
                 ->where('semester_code', $semesterCode)
+                ->where('year_level_code', $yearLevelCode)
                 ->lockForUpdate()
                 ->first();
 
@@ -137,6 +139,7 @@ class EDPCodeService
                         'major_id' => $majorId,
                         'academic_year' => $academicYear,
                         'semester_code' => $semesterCode,
+                        'year_level_code' => $yearLevelCode,
                     ],
                     ['last_sequence' => 0]
                 );

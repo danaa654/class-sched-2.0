@@ -5,11 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * A running counter for one (Major, Academic Year, Semester) scope,
- * used exclusively by EDPCodeService to hand out the next EDP Code
- * sequence number. Not meant to be queried or edited directly
- * elsewhere — see EDPCodeService for how it's incremented safely
- * under concurrent saves.
+ * A running counter for one (Major, Academic Year, Semester, Year
+ * Level) scope, used exclusively by EDPCodeService to hand out the
+ * next EDP Code sequence number. Not meant to be queried or edited
+ * directly elsewhere — see EDPCodeService for how it's incremented
+ * safely under concurrent saves.
  */
 class EdpCodeSequence extends Model
 {
@@ -20,6 +20,7 @@ class EdpCodeSequence extends Model
         'major_id',
         'academic_year',
         'semester_code',
+        'year_level_code',
         'last_sequence',
     ];
 
