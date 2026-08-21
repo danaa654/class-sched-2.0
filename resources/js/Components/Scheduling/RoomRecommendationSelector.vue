@@ -83,6 +83,14 @@ const STATUS_DOT = {
 
 const statusDotColor = (statusColor) => STATUS_DOT[statusColor] ?? STATUS_DOT.blue;
 
+// Same "X/Y hrs" shape Faculty's "Load: 0/24" already shows — trims a
+// trailing ".0" (e.g. "8" instead of "8.0") but keeps a real decimal
+// (e.g. "8.5") since scheduled_hours/max_hours can be fractional.
+const formatHours = (value) => {
+    const num = Number(value ?? 0);
+    return Number.isInteger(num) ? String(num) : num.toFixed(1);
+};
+
 const badgeSeverity = (badge) => {
     switch (badge) {
         case 'Recommended Room':
@@ -244,6 +252,10 @@ const select = async (event) => {
                         <span class="text-xs text-slate-500">{{ option.room_category || option.room_type }}</span>
                         <span class="text-xs text-slate-400">·</span>
                         <span class="text-xs text-slate-500">Capacity {{ option.capacity }}</span>
+                        <template v-if="option.max_hours">
+                            <span class="text-xs text-slate-400">·</span>
+                            <span class="text-xs text-slate-500">Load: {{ formatHours(option.scheduled_hours) }}/{{ formatHours(option.max_hours) }} hrs</span>
+                        </template>
                     </div>
                 </div>
             </template>

@@ -1633,7 +1633,15 @@ class RecommendationService
         $sectionCollegeId = $section->major?->department?->college_id;
         $tier = $this->resolveRoomScopeTier($room, $sectionDepartmentId, $sectionCollegeId);
 
-        $utilizationPercent = round(app(RoomUtilizationService::class)->summarizeRoom($room)['utilization_percent'] ?? 0.0, 1);
+        $roomSummary = app(RoomUtilizationService::class)->summarizeRoom($room);
+        $utilizationPercent = round($roomSummary['utilization_percent'] ?? 0.0, 1);
+        // Same "X / Y hrs" shape recommendRooms() already attaches to
+        // its ranked pool (see the comment there) — search results
+        // from scoreArbitraryRoom() were missing it, so the selector
+        // dropdown showed hours for the recommended pool but not for
+        // a room found via search (e.g. typing "Room 108").
+        $scheduledHours = (float) ($roomSummary['scheduled_hours'] ?? 0);
+        $maxHours = (float) ($roomSummary['max_hours'] ?? 0);
 
         $scored = $this->weightedRoomScore(
             typeMatch: $typeMatch,
@@ -1745,6 +1753,8 @@ class RecommendationService
             'manual_override' => $isManualOverride,
             'override_reason' => $overrideReason,
             'utilization_percent' => $utilizationPercent,
+            'scheduled_hours' => $scheduledHours,
+            'max_hours' => $maxHours,
             'status_color' => $this->roomStatusColor($isManualOverride, false, $tier),
             'explanation' => $isManualOverride
                 ? $overrideReason

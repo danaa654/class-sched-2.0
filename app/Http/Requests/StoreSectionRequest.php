@@ -96,6 +96,14 @@ class StoreSectionRequest extends FormRequest
             'estimated_students' => ['required', 'integer', 'min:1'],
             'status' => ['required', Rule::in(['Active', 'Inactive'])],
             'remarks' => ['nullable', 'string'],
+            // Optional "Subjects" step in the Add Section modal — every
+            // Subject the admin picked to place onto this Section
+            // immediately, the same as if they were added afterward via
+            // Manual Selection on the Section Subjects page. Omitted or
+            // empty is perfectly valid; the Section is just created with
+            // no subjects yet, exactly as before this field existed.
+            'subject_ids' => ['nullable', 'array'],
+            'subject_ids.*' => ['integer', 'exists:subjects,id'],
         ];
     }
 

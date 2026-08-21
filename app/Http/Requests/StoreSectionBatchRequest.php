@@ -55,6 +55,15 @@ class StoreSectionBatchRequest extends FormRequest
                     ->whereNull('deleted_at'),
             ],
             'sections.*.estimated_students' => ['required', 'integer', 'min:1'],
+
+            // Optional "Subjects" step in the Add Section modal — every
+            // Subject the admin picked is placed onto EVERY Section row
+            // this batch creates (see SectionController::storeBatch()'s
+            // docblock). Omitted or empty is perfectly valid; every
+            // section in the batch is just created with no subjects
+            // yet, exactly as before this field existed.
+            'subject_ids' => ['nullable', 'array'],
+            'subject_ids.*' => ['integer', 'exists:subjects,id'],
         ];
     }
 

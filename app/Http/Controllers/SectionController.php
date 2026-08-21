@@ -9,9 +9,14 @@ use App\Http\Requests\UpdateSectionRequest;
 use App\Models\AcademicTerm;
 use App\Models\College;
 use App\Models\Curriculum;
+use App\Models\CurriculumItem;
 use App\Models\Major;
 use App\Models\Section;
+use App\Models\SectionSubject;
+use App\Models\Subject;
+use App\Services\EDPCodeService;
 use App\Services\NotificationService;
+use App\Services\ScheduleConflictService;
 use App\Services\SectionBatchGeneratorService;
 use App\Support\AccessScope;
 use App\Support\ViewingTerm;
@@ -21,12 +26,29 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class SectionController extends Controller
 {
+    /**
+     * Section.year_level uses "First Year"… while CurriculumItem.year_level
+     * uses "1st Year"… — mirrors SectionSubjectController::YEAR_LEVEL_MAP
+     * so the Add Section modal's subject picker (curriculumSubjectsPreview())
+     * maps between the two exactly the same way "Generate Curriculum
+     * Subjects" and "Load From Curriculum" already do.
+     *
+     * @var array<string, string>
+     */
+    private const YEAR_LEVEL_MAP = [
+        'First Year' => '1st Year',
+        'Second Year' => '2nd Year',
+        'Third Year' => '3rd Year',
+        'Fourth Year' => '4th Year',
+    ];
+
     /**
      * Display the Sections page.
      *
@@ -239,11 +261,19 @@ class SectionController extends Controller
     /**
      * Store a newly created section.
      */
-    public function store(StoreSectionRequest $request, NotificationService $notifications): RedirectResponse
-    {
+    public function store(
+        StoreSectionRequest $request,
+        NotificationService $notifications,
+        EDPCodeService $edpCodeService,
+        ScheduleConflictService $conflictService
+    ): RedirectResponse {
         // NEVER trust an implicit College from the frontend — derive it
         // from the Major record server-side (spec Section 23).
         $this->authorizeSectionCollege($request, (int) $request->validated('major_id'));
+
+        $data = $request->validated();
+        $subjectIds = collect($data['subject_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values();
+        unset($data['subject_ids']);
 
         // The StoreSectionRequest's "unique" rule already checks
         // section_code, but that check and this insert aren't atomic —
@@ -257,9 +287,17 @@ class SectionController extends Controller
         // "Section Created" notification all commit together or not
         // at all.
         try {
-            DB::transaction(function () use ($request, $notifications) {
-                $section = Section::create($request->validated());
+            DB::transaction(function () use ($data, $request, $notifications, $edpCodeService, $conflictService, $subjectIds) {
+                $section = Section::create($data);
                 $notifications->created($section, $request->user());
+
+                // Optional up-front Subjects step (Add Section modal) —
+                // see storeBatch()'s matching block for the full
+                // reasoning: this is what lets a section created here
+                // start out with the same subject list the admin picked
+                // in the modal, instead of having to add them
+                // afterward on the Section Subjects page.
+                $this->attachSubjectsToSection($section, $subjectIds, $edpCodeService, $conflictService, $notifications, $request);
             });
         } catch (UniqueConstraintViolationException $e) {
             throw ValidationException::withMessages([
@@ -324,6 +362,100 @@ class SectionController extends Controller
     }
 
     /**
+     * Add Section modal — "Subjects" step preview.
+     *
+     * Given a Curriculum + Year Level + Semester (the same three
+     * fields the modal already collects before this point), returns
+     * every Subject that Curriculum offers for that Year Level and
+     * Semester — so the admin can pick, up front, exactly which
+     * subjects every block being created (BSIT-1A, BSIT-1B, ...) will
+     * share, instead of having to open each section afterward and
+     * run "Generate Curriculum Subjects" or "Manual Selection"
+     * separately per section.
+     *
+     * Deliberately NOT scoped to any one Section (unlike
+     * SectionSubjectController::curriculumPreview(), which excludes
+     * subjects already placed on a specific, already-existing
+     * Section) — at this point in the Add Section flow no Section
+     * exists yet, and the same subject list is meant to apply
+     * identically to every block in the batch.
+     *
+     * Read-only — nothing is created here.
+     */
+    public function curriculumSubjectsPreview(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'curriculum_id' => ['required', 'integer', 'exists:curriculums,id'],
+            'year_level' => ['required', Rule::in(StoreSectionRequest::YEAR_LEVELS)],
+            'semester' => ['required', Rule::in(StoreSectionRequest::SEMESTERS)],
+        ]);
+
+        $mappedYearLevel = self::YEAR_LEVEL_MAP[$validated['year_level']] ?? null;
+
+        if (! $mappedYearLevel) {
+            return response()->json(['subjects' => []]);
+        }
+
+        $subjects = CurriculumItem::query()
+            ->where('curriculum_id', $validated['curriculum_id'])
+            ->where('year_level', $mappedYearLevel)
+            ->where('semester', $validated['semester'])
+            ->with('subject:id,subject_code,subject_title,category,units')
+            ->get()
+            ->pluck('subject')
+            ->filter()
+            ->map(fn (Subject $subject) => [
+                'id' => $subject->id,
+                'subject_code' => $subject->subject_code,
+                'subject_title' => $subject->subject_title,
+                'category' => $subject->category,
+                'units' => $subject->units,
+            ])
+            ->sortBy('subject_code')
+            ->values();
+
+        return response()->json(['subjects' => $subjects]);
+    }
+
+    /**
+     * Add Section modal — "Subjects" step, Manual Selection tab.
+     *
+     * Every Active Subject belonging to the given Major, plus true
+     * General Education subjects (shared by every Major) — the exact
+     * same scoping SectionSubjectController::show() already uses for
+     * its own Manual Selection tab (see that method's docblock for
+     * why Major-category subjects with a null major_id, e.g. the
+     * BSCRIM shared core, are deliberately excluded here).
+     *
+     * Unlike curriculumSubjectsPreview() above, this is NOT scoped to
+     * a Curriculum/Year Level/Semester at all — it's the full
+     * "search any subject" pool, since Manual Selection exists
+     * precisely for subjects that don't come from a Curriculum (a
+     * bridging subject, a replacement, a cross-enrolled subject, or
+     * every subject an Irregular section needs, since Irregular
+     * sections don't follow one Prospectus).
+     *
+     * Read-only — nothing is created here.
+     */
+    public function manualSubjectsPreview(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'major_id' => ['required', 'integer', 'exists:majors,id'],
+        ]);
+
+        $subjects = Subject::query()
+            ->where('is_active', true)
+            ->where(function ($query) use ($validated) {
+                $query->where('major_id', $validated['major_id'])
+                    ->orWhere('category', 'General Education');
+            })
+            ->orderBy('subject_code')
+            ->get(['id', 'subject_code', 'subject_title', 'category', 'units']);
+
+        return response()->json(['subjects' => $subjects]);
+    }
+
+    /**
      * Store a batch of sections generated from the Add Section flow
      * (Section Prefix + Number of Blocks → BSIT-1A, BSIT-1B, ...).
      *
@@ -331,10 +463,22 @@ class SectionController extends Controller
      * record — no "parent section" grouping is introduced — sharing
      * the common Academic Year / Semester / Program / Year Level /
      * Prospectus (Curriculum) / Status / Remarks.
+     *
+     * Also sharing, when the admin used the modal's optional Subjects
+     * step: the exact same set of Subjects (via subject_ids) — so
+     * BSIT-1A and BSIT-1B, created in the same batch, walk away with
+     * an identical subject list already placed, rather than each
+     * needing "Generate Curriculum Subjects" or Manual Selection run
+     * separately afterward on every individual Section.
      */
-    public function storeBatch(StoreSectionBatchRequest $request, NotificationService $notifications): RedirectResponse
-    {
+    public function storeBatch(
+        StoreSectionBatchRequest $request,
+        NotificationService $notifications,
+        EDPCodeService $edpCodeService,
+        ScheduleConflictService $conflictService
+    ): RedirectResponse {
         $data = $request->validated();
+        $subjectIds = collect($data['subject_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values();
 
         // SECURITY: StoreSectionBatchRequest::authorize() intentionally
         // just returns true (validation-only, per Laravel FormRequest
@@ -347,7 +491,7 @@ class SectionController extends Controller
         $this->authorizeSectionCollege($request, (int) $data['major_id']);
 
         try {
-            DB::transaction(function () use ($data, $request, $notifications) {
+            DB::transaction(function () use ($data, $request, $notifications, $edpCodeService, $conflictService, $subjectIds) {
                 foreach ($data['sections'] as $row) {
                     $section = Section::create([
                         'section_code' => $row['section_code'],
@@ -369,6 +513,12 @@ class SectionController extends Controller
                     // each gets its own notification rather than one
                     // rolled-up "3 sections created" message.
                     $notifications->created($section, $request->user());
+
+                    // Same Subjects picked once in the modal, applied
+                    // identically to every block this batch creates —
+                    // see attachSubjectsToSection()'s docblock. A no-op
+                    // when the admin left the Subjects step empty.
+                    $this->attachSubjectsToSection($section, $subjectIds, $edpCodeService, $conflictService, $notifications, $request);
                 }
             });
         } catch (UniqueConstraintViolationException $e) {
@@ -602,6 +752,61 @@ class SectionController extends Controller
         })->whereDoesntHave('subject', function ($subjectQuery) {
             $subjectQuery->where('subject_type', 'practicum');
         });
+    }
+
+    /**
+     * Places the given Subjects onto a just-created Section — the Add
+     * Section modal's optional "Subjects" step. Mirrors
+     * SectionSubjectController::store()'s Manual Selection write path
+     * exactly (same EDP Code minting via EDPCodeService, same
+     * schedule_version bump via ScheduleConflictService, same
+     * "Subject Added" notification per subject) so a subject placed
+     * here is indistinguishable from one added afterward on the
+     * Section Subjects page — this is only a convenience for doing it
+     * up front, never a second/parallel code path.
+     *
+     * Deliberately does its own lockResources()/bumpScheduleVersion()
+     * call rather than reusing one taken by the caller — this always
+     * runs immediately after Section::create(), so the Section row
+     * being locked here is brand new and was never at risk of being
+     * concurrently modified by anything else.
+     *
+     * A no-op when $subjectIds is empty (the admin skipped the
+     * Subjects step) — a Section is still perfectly valid with zero
+     * subjects, exactly as before this feature existed.
+     *
+     * @param  \Illuminate\Support\Collection<int, int>  $subjectIds
+     */
+    private function attachSubjectsToSection(
+        Section $section,
+        \Illuminate\Support\Collection $subjectIds,
+        EDPCodeService $edpCodeService,
+        ScheduleConflictService $conflictService,
+        NotificationService $notifications,
+        Request $request
+    ): void {
+        if ($subjectIds->isEmpty()) {
+            return;
+        }
+
+        $lockedSection = $conflictService->lockResources(null, null, $section->id);
+
+        foreach ($subjectIds as $subjectId) {
+            $sectionSubject = SectionSubject::create([
+                'section_id' => $section->id,
+                'subject_id' => $subjectId,
+                'source' => 'Curriculum',
+                'capacity' => $section->estimated_students,
+                'status' => 'Draft',
+            ]);
+
+            $sectionSubject->setRelation('section', $section->loadMissing('major'));
+            $edpCodeService->generateForSectionSubject($sectionSubject);
+
+            $notifications->subjectAdded($section, $sectionSubject, $request->user());
+        }
+
+        $conflictService->bumpScheduleVersion($lockedSection);
     }
 
     /**

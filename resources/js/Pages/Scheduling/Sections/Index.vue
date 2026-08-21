@@ -16,6 +16,12 @@ import Column from 'primevue/column';
 import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
+import MultiSelect from 'primevue/multiselect';
+import Tabs from 'primevue/tabs';
+import TabList from 'primevue/tablist';
+import Tab from 'primevue/tab';
+import TabPanels from 'primevue/tabpanels';
+import TabPanel from 'primevue/tabpanel';
 import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
@@ -680,6 +686,196 @@ watch(
     refreshPreview,
 );
 
+/* ------------------------------------------------------------------ */
+/* Add Section — "Subjects" step                                       */
+/* Lets the admin pick, once, exactly which subjects every block being */
+/* created (BSIT-1A, BSIT-1B, ...) will share, instead of having to    */
+/* open each section afterward and run "Generate Curriculum Subjects"  */
+/* or Manual Selection separately per section. Mirrors the Section     */
+/* Subjects page's own "Load From Curriculum" / "Manual Selection"     */
+/* tabs so the two entry points feel identical.                       */
+/* ------------------------------------------------------------------ */
+
+const subjectsTab = ref('curriculum');
+
+// --- Load From Curriculum tab ---
+const subjectOptions = ref([]); // [{ id, subject_code, subject_title, category, units }]
+const curriculumSelectedSubjectIds = ref(new Set());
+const subjectsLoading = ref(false);
+const subjectsError = ref('');
+
+// Only meaningful for Regular sections with a Prospectus + Year Level
+// + Semester picked — an Irregular section's subjects are always
+// picked manually (Manual Selection tab below).
+const canPreviewSubjects = computed(
+    () =>
+        batchForm.section_type === 'Regular' &&
+        !!batchForm.curriculum_id &&
+        !!batchForm.year_level &&
+        !!batchForm.semester,
+);
+
+let subjectsDebounce = null;
+
+const refreshSubjectOptions = () => {
+    clearTimeout(subjectsDebounce);
+
+    if (!canPreviewSubjects.value) {
+        subjectOptions.value = [];
+        subjectsError.value = '';
+        return;
+    }
+
+    subjectsDebounce = setTimeout(async () => {
+        subjectsLoading.value = true;
+        subjectsError.value = '';
+        try {
+            const response = await fetch(route('scheduling.sections.curriculum-subjects-preview'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify({
+                    curriculum_id: batchForm.curriculum_id,
+                    year_level: batchForm.year_level,
+                    semester: batchForm.semester,
+                }),
+            });
+
+            if (!response.ok) {
+                subjectsError.value = 'Could not load this prospectus\'s subjects.';
+                subjectOptions.value = [];
+                return;
+            }
+
+            const data = await response.json();
+            const previousIds = new Set(curriculumSelectedSubjectIds.value);
+            subjectOptions.value = data.subjects ?? [];
+
+            // Default to everything selected the first time a fresh
+            // list loads, but preserve the admin's own checks/unchecks
+            // across a re-fetch caused by an unrelated field changing
+            // (e.g. tweaking Number of Blocks shouldn't silently
+            // re-select subjects they'd already unchecked).
+            const nextIds = new Set();
+            subjectOptions.value.forEach((subject) => {
+                if (previousIds.size === 0 || previousIds.has(subject.id)) {
+                    nextIds.add(subject.id);
+                }
+            });
+            curriculumSelectedSubjectIds.value = nextIds;
+        } catch (e) {
+            subjectsError.value = 'Could not reach the server to load subjects.';
+        } finally {
+            subjectsLoading.value = false;
+        }
+    }, 350);
+};
+
+watch(() => [batchForm.curriculum_id, batchForm.year_level, batchForm.semester, batchForm.section_type], refreshSubjectOptions);
+
+const toggleSubject = (subjectId) => {
+    const next = new Set(curriculumSelectedSubjectIds.value);
+    if (next.has(subjectId)) {
+        next.delete(subjectId);
+    } else {
+        next.add(subjectId);
+    }
+    curriculumSelectedSubjectIds.value = next;
+};
+
+const allSubjectsSelected = computed(
+    () => subjectOptions.value.length > 0 && subjectOptions.value.every((subject) => curriculumSelectedSubjectIds.value.has(subject.id)),
+);
+
+const toggleAllSubjects = () => {
+    if (allSubjectsSelected.value) {
+        curriculumSelectedSubjectIds.value = new Set();
+    } else {
+        curriculumSelectedSubjectIds.value = new Set(subjectOptions.value.map((subject) => subject.id));
+    }
+};
+
+// --- Manual Selection tab ---
+// Every Active subject for the selected Program (+ General Education),
+// independent of Curriculum/Year Level/Semester — same broad pool the
+// Section Subjects page's own Manual Selection tab searches. Always
+// available once a Program is picked, which is what makes it the only
+// Subjects option for Irregular sections (they don't follow one
+// Prospectus — see the batchForm.section_type watcher elsewhere on
+// this page).
+const manualSubjectOptions = ref([]);
+const manualSelectedSubjectIds = ref([]); // array — MultiSelect's own v-model shape
+const manualSubjectsLoading = ref(false);
+const manualSubjectsError = ref('');
+
+let manualSubjectsDebounce = null;
+
+const refreshManualSubjectOptions = () => {
+    clearTimeout(manualSubjectsDebounce);
+
+    if (!batchForm.major_id) {
+        manualSubjectOptions.value = [];
+        manualSubjectsError.value = '';
+        return;
+    }
+
+    manualSubjectsDebounce = setTimeout(async () => {
+        manualSubjectsLoading.value = true;
+        manualSubjectsError.value = '';
+        try {
+            const response = await fetch(route('scheduling.sections.manual-subjects-preview'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify({ major_id: batchForm.major_id }),
+            });
+
+            if (!response.ok) {
+                manualSubjectsError.value = 'Could not load subjects for this program.';
+                manualSubjectOptions.value = [];
+                return;
+            }
+
+            const data = await response.json();
+            manualSubjectOptions.value = data.subjects ?? [];
+
+            // A Program change may have invalidated some previously
+            // hand-picked subjects (they belonged to the old Program)
+            // — drop anything no longer in the fresh list rather than
+            // silently keeping a stale, now-irrelevant selection.
+            const validIds = new Set(manualSubjectOptions.value.map((subject) => subject.id));
+            manualSelectedSubjectIds.value = manualSelectedSubjectIds.value.filter((id) => validIds.has(id));
+        } catch (e) {
+            manualSubjectsError.value = 'Could not reach the server to load subjects.';
+        } finally {
+            manualSubjectsLoading.value = false;
+        }
+    }, 350);
+};
+
+watch(() => batchForm.major_id, refreshManualSubjectOptions);
+
+// The Subjects panel appears once a Program is picked — Load From
+// Curriculum additionally needs a Prospectus/Year Level/Semester (see
+// canPreviewSubjects above), but Manual Selection only ever needs the
+// Program itself, so it's always reachable even before those are set.
+const showSubjectsStep = computed(() => !!batchForm.major_id);
+
+// Union of both tabs' picks — what actually gets sent on save. The two
+// tabs track their own selection independently (a checkbox list vs a
+// MultiSelect have different natural shapes) and are only merged here.
+const combinedSelectedSubjectIds = computed(() => {
+    const combined = new Set(curriculumSelectedSubjectIds.value);
+    manualSelectedSubjectIds.value.forEach((id) => combined.add(id));
+    return combined;
+});
+
 // Detect duplicate names the admin typed in manually within the
 // preview list itself (server also re-checks this, and against the
 // database, on save).
@@ -722,6 +918,13 @@ const openAdd = () => {
     previewSections.value = [];
     previewError.value = '';
     nameErrors.value = {};
+    subjectsTab.value = 'curriculum';
+    subjectOptions.value = [];
+    curriculumSelectedSubjectIds.value = new Set();
+    subjectsError.value = '';
+    manualSubjectOptions.value = [];
+    manualSelectedSubjectIds.value = [];
+    manualSubjectsError.value = '';
     addSectionVisible.value = true;
 };
 
@@ -732,6 +935,13 @@ const closeAddSection = () => {
     prefixManuallyEdited.value = false;
     previewSections.value = [];
     nameErrors.value = {};
+    subjectsTab.value = 'curriculum';
+    subjectOptions.value = [];
+    curriculumSelectedSubjectIds.value = new Set();
+    subjectsError.value = '';
+    manualSubjectOptions.value = [];
+    manualSelectedSubjectIds.value = [];
+    manualSubjectsError.value = '';
 };
 
 const onSaveBatch = () => {
@@ -755,6 +965,7 @@ const onSaveBatch = () => {
                 section_code: (row.section_code || '').trim(),
                 estimated_students: row.estimated_students,
             })),
+            subject_ids: Array.from(combinedSelectedSubjectIds.value),
         }))
         .post(route('scheduling.sections.store-batch'), {
             preserveScroll: true,
@@ -1476,6 +1687,150 @@ const onUnlockSection = (section) => {
                             school uses a different naming convention.
                         </template>
                     </p>
+                </div>
+
+                <!-- Subjects (optional) -->
+                <div v-if="showSubjectsStep">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                        Subjects <span class="text-slate-400 font-normal normal-case">(optional)</span>
+                    </p>
+
+                    <div class="rounded-xl border border-slate-200 overflow-hidden">
+                        <Tabs v-model:value="subjectsTab">
+                            <TabList>
+                                <Tab value="curriculum">Load From Curriculum</Tab>
+                                <Tab value="manual">Manual Selection</Tab>
+                            </TabList>
+                            <TabPanels>
+                                <!-- Load From Curriculum -->
+                                <TabPanel value="curriculum">
+                                    <div v-if="batchForm.section_type !== 'Regular'" class="text-sm text-slate-400 px-1 py-2">
+                                        Irregular sections don't follow one Prospectus — use Manual Selection instead.
+                                    </div>
+
+                                    <div v-else-if="!batchForm.curriculum_id" class="text-sm text-slate-400 px-1 py-2">
+                                        Select a Prospectus above to choose which subjects every section in this batch
+                                        starts with.
+                                    </div>
+
+                                    <template v-else>
+                                        <div class="flex items-center justify-between px-1 py-1">
+                                            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    :checked="allSubjectsSelected"
+                                                    :disabled="!subjectOptions.length"
+                                                    @change="toggleAllSubjects"
+                                                />
+                                                Select all
+                                                <span v-if="subjectOptions.length" class="text-slate-400 font-normal">
+                                                    ({{ curriculumSelectedSubjectIds.size }}/{{ subjectOptions.length }} selected)
+                                                </span>
+                                            </label>
+                                            <i v-if="subjectsLoading" class="pi pi-spin pi-spinner text-slate-400"></i>
+                                        </div>
+
+                                        <p v-if="subjectsError" class="text-sm text-red-500 px-1 py-2">{{ subjectsError }}</p>
+
+                                        <p v-else-if="!subjectOptions.length && !subjectsLoading" class="text-sm text-slate-400 px-1 py-2">
+                                            No subjects found for this Prospectus, Year Level, and Semester.
+                                        </p>
+
+                                        <div v-else class="max-h-56 overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-lg">
+                                            <label
+                                                v-for="subject in subjectOptions"
+                                                :key="subject.id"
+                                                class="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    :checked="curriculumSelectedSubjectIds.has(subject.id)"
+                                                    @change="toggleSubject(subject.id)"
+                                                />
+                                                <span class="flex-1">
+                                                    <span class="font-medium text-slate-700">{{ subject.subject_code }}</span>
+                                                    <span class="text-slate-500"> — {{ subject.subject_title }}</span>
+                                                </span>
+                                                <span class="text-xs text-slate-400">{{ subject.units }} units</span>
+                                            </label>
+                                        </div>
+
+                                        <!-- Add subjects outside this Prospectus — for irregular-style cases -->
+                                        <!-- where a section otherwise following this curriculum still needs a -->
+                                        <!-- subject from another year level/semester (bridging, replacement, -->
+                                        <!-- cross-enrolled). Shares state with the Manual Selection tab -->
+                                        <!-- (manualSelectedSubjectIds/manualSubjectOptions) so a subject added -->
+                                        <!-- here shows up there too, and both are combined on save via -->
+                                        <!-- combinedSelectedSubjectIds. -->
+                                        <div class="mt-3 pt-3 border-t border-slate-100">
+                                            <p class="text-xs font-semibold text-slate-500 mb-1">
+                                                Add subjects outside this Prospectus
+                                                <span class="text-slate-400 font-normal normal-case">
+                                                    — e.g. a lower-year, bridging, or cross-enrolled subject
+                                                </span>
+                                            </p>
+                                            <MultiSelect
+                                                v-model="manualSelectedSubjectIds"
+                                                :options="manualSubjectOptions"
+                                                optionLabel="subject_code"
+                                                optionValue="id"
+                                                filter
+                                                filterPlaceholder="Search subject code or title"
+                                                display="chip"
+                                                :loading="manualSubjectsLoading"
+                                                placeholder="Search and add a subject..."
+                                                class="w-full"
+                                                :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                            >
+                                                <template #option="{ option }">
+                                                    <span class="font-medium">{{ option.subject_code }}</span>
+                                                    <span class="text-slate-400"> — {{ option.subject_title }}</span>
+                                                </template>
+                                            </MultiSelect>
+                                            <small v-if="manualSubjectsError" class="text-red-500">{{ manualSubjectsError }}</small>
+                                        </div>
+                                    </template>
+                                </TabPanel>
+
+                                <!-- Manual Selection -->
+                                <TabPanel value="manual">
+                                    <p class="text-sm text-slate-500 mb-2">
+                                        Search any Active subject for this Program — useful for bridging subjects,
+                                        replacements, cross-enrolled subjects, or every subject on an Irregular section.
+                                    </p>
+
+                                    <div class="flex flex-col gap-1">
+                                        <MultiSelect
+                                            v-model="manualSelectedSubjectIds"
+                                            :options="manualSubjectOptions"
+                                            optionLabel="subject_code"
+                                            optionValue="id"
+                                            filter
+                                            filterPlaceholder="Search subject code or title"
+                                            display="chip"
+                                            :loading="manualSubjectsLoading"
+                                            placeholder="Select one or multiple subjects"
+                                            class="w-full"
+                                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                                        >
+                                            <template #option="{ option }">
+                                                <span class="font-medium">{{ option.subject_code }}</span>
+                                                <span class="text-slate-400"> — {{ option.subject_title }}</span>
+                                            </template>
+                                        </MultiSelect>
+                                        <small v-if="manualSubjectsError" class="text-red-500">{{ manualSubjectsError }}</small>
+                                    </div>
+                                </TabPanel>
+                            </TabPanels>
+                        </Tabs>
+
+                        <p class="text-xs text-slate-400 px-4 py-2 border-t border-slate-100">
+                            Every section created below will start out with the subjects checked/selected above already
+                            placed — two blocks of BSIT-1 (e.g. 1A and 1B) end up sharing the exact same subject list
+                            instead of needing "Generate Curriculum Subjects" or Manual Selection run separately for
+                            each. You can still add, remove, or override subjects per section afterward.
+                        </p>
+                    </div>
                 </div>
 
                 <!-- Live Preview -->

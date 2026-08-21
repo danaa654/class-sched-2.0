@@ -1252,6 +1252,8 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'manual_override' => $scored['manual_override'],
             'override_reason' => $scored['override_reason'],
             'utilization_percent' => $scored['utilization_percent'],
+            'scheduled_hours' => $scored['scheduled_hours'] ?? null,
+            'max_hours' => $scored['max_hours'] ?? null,
             'status_color' => $scored['status_color'],
             'explanation' => $scored['explanation'],
         ];

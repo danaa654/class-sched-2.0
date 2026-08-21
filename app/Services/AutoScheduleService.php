@@ -567,6 +567,8 @@ class AutoScheduleService
                 'confidence' => $room['confidence'],
                 'reasons' => $room['reasons'],
                 'utilization_percent' => $room['utilization_percent'] ?? null,
+                'scheduled_hours' => $room['scheduled_hours'] ?? null,
+                'max_hours' => $room['max_hours'] ?? null,
                 'status_color' => $room['status_color'] ?? null,
                 'explanation' => $room['explanation'] ?? null,
                 'badge' => $room['badge'] ?? null,
