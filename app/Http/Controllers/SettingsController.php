@@ -89,6 +89,17 @@ class SettingsController extends Controller
                 )->updated_at : null,
             ] : null,
             'activeSessions' => $isAdministrator ? ActiveSessionController::activeSessions($request) : [],
+            // Lazily evaluated — only actually queried when the
+            // Activity Log tab is open (initial load, or a
+            // router.reload({ only: ['activityLog'] }) triggered by
+            // paging/filtering), same reasoning as activeSessions but
+            // via Inertia::optional() since this one also needs
+            // pagination. (Inertia::optional() is this app's
+            // inertiajs/inertia-laravel v3.2 name for what older
+            // versions called Inertia::lazy() — same behavior.)
+            'activityLog' => $isAdministrator
+                ? Inertia::optional(fn () => ActivityLogController::activityLog($request))
+                : [],
         ]);
     }
 

@@ -14,6 +14,7 @@ use App\Models\Major;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Subject;
+use App\Services\ActivityLogService;
 use App\Services\EDPCodeService;
 use App\Services\NotificationService;
 use App\Services\ScheduleConflictService;
@@ -543,7 +544,7 @@ class SectionController extends Controller
      * the Edit Section workspace — instead of always bouncing to the
      * Sections list.
      */
-    public function update(UpdateSectionRequest $request, Section $section): RedirectResponse
+    public function update(UpdateSectionRequest $request, Section $section, ActivityLogService $activityLog): RedirectResponse
     {
         $this->authorize('update', $section);
 
@@ -554,6 +555,13 @@ class SectionController extends Controller
                 'section_code' => 'This section code was just taken by another request. Please use a different code.',
             ]);
         }
+
+        $activityLog->record(
+            ActivityLogService::SECTION_UPDATED,
+            "{$request->user()->full_name} updated section {$section->section_code}.",
+            $section,
+            $request->user(),
+        );
 
         return back()->with('success', 'Section updated successfully.');
     }
@@ -578,7 +586,7 @@ class SectionController extends Controller
      * signed off on; it must be explicitly unlocked (see unlock()
      * above) before it's eligible for deletion at all.
      */
-    public function destroy(Section $section): RedirectResponse
+    public function destroy(Request $request, Section $section, ActivityLogService $activityLog): RedirectResponse
     {
         $this->authorize('delete', $section);
 
@@ -586,7 +594,16 @@ class SectionController extends Controller
             return back()->with('error', "Section {$section->section_code}'s schedule is finalized — unlock it first before it can be deleted.");
         }
 
+        $sectionCode = $section->section_code;
+
         $section->delete();
+
+        $activityLog->record(
+            ActivityLogService::SECTION_DELETED,
+            "{$request->user()->full_name} deleted section {$sectionCode}.",
+            $section,
+            $request->user(),
+        );
 
         return redirect()->route('scheduling.sections')->with('success', 'Section archived successfully.');
     }

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\SystemSetting;
+use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -36,6 +37,8 @@ use Illuminate\Support\Facades\Cache;
 class SettingsService
 {
     private const CACHE_KEY = 'system_settings';
+
+    public function __construct(private readonly ActivityLogService $activityLog = new ActivityLogService) {}
 
     /**
      * Every recognised setting key, grouped, with its default value
@@ -177,6 +180,12 @@ class SettingsService
      */
     public function setMany(array $values, ?int $updatedByUserId = null): void
     {
+        if (empty($values)) {
+            Cache::forget(self::CACHE_KEY);
+
+            return;
+        }
+
         $schema = self::schema();
 
         foreach ($values as $key => $value) {
@@ -194,6 +203,29 @@ class SettingsService
         }
 
         Cache::forget(self::CACHE_KEY);
+
+        // Single choke point for every Settings save (updateGeneral,
+        // updateWorkload, updateRooms, updateAutoSchedule,
+        // updateIrregular, updateNotifications all funnel through
+        // here) — one Activity Log row per save, naming the group(s)
+        // touched rather than every individual key, so a multi-field
+        // save doesn't spam the log with one line per field.
+        if ($updatedByUserId) {
+            $groups = collect($values)
+                ->keys()
+                ->map(fn (string $key) => $schema[$key]['group'] ?? 'general')
+                ->unique()
+                ->values()
+                ->implode(', ');
+
+            $actor = User::find($updatedByUserId);
+
+            $this->activityLog->record(
+                ActivityLogService::SETTINGS_UPDATED,
+                trim(($actor?->full_name ?? 'A user')." updated the {$groups} settings."),
+                actor: $actor,
+            );
+        }
     }
 
     private function cast(?string $raw, string $type): mixed

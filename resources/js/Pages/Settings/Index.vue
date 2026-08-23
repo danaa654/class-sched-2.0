@@ -22,6 +22,7 @@ import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import Tag from 'primevue/tag';
 import Message from 'primevue/message';
+import DatePicker from 'primevue/datepicker';
 import InfoPopover from '@/Components/InfoPopover.vue';
 import { useTheme } from '@/composables/useTheme';
 
@@ -35,6 +36,7 @@ const props = defineProps({
     schoolYear: { type: Object, default: null },
     system: { type: Object, default: null },
     activeSessions: { type: Array, default: () => [] },
+    activityLog: { type: Object, default: () => ({}) },
 });
 
 const toast = useToast();
@@ -123,6 +125,43 @@ function forceLogout(session) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Activity Log                                                        */
+/* ------------------------------------------------------------------ */
+const activityLogFilters = ref({
+    log_action: props.activityLog?.filters?.action ?? null,
+    log_user_id: props.activityLog?.filters?.user_id ?? null,
+    log_date_from: props.activityLog?.filters?.date_from ?? null,
+    log_date_to: props.activityLog?.filters?.date_to ?? null,
+});
+
+function reloadActivityLog(extra = {}) {
+    router.reload({
+        only: ['activityLog'],
+        data: { ...activityLogFilters.value, ...extra },
+        preserveScroll: true,
+        preserveState: true,
+    });
+}
+
+function applyActivityLogFilters() {
+    reloadActivityLog({ log_page: 1 });
+}
+
+function clearActivityLogFilters() {
+    activityLogFilters.value = {
+        log_action: null,
+        log_user_id: null,
+        log_date_from: null,
+        log_date_to: null,
+    };
+    reloadActivityLog({ log_page: 1 });
+}
+
+function goToActivityLogPage(page) {
+    reloadActivityLog({ log_page: page });
+}
+
+/* ------------------------------------------------------------------ */
 /* Manage Account (Registrar / Dean / OIC / Assistant Dean)            */
 /* ------------------------------------------------------------------ */
 const accountForm = useForm({
@@ -176,6 +215,7 @@ const onUpdateAccount = () => {
                     <Tab v-if="has('academic')" value="academic">Academic</Tab>
                     <Tab v-if="has('workload')" value="workload">Faculty &amp; Workload</Tab>
                     <Tab v-if="has('system')" value="activeSessions">Active Sessions</Tab>
+                    <Tab v-if="has('system')" value="activityLog">Activity Log</Tab>
                     <Tab v-if="has('system')" value="system">System</Tab>
                     <Tab v-if="!isAdministrator" value="account">Manage Account</Tab>
                 </TabList>
@@ -356,6 +396,111 @@ const onUpdateAccount = () => {
                                                 />
                                             </li>
                                         </ul>
+                                    </div>
+                                </div>
+                            </template>
+                        </Card>
+                        </div>
+                    </TabPanel>
+
+                    <!-- ============================== ACTIVITY LOG ============================== -->
+                    <TabPanel v-if="has('system')" value="activityLog">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
+                            <template #content>
+                                <div class="flex items-start justify-between gap-4 mb-5">
+                                    <div>
+                                        <h2 class="text-lg font-bold text-[#1E293B] mb-1">Activity Log</h2>
+                                        <p class="text-sm text-slate-500 max-w-2xl">
+                                            A record of important actions across Classly — who did what, and when.
+                                            Visible to Administrators only.
+                                        </p>
+                                    </div>
+                                    <Button icon="pi pi-refresh" label="Refresh" text @click="reloadActivityLog()" />
+                                </div>
+
+                                <!-- Filters -->
+                                <div class="neu-inset rounded-2xl p-4 mb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+                                    <div class="flex flex-col gap-1">
+                                        <label class="text-xs text-slate-500">Action</label>
+                                        <Select
+                                            v-model="activityLogFilters.log_action"
+                                            :options="activityLog.action_options ?? []"
+                                            placeholder="All actions"
+                                            showClear
+                                            class="w-full"
+                                        />
+                                    </div>
+                                    <div class="flex flex-col gap-1">
+                                        <label class="text-xs text-slate-500">User</label>
+                                        <Select
+                                            v-model="activityLogFilters.log_user_id"
+                                            :options="activityLog.user_options ?? []"
+                                            optionLabel="name"
+                                            optionValue="id"
+                                            placeholder="All users"
+                                            showClear
+                                            class="w-full"
+                                        />
+                                    </div>
+                                    <div class="flex flex-col gap-1">
+                                        <label class="text-xs text-slate-500">From</label>
+                                        <DatePicker v-model="activityLogFilters.log_date_from" dateFormat="yy-mm-dd" showIcon class="w-full" />
+                                    </div>
+                                    <div class="flex flex-col gap-1">
+                                        <label class="text-xs text-slate-500">To</label>
+                                        <DatePicker v-model="activityLogFilters.log_date_to" dateFormat="yy-mm-dd" showIcon class="w-full" />
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <Button label="Apply" size="small" @click="applyActivityLogFilters" />
+                                        <Button label="Clear" size="small" text @click="clearActivityLogFilters" />
+                                    </div>
+                                </div>
+
+                                <div v-if="!activityLog.data || activityLog.data.length === 0" class="neu-inset rounded-2xl p-8 text-center text-slate-500">
+                                    No activity recorded yet for these filters.
+                                </div>
+
+                                <div v-else class="space-y-2">
+                                    <div
+                                        v-for="entry in activityLog.data"
+                                        :key="entry.id"
+                                        class="neu-inset rounded-2xl px-4 py-3 flex items-start justify-between gap-4"
+                                    >
+                                        <div class="flex flex-col gap-1">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="font-semibold text-[#1E293B] text-sm">{{ entry.actor }}</span>
+                                                <Tag v-if="entry.role" :value="entry.role" severity="secondary" class="!text-[10px]" />
+                                                <Tag :value="entry.action" severity="info" class="!text-[10px]" />
+                                            </div>
+                                            <span class="text-sm text-slate-600">{{ entry.description }}</span>
+                                        </div>
+                                        <span class="text-xs text-slate-400 whitespace-nowrap">
+                                            {{ new Date(entry.created_at).toLocaleString() }}
+                                        </span>
+                                    </div>
+
+                                    <!-- Pagination -->
+                                    <div v-if="activityLog.last_page > 1" class="flex items-center justify-between pt-3">
+                                        <span class="text-xs text-slate-400">
+                                            Page {{ activityLog.current_page }} of {{ activityLog.last_page }} · {{ activityLog.total }} total
+                                        </span>
+                                        <div class="flex gap-2">
+                                            <Button
+                                                icon="pi pi-chevron-left"
+                                                text
+                                                size="small"
+                                                :disabled="activityLog.current_page <= 1"
+                                                @click="goToActivityLogPage(activityLog.current_page - 1)"
+                                            />
+                                            <Button
+                                                icon="pi pi-chevron-right"
+                                                text
+                                                size="small"
+                                                :disabled="activityLog.current_page >= activityLog.last_page"
+                                                @click="goToActivityLogPage(activityLog.current_page + 1)"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </template>

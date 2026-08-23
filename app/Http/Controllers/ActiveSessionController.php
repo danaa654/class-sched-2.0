@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\ActivityLogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -78,7 +79,7 @@ class ActiveSessionController extends Controller
      * action unambiguous (it only ever ends *someone else's*
      * session).
      */
-    public function destroy(Request $request, string $session): RedirectResponse
+    public function destroy(Request $request, string $session, ActivityLogService $activityLog): RedirectResponse
     {
         abort_unless($request->user()->hasRole('Administrator'), 403);
 
@@ -86,11 +87,22 @@ class ActiveSessionController extends Controller
             return back()->withErrors(['session' => "You can't force-logout your own current session this way. Use Logout instead."]);
         }
 
+        $sessionRow = DB::table('sessions')->where('id', $session)->first(['user_id']);
+
         $deleted = DB::table('sessions')->where('id', $session)->delete();
 
         if (! $deleted) {
             return back()->withErrors(['session' => 'That session was already ended.']);
         }
+
+        $loggedOutUser = $sessionRow?->user_id ? User::find($sessionRow->user_id) : null;
+
+        $activityLog->record(
+            ActivityLogService::SESSION_FORCE_LOGOUT,
+            "{$request->user()->full_name} force-logged out ".($loggedOutUser?->full_name ?? 'a user').'.',
+            $loggedOutUser,
+            $request->user(),
+        );
 
         return back()->with('success', 'User has been logged out.');
     }

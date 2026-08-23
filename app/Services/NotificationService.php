@@ -43,6 +43,8 @@ use Illuminate\Support\Collection;
  */
 class NotificationService
 {
+    public function __construct(private readonly ActivityLogService $activityLog = new ActivityLogService) {}
+
     // Event types.
     public const TYPE_FINALIZED = 'SCHEDULE_FINALIZED';
 
@@ -659,6 +661,13 @@ class NotificationService
             'new_value' => 'Inactive',
             'created_at' => now(),
         ]);
+
+        $this->activityLog->record(
+            ActivityLogService::FACULTY_DEACTIVATED,
+            "{$actor->full_name} deactivated faculty member {$facultyName}.",
+            $faculty,
+            $actor,
+        );
     }
 
     /**
@@ -694,6 +703,13 @@ class NotificationService
             'new_value' => 'Deleted',
             'created_at' => now(),
         ]);
+
+        $this->activityLog->record(
+            ActivityLogService::FACULTY_DELETED,
+            "{$actor->full_name} removed faculty member {$facultyName} from the Faculty Master.",
+            $faculty,
+            $actor,
+        );
     }
 
     /**
@@ -752,6 +768,38 @@ class NotificationService
         } else {
             $this->audit($actor, $auditAction, $section, $sectionSubject);
         }
+
+        // One Activity Log row per save (never per changed field —
+        // that finer granularity already lives in schedule_audit_logs
+        // above). Only the first line of $message is used — for
+        // scheduleUpdated() specifically, $message spans several
+        // lines listing every field diff, which belongs in
+        // schedule_audit_logs, not in this general-purpose log line.
+        $this->activityLog->record(
+            $this->activityLogActionFor($auditAction),
+            "{$title}: ".strtok($message, "\n"),
+            $section,
+            $actor,
+        );
+    }
+
+    /**
+     * Maps a ScheduleAuditLog action code (this service's internal
+     * vocabulary) to the corresponding App\Services\ActivityLogService
+     * action code (the Activity Log tab's vocabulary). Falls back to
+     * the original code unchanged for anything not explicitly listed.
+     */
+    private function activityLogActionFor(string $auditAction): string
+    {
+        return match ($auditAction) {
+            'SECTION_CREATED' => ActivityLogService::SECTION_CREATED,
+            'FINALIZED' => ActivityLogService::SECTION_FINALIZED,
+            'UNLOCKED' => ActivityLogService::SECTION_UNLOCKED,
+            'SCHEDULE_UPDATED' => ActivityLogService::SCHEDULE_UPDATED,
+            'SUBJECT_ADDED' => ActivityLogService::SUBJECT_ADDED_TO_SECTION,
+            'SUBJECT_REMOVED' => ActivityLogService::SUBJECT_REMOVED_FROM_SECTION,
+            default => $auditAction,
+        };
     }
 
     /**

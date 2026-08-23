@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Services\ActivityLogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Password;
@@ -12,6 +14,8 @@ use Inertia\Response;
 
 class PasswordResetLinkController extends Controller
 {
+    public function __construct(private readonly ActivityLogService $activityLog = new ActivityLogService) {}
+
     /**
      * Display the password reset link request view.
      */
@@ -41,7 +45,21 @@ class PasswordResetLinkController extends Controller
             $request->only('email')
         );
 
+        // Only logged when a real account exists (RESET_LINK_SENT) —
+        // never for INVALID_USER below, so the Activity Log itself
+        // can't be used to confirm/deny an email's existence to
+        // anyone without Administrator access to begin with, and
+        // stays a true record of resets actually sent rather than
+        // every email typed into the form.
         if ($status === Password::RESET_LINK_SENT) {
+            $user = User::where('email', $request->string('email'))->first();
+
+            $this->activityLog->record(
+                ActivityLogService::PASSWORD_RESET_REQUESTED,
+                'A password reset was requested for '.($user?->full_name ?? $request->string('email')).'.',
+                $user,
+            );
+
             return back()->with('status', __($status));
         }
 

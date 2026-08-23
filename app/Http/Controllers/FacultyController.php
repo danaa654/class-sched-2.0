@@ -9,6 +9,7 @@ use App\Models\Faculty;
 use App\Models\FacultyLoadRequest;
 use App\Models\FacultyRequest;
 use App\Models\Subject;
+use App\Services\ActivityLogService;
 use App\Services\FacultyWorkloadService;
 use App\Services\NotificationService;
 use App\Support\AccessScope;
@@ -23,6 +24,7 @@ class FacultyController extends Controller
     public function __construct(
         private readonly FacultyWorkloadService $workloadService,
         private readonly NotificationService $notifications,
+        private readonly ActivityLogService $activityLog,
     ) {
     }
 
@@ -241,7 +243,16 @@ class FacultyController extends Controller
             $data['workload_type'] = 'units';
         }
 
-        Faculty::create($data);
+        $faculty = Faculty::create($data);
+
+        $facultyName = trim(($faculty->first_name ?? '').' '.($faculty->last_name ?? ''));
+
+        $this->activityLog->record(
+            ActivityLogService::FACULTY_CREATED,
+            "{$request->user()->full_name} added faculty member {$facultyName}.",
+            $faculty,
+            $request->user(),
+        );
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member added successfully.');
     }
@@ -292,6 +303,15 @@ class FacultyController extends Controller
                 $data['max_teaching_units'],
             );
         }
+
+        $facultyName = trim(($faculty->first_name ?? '').' '.($faculty->last_name ?? ''));
+
+        $this->activityLog->record(
+            ActivityLogService::FACULTY_UPDATED,
+            "{$request->user()->full_name} updated faculty member {$facultyName}.",
+            $faculty,
+            $request->user(),
+        );
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member updated successfully.');
     }

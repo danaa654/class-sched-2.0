@@ -1,0 +1,107 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\ActivityLog;
+use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
+
+/**
+ * ACTIVITY LOG — the single place that writes to `activity_logs`.
+ * Every controller/service that wants an entry in the Settings >
+ * Activity Log tab calls ActivityLogService::record() (a thin
+ * wrapper around a single ActivityLog::create()) — nothing else
+ * should ever touch that table directly, same convention
+ * NotificationService already enforces for `schedule_audit_logs`.
+ *
+ * This deliberately does NOT replace ScheduleAuditLog — field-level
+ * scheduling diffs stay exactly where they are. Where a scheduling
+ * action already routes through NotificationService (Section
+ * created/finalized/unlocked, Subject added/removed, Faculty
+ * deactivated/deleted directly), the call into here lives inside
+ * NotificationService itself so both tables stay in sync from one
+ * call site. Everywhere else (Settings changes, Faculty create/
+ * update, Section update/delete, forced logout, password reset
+ * requests) the owning controller/service calls record() directly.
+ */
+class ActivityLogService
+{
+    // Canonical action codes — kept here so every caller (and the
+    // Activity Log tab's filter dropdown) references the same list
+    // instead of ad hoc strings drifting out of sync.
+    public const SETTINGS_UPDATED = 'SETTINGS_UPDATED';
+
+    public const FACULTY_CREATED = 'FACULTY_CREATED';
+
+    public const FACULTY_UPDATED = 'FACULTY_UPDATED';
+
+    public const FACULTY_DEACTIVATED = 'FACULTY_DEACTIVATED';
+
+    public const FACULTY_DELETED = 'FACULTY_DELETED';
+
+    public const SECTION_CREATED = 'SECTION_CREATED';
+
+    public const SECTION_UPDATED = 'SECTION_UPDATED';
+
+    public const SECTION_DELETED = 'SECTION_DELETED';
+
+    public const SECTION_FINALIZED = 'SECTION_FINALIZED';
+
+    public const SECTION_UNLOCKED = 'SECTION_UNLOCKED';
+
+    public const SCHEDULE_UPDATED = 'SCHEDULE_UPDATED';
+
+    public const SUBJECT_ADDED_TO_SECTION = 'SUBJECT_ADDED_TO_SECTION';
+
+    public const SUBJECT_REMOVED_FROM_SECTION = 'SUBJECT_REMOVED_FROM_SECTION';
+
+    public const SESSION_FORCE_LOGOUT = 'SESSION_FORCE_LOGOUT';
+
+    public const PASSWORD_RESET_REQUESTED = 'PASSWORD_RESET_REQUESTED';
+
+    /**
+     * Every action code above, for the Activity Log tab's filter
+     * dropdown — kept in one place so it can never drift out of sync
+     * with what's actually recorded.
+     *
+     * @return list<string>
+     */
+    public static function actions(): array
+    {
+        return [
+            self::SETTINGS_UPDATED,
+            self::FACULTY_CREATED,
+            self::FACULTY_UPDATED,
+            self::FACULTY_DEACTIVATED,
+            self::FACULTY_DELETED,
+            self::SECTION_CREATED,
+            self::SECTION_UPDATED,
+            self::SECTION_DELETED,
+            self::SECTION_FINALIZED,
+            self::SECTION_UNLOCKED,
+            self::SCHEDULE_UPDATED,
+            self::SUBJECT_ADDED_TO_SECTION,
+            self::SUBJECT_REMOVED_FROM_SECTION,
+            self::SESSION_FORCE_LOGOUT,
+            self::PASSWORD_RESET_REQUESTED,
+        ];
+    }
+
+    /**
+     * Write one Activity Log row. $actor is nullable to cover the
+     * rare system-initiated case (e.g. a password reset request made
+     * by someone not yet authenticated) — the row is still written,
+     * just with no attributable user.
+     */
+    public function record(string $action, string $description, ?Model $subject = null, ?User $actor = null): ActivityLog
+    {
+        return ActivityLog::create([
+            'user_id' => $actor?->id,
+            'action' => $action,
+            'subject_type' => $subject ? $subject::class : null,
+            'subject_id' => $subject?->getKey(),
+            'description' => $description,
+            'created_at' => now(),
+        ]);
+    }
+}
