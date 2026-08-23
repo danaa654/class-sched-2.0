@@ -185,10 +185,28 @@ class RoomController extends Controller
 
     /**
      * Delete a room from the Room Master.
+     *
+     * Double confirmation, mirroring FacultyController::destroy(): a
+     * Room tied to a finalized/locked Section can never be deleted
+     * outright (unlock and reassign first). A Room with active
+     * (non-finalized) placements may still be deleted, but only after
+     * the admin/registrar confirms the warning — deleting it leaves
+     * those scheduled SectionSubject rows without a Room.
      */
-    public function destroy(Room $room): RedirectResponse
+    public function destroy(Request $request, Room $room): RedirectResponse
     {
         $this->authorize('delete', $room);
+
+        $impact = $this->utilization->deletionImpact($room);
+
+        if ($impact['has_finalized_assignment']) {
+            return back()->with('error', 'This room is assigned to a finalized schedule ('.implode(', ', $impact['finalized_section_codes']).'). Unlock the affected section(s) and reassign before deleting.');
+        }
+
+        if ($impact['has_active_assignments'] && ! $request->boolean('confirmed')) {
+            return back()->with('error', 'This room has active scheduled classes. Confirm the warning to proceed.')
+                ->with('roomDeletionImpact', $impact);
+        }
 
         $room->delete();
 

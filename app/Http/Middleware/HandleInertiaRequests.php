@@ -93,6 +93,10 @@ class HandleInertiaRequests extends Middleware
                 // flow — see FacultyController::destroy() and
                 // Faculty/Index.vue's onDeleteFaculty().
                 'facultyDeletionImpact' => fn () => $request->session()->get('facultyDeletionImpact'),
+                // Same double-confirmation pattern for Room deletion —
+                // see RoomController::destroy() and
+                // RoomUtilizationService::deletionImpact().
+                'roomDeletionImpact' => fn () => $request->session()->get('roomDeletionImpact'),
             ],
             // The currently Active Academic Term (School Year +
             // Semester) — the real, system-wide one, unaffected by

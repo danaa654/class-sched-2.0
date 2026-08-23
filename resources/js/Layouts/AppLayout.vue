@@ -113,15 +113,15 @@ const isActive = (routeName) => {
                 <!-- School branding (Settings → General) — separate from CLASSLY's own mark above -->
                 <template v-if="schoolBranding.name">
                     <span class="h-5 w-px bg-white/15"></span>
-                    <div class="hidden items-center gap-2 sm:flex">
+                    <div class="hidden items-center gap-2 sm:flex min-w-0">
                         <img
                             v-if="schoolBranding.logoUrl"
                             :src="schoolBranding.logoUrl"
                             alt=""
-                            class="h-6 w-6 rounded-full object-cover"
+                            class="h-6 w-6 rounded-full object-cover shrink-0"
                             @error="$event.target.style.display = 'none'"
                         />
-                        <span class="max-w-[220px] truncate text-sm font-medium text-slate-300">{{ schoolBranding.name }}</span>
+                        <span class="max-w-[320px] truncate text-xs font-medium text-slate-300">{{ schoolBranding.name }}</span>
                     </div>
                 </template>
             </div>

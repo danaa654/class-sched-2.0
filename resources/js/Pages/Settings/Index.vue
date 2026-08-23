@@ -62,24 +62,16 @@ const onError = () => {
 /* ------------------------------------------------------------------ */
 /* General                                                             */
 /* ------------------------------------------------------------------ */
-const logoFile = ref(null);
 const generalForm = useForm({
     school_name: props.settings['general.school_name'] ?? '',
     school_short_name: props.settings['general.school_short_name'] ?? '',
     school_address: props.settings['general.school_address'] ?? '',
     school_contact: props.settings['general.school_contact'] ?? '',
     school_email: props.settings['general.school_email'] ?? '',
-    logo: null,
 });
-const onLogoChange = (e) => {
-    const file = e.target.files?.[0] ?? null;
-    logoFile.value = file;
-    generalForm.logo = file;
-};
 const saveGeneral = () => {
     generalForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.general.update'), {
         preserveScroll: true,
-        forceFormData: true,
         onError,
     });
 };
@@ -98,94 +90,6 @@ const saveWorkload = () => {
     workloadForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.workload.update'), { preserveScroll: true, onError });
 };
 
-/* ------------------------------------------------------------------ */
-/* Rooms                                                                */
-/* ------------------------------------------------------------------ */
-const roomPriorityLabels = {
-    subject_requirement: 'Subject Requirement',
-    college: 'College',
-    department_program: 'Department / Program',
-    capacity: 'Capacity',
-    availability: 'Availability',
-};
-const roomsForm = useForm({
-    enable_recommendations: props.settings['rooms.enable_recommendations'] ?? true,
-    priority_order: [...(props.settings['rooms.priority_order'] ?? ['subject_requirement', 'college', 'department_program', 'capacity', 'availability'])],
-});
-const moveRoomPriority = (index, direction) => {
-    const target = index + direction;
-    if (target < 0 || target >= roomsForm.priority_order.length) return;
-    const arr = [...roomsForm.priority_order];
-    [arr[index], arr[target]] = [arr[target], arr[index]];
-    roomsForm.priority_order = arr;
-};
-const saveRooms = () => {
-    roomsForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.rooms.update'), { preserveScroll: true, onError });
-};
-
-/* ------------------------------------------------------------------ */
-/* Auto Schedule / AI                                                  */
-/* ------------------------------------------------------------------ */
-const autoModeOptions = [
-    { label: 'Balanced', value: 'balanced' },
-    { label: 'Constraint Priority', value: 'constraint_priority' },
-    { label: 'Optimization Priority', value: 'optimization_priority' },
-];
-const priorityLevels = [
-    { label: 'High', value: 'high' },
-    { label: 'Medium', value: 'medium' },
-    { label: 'Low', value: 'low' },
-];
-const priorityLabels = {
-    room_availability: 'Room Availability',
-    faculty_workload: 'Faculty Workload',
-    section_daily_load: 'Section Daily Load',
-    minimize_idle_gaps: 'Minimize Idle Gaps',
-    room_suitability: 'Room Suitability',
-    preferred_meeting_frequency: 'Preferred Meeting Frequency',
-    merge_irregular_classes: 'Merge Irregular Classes',
-    college_program_room_restrictions: 'College/Program Room Restrictions',
-};
-const autoScheduleForm = useForm({
-    mode: props.settings['autoschedule.mode'] ?? 'balanced',
-    priorities: { ...(props.settings['autoschedule.priorities'] ?? {}) },
-    enable_daily_load_optimization: props.settings['autoschedule.enable_daily_load_optimization'] ?? true,
-    max_continuous_duration_hours: props.settings['autoschedule.max_continuous_duration_hours'] ?? 5,
-});
-const saveAutoSchedule = () => {
-    autoScheduleForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.autoschedule.update'), { preserveScroll: true, onError });
-};
-
-/* ------------------------------------------------------------------ */
-/* Irregular sections                                                  */
-/* ------------------------------------------------------------------ */
-const irregularModeOptions = [
-    { label: 'Auto-select', value: 'auto_select' },
-    { label: 'Recommend Merge', value: 'recommend_merge' },
-    { label: 'Independent Class', value: 'independent_class' },
-];
-const irregularForm = useForm({
-    default_estimated_students: props.settings['irregular.default_estimated_students'] ?? 5,
-    enable_merge_recommendations: props.settings['irregular.enable_merge_recommendations'] ?? true,
-    default_mode: props.settings['irregular.default_mode'] ?? 'auto_select',
-});
-const saveIrregular = () => {
-    irregularForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.irregular.update'), { preserveScroll: true, onError });
-};
-
-/* ------------------------------------------------------------------ */
-/* Notifications                                                       */
-/* ------------------------------------------------------------------ */
-const notificationsForm = useForm({
-    schedule_conflict: props.settings['notifications.schedule_conflict'] ?? true,
-    workload_warning: props.settings['notifications.workload_warning'] ?? true,
-    room_conflict: props.settings['notifications.room_conflict'] ?? true,
-    unscheduled_subject: props.settings['notifications.unscheduled_subject'] ?? true,
-    merge_recommendation: props.settings['notifications.merge_recommendation'] ?? true,
-});
-const saveNotifications = () => {
-    notificationsForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.notifications.update'), { preserveScroll: true, onError });
-};
 
 /* ------------------------------------------------------------------ */
 /* System / Maintenance                                                */
@@ -237,8 +141,6 @@ const onUpdateAccount = () => {
                         ]"
                         :bullets="[
                             'Academic — a read-only summary of the daily class window, lunch break, and available scheduling days; managed on the Academic Calendar page.',
-                            'Auto Schedule — rules the recommendation engine follows when proposing Faculty, Room, and Time.',
-                            'Irregular Scheduling — controls for merging irregular section subjects into compatible regular sections.',
                             'Changing these settings affects future scheduling; it does not retroactively change schedules already saved.',
                         ]"
                     />
@@ -254,10 +156,6 @@ const onUpdateAccount = () => {
                     <Tab v-if="has('general')" value="general">General</Tab>
                     <Tab v-if="has('academic')" value="academic">Academic</Tab>
                     <Tab v-if="has('workload')" value="workload">Faculty &amp; Workload</Tab>
-                    <Tab v-if="has('rooms')" value="rooms">Rooms</Tab>
-                    <Tab v-if="has('autoschedule')" value="autoschedule">Auto Schedule</Tab>
-                    <Tab v-if="has('irregular')" value="irregular">Irregular Scheduling</Tab>
-                    <Tab v-if="has('notifications')" value="notifications">Notifications</Tab>
                     <Tab v-if="has('system')" value="system">System</Tab>
                     <Tab v-if="!isAdministrator" value="account">Manage Account</Tab>
                 </TabList>
@@ -295,20 +193,6 @@ const onUpdateAccount = () => {
                                         <label for="schoolAddress">Address</label>
                                     </FloatLabel>
                                 </fieldset>
-
-                                <Divider class="!my-6" />
-
-                                <div class="flex flex-col sm:flex-row sm:items-center gap-5">
-                                    <img v-if="settings['general.school_logo_path']" :src="settings['general.school_logo_path']" class="h-16 w-16 object-cover rounded-xl neu-inset shrink-0" alt="Current logo" />
-                                    <div class="neu-inset h-16 w-16 rounded-xl flex items-center justify-center text-slate-300 shrink-0" v-else>
-                                        <i class="pi pi-image text-xl"></i>
-                                    </div>
-                                    <div class="flex-1">
-                                        <label class="text-sm text-slate-600 font-medium mb-1 block">School Logo</label>
-                                        <input type="file" accept="image/*" :disabled="!canEdit('general')" @change="onLogoChange" class="text-sm" />
-                                        <small v-if="generalForm.errors.logo" class="text-red-500 block mt-1">{{ generalForm.errors.logo }}</small>
-                                    </div>
-                                </div>
 
                                 <div v-if="canEdit('general')" class="flex justify-end mt-6">
                                     <Button label="Save Changes" icon="pi pi-check" :loading="generalForm.processing" @click="saveGeneral" />
@@ -388,151 +272,6 @@ const onUpdateAccount = () => {
 
                                 <div v-if="canEdit('workload')" class="flex justify-end mt-6">
                                     <Button label="Save Changes" icon="pi pi-check" :loading="workloadForm.processing" @click="saveWorkload" />
-                                </div>
-                            </template>
-                        </Card>
-                        </div>
-                    </TabPanel>
-
-                    <!-- ============================== ROOMS ============================== -->
-                    <TabPanel v-if="has('rooms')" value="rooms">
-                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
-                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
-                            <template #content>
-                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Rooms</h2>
-                                <p class="text-sm text-slate-500 mb-5">
-                                    Controls Auto Schedule's room-recommendation behavior only. Actual rooms and their
-                                    capacity/type remain managed on the
-                                    <a :href="route('scheduling.rooms')" class="text-[#2563EB] underline">Rooms</a> page.
-                                </p>
-
-                                <div class="flex items-center gap-3 mb-5">
-                                    <ToggleSwitch v-model="roomsForm.enable_recommendations" :disabled="!canEdit('rooms')" />
-                                    <span>Use room recommendations during Auto Schedule</span>
-                                </div>
-
-                                <label class="text-sm text-slate-600 font-medium mb-2 block">Room Recommendation Priority (top = highest priority)</label>
-                                <ul class="space-y-2">
-                                    <li v-for="(key, index) in roomsForm.priority_order" :key="key" class="neu-inset flex items-center justify-between rounded-xl px-3 py-2">
-                                        <span class="text-sm">{{ index + 1 }}. {{ roomPriorityLabels[key] }}</span>
-                                        <div class="flex gap-1" v-if="canEdit('rooms')">
-                                            <Button icon="pi pi-arrow-up" text size="small" :disabled="index === 0" @click="moveRoomPriority(index, -1)" />
-                                            <Button icon="pi pi-arrow-down" text size="small" :disabled="index === roomsForm.priority_order.length - 1" @click="moveRoomPriority(index, 1)" />
-                                        </div>
-                                    </li>
-                                </ul>
-
-                                <div v-if="canEdit('rooms')" class="flex justify-end mt-6">
-                                    <Button label="Save Changes" icon="pi pi-check" :loading="roomsForm.processing" @click="saveRooms" />
-                                </div>
-                            </template>
-                        </Card>
-                        </div>
-                    </TabPanel>
-
-                    <!-- ============================== AUTO SCHEDULE / AI ============================== -->
-                    <TabPanel v-if="has('autoschedule')" value="autoschedule">
-                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
-                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
-                            <template #content>
-                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Auto Schedule / AI</h2>
-                                <p class="text-sm text-slate-500 mb-2">
-                                    Controls how aggressively Auto Schedule optimizes. Soft preferences below are used to
-                                    rank valid solutions — they can never override a
-                                    <Tag severity="danger" value="HARD CONSTRAINT" class="!text-[10px] align-middle" /> such as
-                                    Faculty/Room conflict, Lunch Break, a disabled day, or outside the scheduling window.
-                                </p>
-
-                                <fieldset :disabled="!canEdit('autoschedule')">
-                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-4">
-                                        <FloatLabel variant="on">
-                                            <Select id="autoMode" size="large" v-model="autoScheduleForm.mode" :options="autoModeOptions" optionLabel="label" optionValue="value" class="w-full" />
-                                            <label for="autoMode">Auto Schedule Mode</label>
-                                        </FloatLabel>
-                                        <FloatLabel variant="on">
-                                            <InputNumber id="maxContinuous" size="large" v-model="autoScheduleForm.max_continuous_duration_hours" class="w-full" :min="1" :max="12" suffix=" hrs" />
-                                            <label for="maxContinuous">Max Continuous Class Duration</label>
-                                        </FloatLabel>
-                                    </div>
-
-                                    <div class="flex items-center gap-3 mt-5">
-                                        <ToggleSwitch v-model="autoScheduleForm.enable_daily_load_optimization" />
-                                        <span>Enable Section Daily Load Optimization <Tag severity="secondary" value="SOFT PREFERENCE" class="!text-[10px]" /></span>
-                                    </div>
-
-                                    <Divider class="!my-5" />
-
-                                    <label class="text-sm text-slate-600 font-medium mb-2 block">Optimization Priorities <Tag severity="secondary" value="SOFT PREFERENCE" class="!text-[10px]" /></label>
-                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                        <div v-for="(label, key) in priorityLabels" :key="key" class="neu-inset flex items-center justify-between rounded-xl px-3 py-2">
-                                            <span class="text-sm">{{ label }}</span>
-                                            <Select v-model="autoScheduleForm.priorities[key]" :options="priorityLevels" optionLabel="label" optionValue="value" class="!w-28" />
-                                        </div>
-                                    </div>
-                                </fieldset>
-
-                                <div v-if="canEdit('autoschedule')" class="flex justify-end mt-6">
-                                    <Button label="Save Changes" icon="pi pi-check" :loading="autoScheduleForm.processing" @click="saveAutoSchedule" />
-                                </div>
-                            </template>
-                        </Card>
-                        </div>
-                    </TabPanel>
-
-                    <!-- ============================== IRREGULAR SCHEDULING ============================== -->
-                    <TabPanel v-if="has('irregular')" value="irregular">
-                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
-                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
-                            <template #content>
-                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Irregular Scheduling</h2>
-                                <Message severity="warn" :closable="false" class="mb-4 !text-sm">
-                                    Student-level conflict checking is unavailable because student enrollment data is not
-                                    currently stored in Classly.
-                                </Message>
-
-                                <fieldset :disabled="!canEdit('irregular')" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                                    <FloatLabel variant="on">
-                                        <InputNumber id="defEstStudents" size="large" v-model="irregularForm.default_estimated_students" class="w-full" :min="1" :max="200" />
-                                        <label for="defEstStudents">Default Estimated Students</label>
-                                    </FloatLabel>
-                                    <FloatLabel variant="on">
-                                        <Select id="irregularMode" size="large" v-model="irregularForm.default_mode" :options="irregularModeOptions" optionLabel="label" optionValue="value" class="w-full" />
-                                        <label for="irregularMode">Default Irregular Scheduling Mode</label>
-                                    </FloatLabel>
-                                </fieldset>
-                                <p class="text-xs text-slate-400 mt-1">An individual Irregular Section can still override its own estimated students.</p>
-
-                                <div class="flex items-center gap-3 mt-5">
-                                    <ToggleSwitch v-model="irregularForm.enable_merge_recommendations" :disabled="!canEdit('irregular')" />
-                                    <span>Enable Merge Recommendations</span>
-                                </div>
-
-                                <div v-if="canEdit('irregular')" class="flex justify-end mt-6">
-                                    <Button label="Save Changes" icon="pi pi-check" :loading="irregularForm.processing" @click="saveIrregular" />
-                                </div>
-                            </template>
-                        </Card>
-                        </div>
-                    </TabPanel>
-
-                    <!-- ============================== NOTIFICATIONS ============================== -->
-                    <TabPanel v-if="has('notifications')" value="notifications">
-                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
-                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
-                            <template #content>
-                                <h2 class="text-lg font-bold text-[#1E293B] mb-1">Notifications</h2>
-                                <p class="text-sm text-slate-500 mb-5">Controls which in-app warnings/notifications are shown.</p>
-
-                                <fieldset :disabled="!canEdit('notifications')" class="space-y-3">
-                                    <div class="flex items-center gap-3"><ToggleSwitch v-model="notificationsForm.schedule_conflict" /><span>Schedule Conflict Notifications</span></div>
-                                    <div class="flex items-center gap-3"><ToggleSwitch v-model="notificationsForm.workload_warning" /><span>Faculty Workload Warnings</span></div>
-                                    <div class="flex items-center gap-3"><ToggleSwitch v-model="notificationsForm.room_conflict" /><span>Room Conflict Notifications</span></div>
-                                    <div class="flex items-center gap-3"><ToggleSwitch v-model="notificationsForm.unscheduled_subject" /><span>Unscheduled Subject Notifications</span></div>
-                                    <div class="flex items-center gap-3"><ToggleSwitch v-model="notificationsForm.merge_recommendation" /><span>Merge Recommendation Notifications</span></div>
-                                </fieldset>
-
-                                <div v-if="canEdit('notifications')" class="flex justify-end mt-6">
-                                    <Button label="Save Changes" icon="pi pi-check" :loading="notificationsForm.processing" @click="saveNotifications" />
                                 </div>
                             </template>
                         </Card>

@@ -31,6 +31,45 @@ class RoomUtilizationService
     public function __construct(private readonly ScheduleConflictService $conflicts) {}
 
     /**
+     * Deletion-impact summary for one Room — powers the double
+     * confirmation on Room delete (spec: same pattern as
+     * FacultyWorkloadService::deactivationImpact()).
+     *
+     * A Room tied to a finalized/locked Section can never be deleted
+     * outright (the schedule must be unlocked and the class moved
+     * first). A Room with active (non-finalized) placements may still
+     * be deleted, but only after the admin/registrar confirms —
+     * deleting it leaves those SectionSubject rows without a Room.
+     *
+     * @return array{
+     *   has_active_assignments:bool,
+     *   has_finalized_assignment:bool,
+     *   subject_count:int,
+     *   section_count:int,
+     *   subject_codes:array<int,string>,
+     *   section_codes:array<int,string>,
+     *   finalized_section_codes:array<int,string>,
+     * }
+     */
+    public function deletionImpact(Room $room): array
+    {
+        $placements = $this->activeTermPlacementsForRoom($room->id, ['section', 'subject']);
+
+        $finalized = $placements->filter(fn (SectionSubject $p) => (bool) ($p->section?->is_finalized));
+        $active = $placements->reject(fn (SectionSubject $p) => (bool) ($p->section?->is_finalized));
+
+        return [
+            'has_active_assignments' => $active->isNotEmpty(),
+            'has_finalized_assignment' => $finalized->isNotEmpty(),
+            'subject_count' => $active->pluck('subject_id')->unique()->count(),
+            'section_count' => $active->pluck('section_id')->unique()->count(),
+            'subject_codes' => $active->pluck('subject.subject_code')->filter()->unique()->values()->all(),
+            'section_codes' => $active->pluck('section.section_code')->filter()->unique()->values()->all(),
+            'finalized_section_codes' => $finalized->pluck('section.section_code')->filter()->unique()->values()->all(),
+        ];
+    }
+
+    /**
      * Weekly Utilization + Availability summary for one Room, scoped to
      * the Active Academic Term.
      *
@@ -245,7 +284,7 @@ class RoomUtilizationService
             ->with($with);
     }
 
-    private function activeTermPlacementsForRoom(int $roomId, array $with = []): Collection
+    public function activeTermPlacementsForRoom(int $roomId, array $with = []): Collection
     {
         return $this->activeTermPlacements($with)->where('room_id', $roomId)->get();
     }

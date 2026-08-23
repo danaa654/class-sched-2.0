@@ -74,6 +74,13 @@ const availabilitySeverity = (status) => AVAILABILITY_SEVERITY[status] ?? 'info'
 const toast = useToast();
 const page = usePage();
 
+// Room Master administration (Add/Edit/Delete) is Admin/Registrar
+// only — Dean/OIC/Assistant Dean may view and use Rooms for
+// scheduling but never touch the master record. Mirrors
+// RoomPolicy::create()/update()/delete(); this is UI-visibility
+// only, the real enforcement is server-side on every request.
+const canManageRooms = computed(() => !!page.props.auth?.can?.manageRooms);
+
 // Show a toast whenever the backend flashes a success/error message.
 watch(
     () => page.props.flash?.success,
@@ -328,24 +335,73 @@ const onSaveRoom = (retried = false) => {
     });
 };
 
+// Double-confirmation flow, mirroring Faculty/Index.vue's
+// onDeleteFaculty(): the first Swal is a plain "are you sure", the
+// second (only shown when the backend flashes roomDeletionImpact
+// because this room has active scheduled classes) spells out exactly
+// what's affected before letting the delete through.
+const pendingDeleteRoom = ref(null);
+
 const onDeleteRoom = (room) => {
     Swal.fire({
         title: 'Delete this room?',
-        text: `${room.room_name} will be permanently deleted.`,
+        html: `<strong>${room.room_name}</strong><br/><br/>
+            This permanently removes it from the Room Master. If it simply isn't in use this term but may be needed
+            again later, cancel this and use <strong>Edit → Status → Inactive</strong> instead.`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
         cancelButtonColor: '#64748B',
-        confirmButtonText: 'Yes, delete it',
-    }).then((result) => {
-        if (result.isConfirmed) {
+        confirmButtonText: 'Continue',
+    }).then((confirmStep) => {
+        if (!confirmStep.isConfirmed) return;
+
+        pendingDeleteRoom.value = room;
+        router.delete(route('scheduling.rooms.destroy', room.id), {
+            preserveScroll: true,
+            onSuccess: () => onRefresh(),
+            onError: () => {},
+            // If the backend has no active assignment to warn about,
+            // it deletes immediately here and the watcher below never
+            // fires — this Swal chain is skipped entirely.
+        });
+    });
+};
+
+// Real second-step confirmation, using the flashed impact summary the
+// backend returns when it declines an unconfirmed delete because the
+// room has active (non-finalized) scheduled classes
+// (`roomDeletionImpact` — see RoomController::destroy()).
+watch(
+    () => page.props.flash?.roomDeletionImpact,
+    (impact) => {
+        if (!impact || !pendingDeleteRoom.value) return;
+        const room = pendingDeleteRoom.value;
+        pendingDeleteRoom.value = null;
+
+        Swal.fire({
+            title: '⚠ Room Has Active Scheduled Classes',
+            html: `<strong>${room.room_name}</strong><br/>
+                Current active assignments:<br/>
+                ${impact.subject_count} subject(s), ${impact.section_count} section(s)<br/><br/>
+                <span class="text-amber-600">Deleting this room will leave those scheduled classes without an assigned room.</span><br/><br/>
+                Affected subjects: ${impact.subject_codes.join(', ') || '—'}<br/>
+                Affected sections: ${impact.section_codes.join(', ') || '—'}`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#DC2626',
+            cancelButtonColor: '#64748B',
+            confirmButtonText: 'Delete Room',
+        }).then((second) => {
+            if (!second.isConfirmed) return;
             router.delete(route('scheduling.rooms.destroy', room.id), {
+                data: { confirmed: true },
                 preserveScroll: true,
                 onSuccess: () => onRefresh(),
             });
-        }
-    });
-};
+        });
+    },
+);
 
 /* ------------------------------------------------------------------ */
 /* Room Schedule Details modal                                         */
@@ -499,7 +555,7 @@ const closeSchedule = () => {
                                     @click="onRefresh"
                                     aria-label="Refresh"
                                 />
-                                <Button label="Add Room" icon="pi pi-plus" severity="success" @click="openAdd" />
+                                <Button v-if="canManageRooms" label="Add Room" icon="pi pi-plus" severity="success" @click="openAdd" />
                             </div>
                         </template>
                     </Toolbar>
@@ -595,10 +651,11 @@ const closeSchedule = () => {
                         <template #empty>
                             <div class="text-center py-10">
                                 <p class="text-slate-500 font-medium">No rooms found.</p>
-                                <p class="text-slate-400 text-sm mt-1">
+                                <p v-if="canManageRooms" class="text-slate-400 text-sm mt-1">
                                     Click "Add Room" to create your first room.
                                 </p>
                                 <Button
+                                    v-if="canManageRooms"
                                     label="Add Room"
                                     icon="pi pi-plus"
                                     severity="success"
@@ -731,24 +788,26 @@ const closeSchedule = () => {
                                         aria-label="View Schedule"
                                         @click="openSchedule(data)"
                                     />
-                                    <Button
-                                        icon="pi pi-pencil"
-                                        text
-                                        rounded
-                                        severity="secondary"
-                                        size="small"
-                                        aria-label="Edit"
-                                        @click="openEdit(data)"
-                                    />
-                                    <Button
-                                        icon="pi pi-trash"
-                                        text
-                                        rounded
-                                        severity="danger"
-                                        size="small"
-                                        aria-label="Delete"
-                                        @click="onDeleteRoom(data)"
-                                    />
+                                    <template v-if="canManageRooms">
+                                        <Button
+                                            icon="pi pi-pencil"
+                                            text
+                                            rounded
+                                            severity="secondary"
+                                            size="small"
+                                            aria-label="Edit"
+                                            @click="openEdit(data)"
+                                        />
+                                        <Button
+                                            icon="pi pi-trash"
+                                            text
+                                            rounded
+                                            severity="danger"
+                                            size="small"
+                                            aria-label="Delete"
+                                            @click="onDeleteRoom(data)"
+                                        />
+                                    </template>
                                 </div>
                             </template>
                         </Column>
