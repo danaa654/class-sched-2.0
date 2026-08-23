@@ -61,6 +61,9 @@ const academicSetupItems = computed(() => [
 // (Faculty/Room/Section Policies) and reflected via `can_manage`
 // flags the controllers attach to each row.
 const resourceManagementItems = [
+    // Load Requests now lives inside the Faculty page itself (a
+    // section below the roster) rather than its own nav item — see
+    // FacultyController@index and Scheduling/Faculty/Index.vue.
     { label: 'Faculty', route: 'scheduling.faculty', icon: 'pi pi-user' },
     { label: 'Rooms', route: 'scheduling.rooms', icon: 'pi pi-building' },
     { label: 'Sections', route: 'scheduling.sections', icon: 'pi pi-th-large' },

@@ -265,7 +265,7 @@ const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null,
             class="mt-6 text-center text-xs"
             :class="isDark ? 'text-slate-500' : 'text-slate-400'"
         >
-            &copy; 2026 {{ schoolBranding.name }} — Powered by Classly
+            &copy; 2026 {{ schoolBranding.name }} — by Classly @ DJS
         </p>
     </div>
 </template>

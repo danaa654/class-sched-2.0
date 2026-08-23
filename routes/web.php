@@ -12,6 +12,7 @@ use App\Http\Controllers\CurriculumSubjectController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\FacultyController;
+use App\Http\Controllers\FacultyLoadRequestController;
 use App\Http\Controllers\MajorController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ReportsController;
@@ -109,6 +110,16 @@ Route::middleware('auth')->group(function () {
     Route::get('/scheduling/faculty/{faculty}', [FacultyController::class, 'show'])->name('scheduling.faculty.show');
     Route::put('/scheduling/faculty/{faculty}', [FacultyController::class, 'update'])->name('scheduling.faculty.update');
     Route::delete('/scheduling/faculty/{faculty}', [FacultyController::class, 'destroy'])->name('scheduling.faculty.destroy');
+
+    // Faculty load change requests — Dean/OIC/Assistant Dean's only
+    // path to raising a faculty member's teaching load ceiling; Admin/
+    // Registrar review via {facultyLoadRequest}/review. The queue now
+    // renders as a section on the Faculty page itself
+    // (FacultyController@index) rather than its own screen, so there
+    // is no GET index route here anymore — just store/review.
+    Route::post('/scheduling/faculty-load-requests', [FacultyLoadRequestController::class, 'store'])->name('scheduling.faculty-load-requests.store');
+    Route::put('/scheduling/faculty-load-requests/{facultyLoadRequest}/review', [FacultyLoadRequestController::class, 'review'])->name('scheduling.faculty-load-requests.review');
+    Route::delete('/scheduling/faculty-load-requests/{facultyLoadRequest}', [FacultyLoadRequestController::class, 'destroy'])->name('scheduling.faculty-load-requests.destroy');
 
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');

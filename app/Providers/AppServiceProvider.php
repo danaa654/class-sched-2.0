@@ -3,10 +3,12 @@
 namespace App\Providers;
 
 use App\Models\Faculty;
+use App\Models\FacultyLoadRequest;
 use App\Models\Room;
 use App\Models\Section;
 use App\Models\Subject;
 use App\Models\User;
+use App\Policies\FacultyLoadRequestPolicy;
 use App\Policies\FacultyPolicy;
 use App\Policies\RoomPolicy;
 use App\Policies\SectionPolicy;
@@ -23,6 +25,7 @@ class AppServiceProvider extends ServiceProvider
      */
     protected $policies = [
         Faculty::class => FacultyPolicy::class,
+        FacultyLoadRequest::class => FacultyLoadRequestPolicy::class,
         Subject::class => SubjectPolicy::class,
         Room::class => RoomPolicy::class,
         Section::class => SectionPolicy::class,

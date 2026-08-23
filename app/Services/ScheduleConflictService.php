@@ -64,6 +64,12 @@ use Illuminate\Support\Facades\Log;
  *
  *   1. Faculty availability      (Faculty exists & is Active)
  *   2. Faculty schedule conflict (this Section's own term)
+ *   2b. Faculty daily-hours cap (this Section's own term) — separate
+ *       from the weekly/semester Max Teaching Load: caps how many
+ *       hours a Faculty member can be scheduled on ONE calendar day,
+ *       regardless of how far under their weekly load they are. See
+ *       findFacultyDailyHoursViolation() and the
+ *       'workload.max_daily_teaching_hours' setting.
  *   3. Room availability         (Room exists & is Active)
  *   4. Room conflict             (this Section's own term)
  *   5. Section conflict          (this Section's own term)
@@ -82,6 +88,11 @@ use Illuminate\Support\Facades\Log;
  */
 class ScheduleConflictService
 {
+    public function __construct(
+        private readonly \App\Services\SettingsService $settings,
+    ) {
+    }
+
     /**
      * Per-request cache for activeSemesterSectionIds() — see that
      * method's docblock. Reset is never needed: a single HTTP request
@@ -158,6 +169,19 @@ class ScheduleConflictService
                 return ['faculty_id' => "Faculty Conflict: {$facultyName} already teaches "
                     ."{$conflict->subject?->subject_code} in {$conflict->section?->section_code} on "
                     .$this->describeWindow($conflict).'.', ];
+            }
+        }
+
+        // 2b. Faculty daily-hours cap — independent of the weekly/
+        // semester unit total. A faculty member can be well under
+        // their Max Teaching Load and still get crammed into an
+        // unrealistic single day (e.g. the whole 8AM-7PM window).
+        if ($facultyId) {
+            $violation = $this->findFacultyDailyHoursViolation($facultyId, $excludingSectionSubjectId, $dayTokens, $startTime, $endTime, $sectionId);
+            if ($violation) {
+                return ['faculty_id' => "Daily Load Exceeded: this would put {$violation['faculty_name']} at "
+                    ."{$violation['projected_hours']} hours on {$violation['day']}, above the "
+                    ."{$violation['cap']}-hour daily teaching cap.", ];
             }
         }
 
@@ -268,6 +292,69 @@ class ScheduleConflictService
             $startTime,
             $endTime
         );
+    }
+
+    /**
+     * DAILY-HOURS CAP — separate from Max Teaching Load (a weekly/
+     * semester unit total). Sums this Faculty member's ALREADY-
+     * scheduled minutes on each requested Day (across every Section
+     * sharing the acting Section's own term, same scope as
+     * findFacultyConflict()), adds the new slot's minutes, and flags
+     * it when the projected total for any one Day exceeds the
+     * institution's 'workload.max_daily_teaching_hours' setting
+     * (default 8 — a realistic single-day teaching ceiling; the
+     * 8:00 AM-7:00 PM room-scheduling window is NOT a per-faculty
+     * daily load, it's just how late the campus runs classes).
+     *
+     * Returns null when within the cap, uncapped (setting = 0), or
+     * $facultyId/window can't be resolved.
+     *
+     * @return array{day: string, faculty_name: string, projected_hours: float, cap: int}|null
+     */
+    public function findFacultyDailyHoursViolation(
+        int $facultyId,
+        int|array $excludingSectionSubjectId,
+        array $dayTokens,
+        string $startTime,
+        string $endTime,
+        ?int $sectionId = null
+    ): ?array {
+        $capHours = (int) $this->settings->get('workload.max_daily_teaching_hours', 8);
+
+        if ($capHours <= 0) {
+            return null;
+        }
+
+        $newMinutes = $this->minutesBetween($startTime, $endTime);
+        $capMinutes = $capHours * 60;
+
+        $placements = SectionSubject::query()
+            ->where('faculty_id', $facultyId)
+            ->whereIn('section_id', $this->scopedSectionIds($sectionId))
+            ->whereNotIn('id', (array) $excludingSectionSubjectId)
+            ->whereNotNull('days')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->get(['id', 'days', 'start_time', 'end_time']);
+
+        foreach ($dayTokens as $day) {
+            $existingMinutes = $placements
+                ->filter(fn (SectionSubject $p) => str_contains((string) $p->days, $day))
+                ->sum(fn (SectionSubject $p) => $this->minutesBetween($p->start_time, $p->end_time));
+
+            $projectedMinutes = $existingMinutes + $newMinutes;
+
+            if ($projectedMinutes > $capMinutes) {
+                return [
+                    'day' => $day,
+                    'faculty_name' => Faculty::find($facultyId)?->full_name ?? 'this faculty member',
+                    'projected_hours' => round($projectedMinutes / 60, 1),
+                    'cap' => $capHours,
+                ];
+            }
+        }
+
+        return null;
     }
 
     /**

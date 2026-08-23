@@ -253,7 +253,7 @@ const highlightedDot = 16;
                 :class="isDark ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/5 bg-white/40'"
             >
                 <div class="mx-auto max-w-7xl px-6 py-6 text-center text-sm lg:px-8" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
-                    <template v-if="schoolBranding.name">&copy; 2026 {{ schoolBranding.name }} — Powered by CLASSLY</template>
+                    <template v-if="schoolBranding.name">&copy; 2026 {{ schoolBranding.name }} — by CLASSLY @ DJS</template>
                     <template v-else>CLASSLY &copy; 2026 -DJS</template>
                 </div>
             </footer>

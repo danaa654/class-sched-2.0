@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\FacultyLoadRequest;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -33,7 +34,12 @@ class StoreFacultyRequest extends FormRequest
             // Education Faculty member (no department), picking one makes
             // them Department Faculty. See Faculty::getFacultyCategoryAttribute().
             'college_id' => ['nullable', 'exists:colleges,id'],
-            'max_teaching_units' => ['required', 'integer', 'min:0', 'max:255'],
+            // Cap follows Settings > Faculty & Workload > "Max Teaching
+            // Load", scoped to the requesting user (Admin/Registrar get
+            // the institution-wide hard cap when override is on — see
+            // FacultyLoadRequest::effectiveCapFor()). Keep in sync with
+            // UpdateFacultyRequest.
+            'max_teaching_units' => ['required', 'integer', 'min:0', 'max:'.FacultyLoadRequest::effectiveCapFor($this->user())],
             // Whichever workload measurement the institution uses.
             // 'units' (default) checks against max_teaching_units;
             // 'hours' checks against max_weekly_hours instead. See

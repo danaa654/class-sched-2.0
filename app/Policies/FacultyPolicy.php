@@ -66,6 +66,19 @@ class FacultyPolicy
     }
 
     /**
+     * Whether the user may directly change a Faculty member's teaching
+     * load ceiling (max_teaching_units / max_weekly_hours). Only
+     * Admin/Registrar may — Dean/OIC/Assistant Dean must submit a
+     * FacultyLoadRequest instead (see FacultyLoadRequestController).
+     * Mirrors reassignCollege(): both are "sensitive field" gates
+     * layered on top of the ordinary update() ability.
+     */
+    public function changeMaxLoad(User $user): bool
+    {
+        return AccessScope::isUnrestricted($user);
+    }
+
+    /**
      * Whether the user may manage a specific teaching qualification
      * entry, based on whether that qualification is a Major subject
      * (College-owned, Dean/OIC's lane) or GenEd/Minor (Assistant

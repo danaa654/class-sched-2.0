@@ -92,6 +92,7 @@ const workloadForm = useForm({
     warning_threshold: props.settings['workload.warning_threshold'] ?? 85,
     overloaded_threshold: props.settings['workload.overloaded_threshold'] ?? 100,
     allow_admin_override: props.settings['workload.allow_admin_override'] ?? true,
+    max_daily_teaching_hours: props.settings['workload.max_daily_teaching_hours'] ?? 8,
 });
 const saveWorkload = () => {
     workloadForm.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.workload.update'), { preserveScroll: true, onError });
@@ -353,13 +354,19 @@ const onUpdateAccount = () => {
                                 <p class="text-sm text-slate-500 mb-5">
                                     Auto Schedule prefers faculty with lower current workload and never auto-assigns past
                                     the maximum load. Individual faculty-specific limits (if set on a Faculty record)
-                                    still take precedence over this system default.
+                                    still take precedence over this system default. Max Daily Teaching Hours is a
+                                    separate, per-day ceiling — a faculty member can be well under their weekly Max
+                                    Teaching Load and still get crammed into too many hours on one single day.
                                 </p>
 
-                                <fieldset :disabled="!canEdit('workload')" class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                                <fieldset :disabled="!canEdit('workload')" class="grid grid-cols-1 sm:grid-cols-4 gap-5">
                                     <FloatLabel variant="on">
-                                        <InputNumber id="maxLoad" size="large" v-model="workloadForm.max_teaching_load" class="w-full" :min="1" :max="60" />
+                                        <InputNumber id="maxLoad" size="large" v-model="workloadForm.max_teaching_load" class="w-full" :min="1" :max="40" />
                                         <label for="maxLoad">Max Teaching Load (units/hrs)</label>
+                                    </FloatLabel>
+                                    <FloatLabel variant="on">
+                                        <InputNumber id="maxDailyHours" size="large" v-model="workloadForm.max_daily_teaching_hours" class="w-full" :min="0" :max="16" suffix=" hrs" />
+                                        <label for="maxDailyHours">Max Daily Teaching Hours</label>
                                     </FloatLabel>
                                     <FloatLabel variant="on">
                                         <InputNumber id="warnThreshold" size="large" v-model="workloadForm.warning_threshold" class="w-full" :min="0" :max="100" suffix="%" />
@@ -370,6 +377,7 @@ const onUpdateAccount = () => {
                                         <label for="overloadThreshold">Overloaded Threshold</label>
                                     </FloatLabel>
                                 </fieldset>
+                                <small v-if="workloadForm.errors.max_daily_teaching_hours" class="text-red-500 block mt-2">{{ workloadForm.errors.max_daily_teaching_hours }}</small>
                                 <small v-if="workloadForm.errors.warning_threshold" class="text-red-500 block mt-2">{{ workloadForm.errors.warning_threshold }}</small>
 
                                 <div class="flex items-center gap-3 mt-5">

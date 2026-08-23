@@ -127,6 +127,11 @@ class NotificationController extends Controller
 
     private function routeFor(Notification $notification): ?string
     {
+        if ($notification->type === \App\Services\NotificationService::TYPE_FACULTY_LOAD_REQUEST_SUBMITTED
+            || $notification->type === \App\Services\NotificationService::TYPE_FACULTY_LOAD_REQUEST_REVIEWED) {
+            return route('scheduling.faculty');
+        }
+
         if (! $notification->section_id) {
             return null;
         }

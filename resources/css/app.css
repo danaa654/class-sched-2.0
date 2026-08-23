@@ -1155,3 +1155,17 @@ html.dark .p-multiselect-filter {
         2px 2px 6px var(--neu-navy-shadow-2),
         0 0 14px 1px rgba(37, 99, 235, 0.45);
 }
+
+/* SweetAlert2 confirm/alert popups vs. PrimeVue Dialogs — PrimeVue
+   assigns its own <Dialog> mask a z-index dynamically at mount time
+   (via its zIndex service) and that number climbs with every dialog
+   already open, easily passing SweetAlert2's fixed default of 1060.
+   Net effect: firing a Swal.fire() confirm from inside an already-open
+   PrimeVue Dialog (e.g. deleting a row from a table shown in a modal)
+   renders the confirm behind that dialog instead of on top of it,
+   unclickable. Pin swal2's container above anything PrimeVue can
+   reasonably reach so confirms always land on top, everywhere they're
+   triggered from. */
+.swal2-container {
+    z-index: 11000 !important;
+}

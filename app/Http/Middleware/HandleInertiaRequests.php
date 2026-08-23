@@ -61,6 +61,14 @@ class HandleInertiaRequests extends Middleware
                     'viewScheduling' => $user->can('view-scheduling'),
                     'runAutoSchedule' => $user->can('run-auto-schedule'),
                     'manageFaculty' => $user->can('create', \App\Models\Faculty::class),
+                    // Gates the Maximum Teaching Units / Weekly Hours
+                    // fields in the Faculty form. Admin/Registrar only
+                    // — everyone else sees them disabled and is routed
+                    // to the "Request Load Increase" flow instead. See
+                    // FacultyPolicy::changeMaxLoad() and
+                    // FacultyController::update()/store() for the
+                    // server-side enforcement this UI hint mirrors.
+                    'changeFacultyMaxLoad' => $user->can('changeMaxLoad', \App\Models\Faculty::class),
                     'manageRooms' => $user->can('create', \App\Models\Room::class),
                     'manageSections' => $user->can('create', \App\Models\Section::class),
                     // Section-level schedule finalization/unlock —

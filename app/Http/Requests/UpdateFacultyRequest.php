@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\FacultyLoadRequest;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -36,7 +37,18 @@ class UpdateFacultyRequest extends FormRequest
             // Education Faculty member (no department), picking one makes
             // them Department Faculty. See Faculty::getFacultyCategoryAttribute().
             'college_id' => ['nullable', 'exists:colleges,id'],
-            'max_teaching_units' => ['required', 'integer', 'min:0', 'max:255'],
+            // Cap follows Settings > Faculty & Workload > "Max Teaching
+            // Load", scoped to the requesting user — Admin/Registrar
+            // only reach FacultyLoadRequest::HARD_CAP_UNITS (the true
+            // institution-wide ceiling) when "Allow Administrator
+            // override" is on; otherwise everyone is held to the
+            // configured value. Keep in sync with StoreFacultyRequest.
+            // Raising a faculty member above their current value is
+            // Admin/Registrar-only in practice — see
+            // FacultyController::update()'s pin-back of this field for
+            // other roles, and FacultyLoadRequest for how Dean/OIC/
+            // Assistant Dean request an increase instead.
+            'max_teaching_units' => ['required', 'integer', 'min:0', 'max:'.FacultyLoadRequest::effectiveCapFor($this->user())],
             // Whichever workload measurement the institution uses.
             // 'units' (default) checks against max_teaching_units;
             // 'hours' checks against max_weekly_hours instead. See

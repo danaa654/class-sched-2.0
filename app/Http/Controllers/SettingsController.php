@@ -127,10 +127,15 @@ class SettingsController extends Controller
         $this->authorizeGroup($request, 'workload');
 
         $data = $request->validate([
-            'max_teaching_load' => ['required', 'integer', 'min:1', 'max:60'],
+            'max_teaching_load' => ['required', 'integer', 'min:1', 'max:40'],
             'warning_threshold' => ['required', 'integer', 'min:0', 'max:100'],
             'overloaded_threshold' => ['required', 'integer', 'min:0', 'max:200'],
             'allow_admin_override' => ['required', 'boolean'],
+            // Daily teaching-hours ceiling — independent of the
+            // weekly/semester Max Teaching Load above. 0 = uncapped.
+            // Enforced by ScheduleConflictService::findFacultyDailyHoursViolation()
+            // on every manual/auto schedule placement.
+            'max_daily_teaching_hours' => ['required', 'integer', 'min:0', 'max:16'],
         ]);
 
         if ($data['warning_threshold'] > $data['overloaded_threshold']) {
@@ -142,6 +147,7 @@ class SettingsController extends Controller
             'workload.warning_threshold' => $data['warning_threshold'],
             'workload.overloaded_threshold' => $data['overloaded_threshold'],
             'workload.allow_admin_override' => $data['allow_admin_override'],
+            'workload.max_daily_teaching_hours' => $data['max_daily_teaching_hours'],
         ], $request->user()->id);
 
         return back()->with('success', 'Faculty workload settings updated.');

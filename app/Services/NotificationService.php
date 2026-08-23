@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Faculty;
 use App\Models\Notification;
 use App\Models\ScheduleAuditLog;
 use App\Models\Section;
 use App\Models\SectionSubject;
+use App\Models\FacultyLoadRequest;
 use App\Models\User;
 use App\Support\AccessScope;
 use Illuminate\Support\Collection;
@@ -60,6 +62,14 @@ class NotificationService
     public const TYPE_AUTO_SCHEDULE_COMPLETED = 'AUTO_SCHEDULE_COMPLETED';
 
     public const TYPE_AUTO_SCHEDULE_NEEDS_ATTENTION = 'AUTO_SCHEDULE_NEEDS_ATTENTION';
+
+    // A Dean/OIC/Assistant Dean submitted (or Admin/Registrar decided)
+    // a Faculty Load Request — see FacultyLoadRequestController. Not
+    // Section-scoped like everything else above, so these two use the
+    // lighter writeNotification() helper instead of dispatch().
+    public const TYPE_FACULTY_LOAD_REQUEST_SUBMITTED = 'FACULTY_LOAD_REQUEST_SUBMITTED';
+
+    public const TYPE_FACULTY_LOAD_REQUEST_REVIEWED = 'FACULTY_LOAD_REQUEST_REVIEWED';
 
     // Priority levels (spec Section 13). Never escalate to CRITICAL
     // for routine events — nothing in this service currently uses it;
@@ -297,7 +307,151 @@ class NotificationService
     }
 
     /**
-     * A scheduling operation failed because of a Room/Faculty/Section
+     * A Dean/OIC/Assistant Dean submitted a Faculty Load Request.
+     * Notifies every Administrator/Registrar (they're the only ones
+     * who can review it — see FacultyLoadRequestPolicy::review()) so
+     * it shows up in the bell dropdown, not just when someone happens
+     * to open the Faculty Load Requests modal.
+     */
+    public function facultyLoadRequestSubmitted(FacultyLoadRequest $loadRequest, User $actor): void
+    {
+        $loadRequest->loadMissing('faculty');
+        $facultyName = trim(($loadRequest->faculty->first_name ?? '').' '.($loadRequest->faculty->last_name ?? ''));
+
+        $recipients = $this->adminRecipients()->reject(fn (User $u) => $u->is($actor));
+
+        foreach ($recipients as $recipient) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_LOAD_REQUEST_SUBMITTED,
+                priority: self::PRIORITY_IMPORTANT,
+                title: 'Faculty Load Request Submitted',
+                message: "{$actor->full_name} requested a load increase for {$facultyName} ({$loadRequest->current_max_teaching_units} → {$loadRequest->requested_max_teaching_units} units).",
+                data: [
+                    'faculty_load_request_id' => $loadRequest->id,
+                    'faculty_name' => $facultyName,
+                    'current_max_teaching_units' => $loadRequest->current_max_teaching_units,
+                    'requested_max_teaching_units' => $loadRequest->requested_max_teaching_units,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Admin/Registrar approved or denied a Faculty Load Request.
+     * Notifies whoever originally submitted it (requested_by) so
+     * they're not left checking the modal to find out.
+     */
+    public function facultyLoadRequestReviewed(FacultyLoadRequest $loadRequest, User $actor): void
+    {
+        $loadRequest->loadMissing('faculty', 'requestedBy');
+        $recipient = $loadRequest->requestedBy;
+
+        // Admin/Registrar reviewing their own submission (they're
+        // also allowed to create requests, see
+        // FacultyLoadRequestPolicy::create()) — no self-notification.
+        if (! $recipient || $recipient->is($actor)) {
+            return;
+        }
+
+        $facultyName = trim(($loadRequest->faculty->first_name ?? '').' '.($loadRequest->faculty->last_name ?? ''));
+        $decision = $loadRequest->status; // 'Approved' | 'Denied'
+
+        $message = "Your load increase request for {$facultyName} was {$decision} by {$actor->full_name}.";
+        if ($loadRequest->decision_note) {
+            $message .= " Note: {$loadRequest->decision_note}";
+        }
+
+        $this->writeNotification(
+            recipient: $recipient,
+            actor: $actor,
+            type: self::TYPE_FACULTY_LOAD_REQUEST_REVIEWED,
+            priority: self::PRIORITY_IMPORTANT,
+            title: "Faculty Load Request {$decision}",
+            message: $message,
+            data: [
+                'faculty_load_request_id' => $loadRequest->id,
+                'faculty_name' => $facultyName,
+                'status' => $decision,
+                'decision_note' => $loadRequest->decision_note,
+            ],
+        );
+    }
+
+    /**
+     * Admin/Registrar applied a load change directly, with no Pending
+     * step for anyone to review (see FacultyLoadRequestController::
+     * store()'s actorIsReviewer branch — they already have direct
+     * edit rights, so there's no separate approval to notify anyone
+     * about). The Dean/OIC of the Faculty's College (or Assistant
+     * Dean, if the Faculty has no College — General Education) still
+     * needs to know their faculty member's ceiling changed, even
+     * though nobody on their end had to request it — same courtesy
+     * facultyLoadRequestReviewed() gives a Dean/OIC whose own
+     * submission was decided, just for the case where nothing was
+     * submitted in the first place.
+     */
+    public function facultyLoadUpdatedDirectly(FacultyLoadRequest $loadRequest, User $actor): void
+    {
+        $loadRequest->loadMissing('faculty');
+        $faculty = $loadRequest->faculty;
+        $facultyName = trim(($faculty->first_name ?? '').' '.($faculty->last_name ?? ''));
+
+        foreach ($this->collegeRecipientsForFaculty($faculty, $actor) as $recipient) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_LOAD_REQUEST_REVIEWED,
+                priority: self::PRIORITY_IMPORTANT,
+                title: 'Faculty Load Updated',
+                message: "{$actor->full_name} updated {$facultyName}'s teaching load ceiling ({$loadRequest->current_max_teaching_units} → {$loadRequest->requested_max_teaching_units} units).",
+                data: [
+                    'faculty_load_request_id' => $loadRequest->id,
+                    'faculty_name' => $facultyName,
+                    'current_max_teaching_units' => $loadRequest->current_max_teaching_units,
+                    'requested_max_teaching_units' => $loadRequest->requested_max_teaching_units,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Admin/Registrar changed a faculty member's Maximum Teaching
+     * Units straight from the Edit Faculty form (FacultyController::
+     * update()) — a plain roster edit, not the Faculty Load Request
+     * workflow, so there's no FacultyLoadRequest row to attach this
+     * to. Still notifies the Dean/OIC of the Faculty's College (or
+     * Assistant Dean for General Education/no-College faculty) so
+     * they're not blindsided by their faculty member's ceiling
+     * changing with no request/approval trail at all. Only call this
+     * when the value actually changed — see FacultyController::
+     * update().
+     */
+    public function facultyMaxLoadEditedDirectly(Faculty $faculty, User $actor, int $oldUnits, int $newUnits): void
+    {
+        $facultyName = trim(($faculty->first_name ?? '').' '.($faculty->last_name ?? ''));
+
+        foreach ($this->collegeRecipientsForFaculty($faculty, $actor) as $recipient) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_LOAD_REQUEST_REVIEWED,
+                priority: self::PRIORITY_IMPORTANT,
+                title: 'Faculty Load Updated',
+                message: "{$actor->full_name} updated {$facultyName}'s teaching load ceiling ({$oldUnits} → {$newUnits} units) from the Faculty Master.",
+                data: [
+                    'faculty_id' => $faculty->id,
+                    'faculty_name' => $facultyName,
+                    'current_max_teaching_units' => $oldUnits,
+                    'requested_max_teaching_units' => $newUnits,
+                ],
+            );
+        }
+    }
+
+    /**
+     * A Scheduling operation failed because of a Room/Faculty/Section
      * conflict rejected by validate() before any write. Optional per
      * spec Section 3 — notifies Admin/Registrar only, never the
      * Dean/OIC (a failed operation isn't "their" event), and only for
@@ -452,6 +606,34 @@ class NotificationService
         ]);
     }
 
+    /**
+     * Same write as create(), but for notifications with no Section
+     * to attach to (facultyLoadRequestSubmitted()/Reviewed() above —
+     * `section_id`/`section_subject_id` are nullable in the schema
+     * precisely for this case). No dedup guard here since these two
+     * callers each only fire once per store()/review() request.
+     */
+    private function writeNotification(
+        User $recipient,
+        User $actor,
+        string $type,
+        string $priority,
+        string $title,
+        string $message,
+        array $data,
+    ): Notification {
+        return Notification::create([
+            'recipient_user_id' => $recipient->id,
+            'actor_user_id' => $actor->id,
+            'type' => $type,
+            'priority' => $priority,
+            'title' => $title,
+            'message' => $message,
+            'data' => $data,
+            'is_read' => false,
+        ]);
+    }
+
     private function audit(
         User $actor,
         string $action,
@@ -539,5 +721,27 @@ class NotificationService
     private function adminRecipients(): Collection
     {
         return User::query()->role(AccessScope::UNRESTRICTED_ROLES)->get();
+    }
+
+    /**
+     * Dean/OIC of the Faculty's College — or Assistant Dean, when the
+     * Faculty has no College (General Education/Minor, same scoping
+     * FacultyLoadRequestPolicy::view() uses). Deliberately NOT
+     * concatenated with institution-wide Admin/Registrar the way
+     * recipientsFor() does for Sections — the actor here already IS
+     * Admin/Registrar, so notifying "every Admin/Registrar" would
+     * mostly just be notifying the actor's own peers about the
+     * actor's own action; this is specifically about reaching the
+     * College-side people who had no part in it.
+     *
+     * @return Collection<int, User>
+     */
+    private function collegeRecipientsForFaculty(Faculty $faculty, User $actor): Collection
+    {
+        $recipients = $faculty->college_id
+            ? User::query()->role(AccessScope::COLLEGE_SCOPED_ROLES)->where('college_id', $faculty->college_id)->get()
+            : User::query()->role(AccessScope::ASSISTANT_DEAN_ROLE)->get();
+
+        return $recipients->reject(fn (User $u) => $u->is($actor))->values();
     }
 }

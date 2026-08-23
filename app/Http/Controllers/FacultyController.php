@@ -6,8 +6,11 @@ use App\Http\Requests\StoreFacultyRequest;
 use App\Http\Requests\UpdateFacultyRequest;
 use App\Models\College;
 use App\Models\Faculty;
+use App\Models\FacultyLoadRequest;
 use App\Models\Subject;
 use App\Services\FacultyWorkloadService;
+use App\Services\NotificationService;
+use App\Support\AccessScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -16,7 +19,8 @@ use Inertia\Response;
 class FacultyController extends Controller
 {
     public function __construct(
-        private readonly FacultyWorkloadService $workloadService
+        private readonly FacultyWorkloadService $workloadService,
+        private readonly NotificationService $notifications,
     ) {
     }
 
@@ -79,7 +83,63 @@ class FacultyController extends Controller
                 ->orderBy('name')
                 ->get(['id', 'name']),
             'nextFacultyId' => $this->nextFacultyId(),
+
+            // Faculty Load Requests — moved here from its own page
+            // (formerly FacultyLoadRequestController@index) so it
+            // renders as a section on the Faculty page itself.
+            ...$this->loadRequestsProps($request),
         ]);
+    }
+
+    /**
+     * Props for the "Faculty Load Requests" section of the Faculty
+     * page. Admin/Registrar see the full queue (for review); Dean/OIC/
+     * Assistant Dean see only requests touching faculty in their own
+     * scope, so they can track status of what they've submitted.
+     */
+    private function loadRequestsProps(Request $request): array
+    {
+        $user = $request->user();
+
+        $loadRequests = FacultyLoadRequest::query()
+            ->with(['faculty:id,faculty_id,first_name,last_name,college_id,max_teaching_units,max_weekly_hours', 'requestedBy:id,name', 'reviewedBy:id,name'])
+            ->when(! AccessScope::isUnrestricted($user), function ($query) use ($user) {
+                $query->whereHas('faculty', function ($facultyQuery) use ($user) {
+                    if (AccessScope::isAssistantDean($user)) {
+                        $facultyQuery->whereNull('college_id');
+
+                        return;
+                    }
+
+                    $facultyQuery->where('college_id', $user->college_id);
+                });
+            });
+
+        // Count BEFORE pagination — used for the reminder banner so it
+        // reflects the whole scoped queue, not just whatever page of
+        // the table happens to be loaded.
+        $pendingCount = (clone $loadRequests)->where('status', 'Pending')->count();
+
+        $loadRequests = $loadRequests
+            ->latest()
+            ->paginate(10, ['*'], 'load_requests_page')
+            ->withQueryString();
+
+        return [
+            'loadRequests' => $loadRequests,
+            'pendingLoadRequestsCount' => $pendingCount,
+            'hardCapUnits' => FacultyLoadRequest::effectiveCapFor($user),
+            // Faculty roster for the "New Request" dropdown, scoped the
+            // same way the Faculty Master roster itself is — a Dean
+            // can only request an increase for faculty they can
+            // already see/manage.
+            'loadRequestFaculties' => Faculty::query()
+                ->visibleTo($user)
+                ->where('status', 'Active')
+                ->orderBy('last_name')
+                ->get(['id', 'faculty_id', 'first_name', 'last_name', 'max_teaching_units', 'max_weekly_hours', 'workload_type']),
+            'canReviewLoadRequests' => $user->can('review', FacultyLoadRequest::class),
+        ];
     }
 
     /**
@@ -127,6 +187,17 @@ class FacultyController extends Controller
         // but the policy check here is the authoritative gate.
         $this->authorize('createForCollege', [Faculty::class, $data['college_id'] ?? null]);
 
+        // Same rule as update(): only Admin/Registrar may set a load
+        // ceiling above the system default when creating a new Faculty
+        // record. Dean/OIC/Assistant Dean get the default regardless
+        // of what they typed — they can submit a FacultyLoadRequest
+        // afterward if this new hire genuinely needs a higher ceiling.
+        if (! $request->user()->can('changeMaxLoad', Faculty::class)) {
+            $data['max_teaching_units'] = 24;
+            $data['max_weekly_hours'] = null;
+            $data['workload_type'] = 'units';
+        }
+
         Faculty::create($data);
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member added successfully.');
@@ -149,7 +220,35 @@ class FacultyController extends Controller
             $this->authorize('reassignCollege', Faculty::class);
         }
 
+        // Per the new Faculty Load Request workflow: Dean/OIC/
+        // Assistant Dean have no direct write path to a faculty
+        // member's load ceiling — only Admin/Registrar do (see
+        // FacultyPolicy::changeMaxLoad()). Anyone else submitting this
+        // form has those fields silently pinned back to their current
+        // value, same pattern as college_id above. They must go
+        // through FacultyLoadRequestController instead.
+        if (! $request->user()->can('changeMaxLoad', Faculty::class)) {
+            $data['max_teaching_units'] = $faculty->max_teaching_units;
+            $data['max_weekly_hours'] = $faculty->max_weekly_hours;
+            $data['workload_type'] = $faculty->workload_type;
+        }
+
+        // Capture before the write so we can tell whether the ceiling
+        // actually moved — only notify on a real change, not on every
+        // save of this form (e.g. editing the email shouldn't fire a
+        // "load updated" notification).
+        $oldMaxTeachingUnits = $faculty->max_teaching_units;
+
         $faculty->update($data);
+
+        if (array_key_exists('max_teaching_units', $data) && $data['max_teaching_units'] !== $oldMaxTeachingUnits) {
+            $this->notifications->facultyMaxLoadEditedDirectly(
+                $faculty,
+                $request->user(),
+                $oldMaxTeachingUnits,
+                $data['max_teaching_units'],
+            );
+        }
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member updated successfully.');
     }
