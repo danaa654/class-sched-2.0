@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Faculty;
+use App\Models\FacultyRequest;
 use App\Models\Notification;
 use App\Models\ScheduleAuditLog;
 use App\Models\Section;
@@ -70,6 +71,19 @@ class NotificationService
     public const TYPE_FACULTY_LOAD_REQUEST_SUBMITTED = 'FACULTY_LOAD_REQUEST_SUBMITTED';
 
     public const TYPE_FACULTY_LOAD_REQUEST_REVIEWED = 'FACULTY_LOAD_REQUEST_REVIEWED';
+
+    // Faculty Management request workflow (Creation/Deactivation
+    // requests) — see FacultyRequestController. Same lighter
+    // writeNotification() path as the Load Request pair above.
+    public const TYPE_FACULTY_REQUEST_SUBMITTED = 'FACULTY_REQUEST_SUBMITTED';
+
+    public const TYPE_FACULTY_REQUEST_REVIEWED = 'FACULTY_REQUEST_REVIEWED';
+
+    public const TYPE_FACULTY_ASSIGNMENTS_NEED_ATTENTION = 'FACULTY_ASSIGNMENTS_NEED_ATTENTION';
+
+    public const TYPE_FACULTY_DEACTIVATED_DIRECTLY = 'FACULTY_DEACTIVATED_DIRECTLY';
+
+    public const TYPE_FACULTY_DELETED_DIRECTLY = 'FACULTY_DELETED_DIRECTLY';
 
     // Priority levels (spec Section 13). Never escalate to CRITICAL
     // for routine events — nothing in this service currently uses it;
@@ -506,6 +520,202 @@ class NotificationService
      *
      * @param  list<array{field: string, old: string|null, new: string|null}>|null  $auditFieldRows
      */
+    /**
+     * A Dean/OIC/Assistant Dean submitted a Faculty Creation or
+     * Deletion request. Notifies every Administrator/Registrar
+     * (they're the only ones who can review it — see
+     * FacultyRequestPolicy::review()).
+     */
+    public function facultyRequestSubmitted(FacultyRequest $facultyRequest, User $actor): void
+    {
+        $label = $facultyRequest->request_type === 'Creation' ? 'creation' : 'deletion';
+        $subject = $facultyRequest->request_type === 'Creation'
+            ? trim(($facultyRequest->payload['first_name'] ?? '').' '.($facultyRequest->payload['last_name'] ?? ''))
+            : trim(($facultyRequest->faculty?->first_name ?? '').' '.($facultyRequest->faculty?->last_name ?? ''));
+
+        foreach ($this->adminRecipients()->reject(fn (User $u) => $u->is($actor)) as $recipient) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_REQUEST_SUBMITTED,
+                priority: self::PRIORITY_IMPORTANT,
+                title: 'Faculty '.ucfirst($label).' Request Submitted',
+                message: "{$actor->full_name} requested a faculty {$label} for {$subject}.",
+                data: [
+                    'faculty_request_id' => $facultyRequest->id,
+                    'request_type' => $facultyRequest->request_type,
+                    'faculty_name' => $subject,
+                ],
+            );
+        }
+
+        $this->auditFacultyRequest($actor, 'FACULTY_'.strtoupper($label).'_REQUEST_SUBMITTED', $facultyRequest);
+    }
+
+    /**
+     * Admin/Registrar approved or rejected a Faculty Creation or
+     * Deletion request. Notifies whoever originally submitted it.
+     */
+    public function facultyRequestReviewed(FacultyRequest $facultyRequest, User $actor): void
+    {
+        $facultyRequest->loadMissing('requestedBy', 'faculty');
+        $recipient = $facultyRequest->requestedBy;
+
+        $label = $facultyRequest->request_type === 'Creation' ? 'creation' : 'deletion';
+        $subject = $facultyRequest->request_type === 'Creation'
+            ? trim(($facultyRequest->payload['first_name'] ?? '').' '.($facultyRequest->payload['last_name'] ?? ''))
+            : trim(($facultyRequest->faculty?->first_name ?? '').' '.($facultyRequest->faculty?->last_name ?? ''));
+
+        $decision = $facultyRequest->status; // 'Approved' | 'Rejected'
+        $message = "Your faculty {$label} request for {$subject} was {$decision} by {$actor->full_name}.";
+        if ($facultyRequest->decision_note) {
+            $message .= " Note: {$facultyRequest->decision_note}";
+        }
+
+        if ($recipient && ! $recipient->is($actor)) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_REQUEST_REVIEWED,
+                priority: self::PRIORITY_IMPORTANT,
+                title: "Faculty ".ucfirst($label)." Request {$decision}",
+                message: $message,
+                data: [
+                    'faculty_request_id' => $facultyRequest->id,
+                    'request_type' => $facultyRequest->request_type,
+                    'faculty_name' => $subject,
+                    'status' => $decision,
+                    'decision_note' => $facultyRequest->decision_note,
+                ],
+            );
+        }
+
+        $this->auditFacultyRequest($actor, 'FACULTY_'.strtoupper($label).'_REQUEST_'.strtoupper($decision), $facultyRequest);
+    }
+
+    /**
+     * A Faculty member with active assignments was just deactivated
+     * (via an approved request OR a direct Admin/Registrar action)
+     * and those assignments now need manual attention — no automatic
+     * reassignment happens (spec Section 11). Notifies the Dean/OIC/
+     * Assistant Dean of the Faculty's College so the vacancy doesn't
+     * go unnoticed until the next schedule run.
+     *
+     * @param  array<string, mixed>  $impact  FacultyWorkloadService::deactivationImpact() output.
+     * @param  string  $action  Past-tense verb describing what just happened to the faculty ('deactivated' or 'deleted').
+     */
+    public function facultyAssignmentsNeedAttention(Faculty $faculty, array $impact, User $actor, string $action = 'deactivated'): void
+    {
+        $facultyName = trim(($faculty->first_name ?? '').' '.($faculty->last_name ?? ''));
+
+        foreach ($this->collegeRecipientsForFaculty($faculty, $actor) as $recipient) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_ASSIGNMENTS_NEED_ATTENTION,
+                priority: self::PRIORITY_WARNING,
+                title: 'Faculty Assignment Requires Attention',
+                message: "{$facultyName} was {$action} with {$impact['subject_count']} active subject(s) across {$impact['section_count']} section(s) — these are now vacant and need reassignment.",
+                data: [
+                    'faculty_name' => $facultyName,
+                    'subject_codes' => $impact['subject_codes'],
+                    'section_codes' => $impact['section_codes'],
+                ],
+            );
+        }
+    }
+
+    /**
+     * Admin/Registrar deactivated a Faculty member directly
+     * (FacultyController@destroy), bypassing the request workflow
+     * entirely since they're already authorized to. Notifies the
+     * Dean/OIC/Assistant Dean of that Faculty's College so they're
+     * not blindsided, same courtesy facultyMaxLoadEditedDirectly()
+     * gives for direct load-ceiling edits.
+     */
+    public function facultyDeactivatedDirectly(Faculty $faculty, User $actor): void
+    {
+        $facultyName = trim(($faculty->first_name ?? '').' '.($faculty->last_name ?? ''));
+
+        foreach ($this->collegeRecipientsForFaculty($faculty, $actor) as $recipient) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_DEACTIVATED_DIRECTLY,
+                priority: self::PRIORITY_IMPORTANT,
+                title: 'Faculty Deactivated',
+                message: "{$actor->full_name} deactivated {$facultyName}.",
+                data: ['faculty_name' => $facultyName],
+            );
+        }
+
+        ScheduleAuditLog::create([
+            'user_id' => $actor->id,
+            'action' => 'FACULTY_DEACTIVATED_DIRECTLY',
+            'section_id' => null,
+            'section_subject_id' => null,
+            'field' => 'status',
+            'old_value' => 'Active',
+            'new_value' => 'Inactive',
+            'created_at' => now(),
+        ]);
+    }
+
+    /**
+     * Admin/Registrar permanently deleted a Faculty member from the
+     * roster (FacultyController@destroy — a soft delete, see that
+     * method's docblock). Notifies the Dean/OIC/Assistant Dean of
+     * that Faculty's College so they're not blindsided, and leaves an
+     * audit trail distinct from a plain deactivation.
+     */
+    public function facultyDeletedDirectly(Faculty $faculty, User $actor): void
+    {
+        $facultyName = trim(($faculty->first_name ?? '').' '.($faculty->last_name ?? ''));
+
+        foreach ($this->collegeRecipientsForFaculty($faculty, $actor) as $recipient) {
+            $this->writeNotification(
+                recipient: $recipient,
+                actor: $actor,
+                type: self::TYPE_FACULTY_DELETED_DIRECTLY,
+                priority: self::PRIORITY_IMPORTANT,
+                title: 'Faculty Deleted',
+                message: "{$actor->full_name} deleted {$facultyName} from the Faculty Master.",
+                data: ['faculty_name' => $facultyName],
+            );
+        }
+
+        ScheduleAuditLog::create([
+            'user_id' => $actor->id,
+            'action' => 'FACULTY_DELETED_DIRECTLY',
+            'section_id' => null,
+            'section_subject_id' => null,
+            'field' => 'status',
+            'old_value' => $faculty->status,
+            'new_value' => 'Deleted',
+            'created_at' => now(),
+        ]);
+    }
+
+    /**
+     * Generic (non-Section-scoped) audit row for the Faculty
+     * Management request workflow — same table as audit(), just
+     * without a Section to attach to (schedule_audit_logs.section_id
+     * is nullable for exactly this reason).
+     */
+    private function auditFacultyRequest(User $actor, string $action, FacultyRequest $facultyRequest): void
+    {
+        ScheduleAuditLog::create([
+            'user_id' => $actor->id,
+            'action' => $action,
+            'section_id' => null,
+            'section_subject_id' => null,
+            'field' => 'faculty_request_id',
+            'old_value' => null,
+            'new_value' => (string) $facultyRequest->id,
+            'created_at' => now(),
+        ]);
+    }
+
     private function dispatch(
         Section $section,
         User $actor,

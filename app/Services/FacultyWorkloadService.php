@@ -241,6 +241,72 @@ class FacultyWorkloadService
     }
 
     /**
+     * Deactivation-impact snapshot (Faculty Management request
+     * workflow) — everything a requester or reviewer needs to see
+     * before deactivating this Faculty member: how many active
+     * subjects/sections/hours are riding on them right now, and
+     * whether any of those sit inside a FINALIZED/locked Section
+     * (spec Section 10 — finalized schedules must never be silently
+     * modified by a deactivation).
+     *
+     * Reuses assignedPlacements() so this can never disagree with the
+     * Workload tab/dashboard indicators about what "currently
+     * assigned" means. Called both when a Dean/OIC/Assistant Dean
+     * submits a Deactivation request (stored as
+     * FacultyRequest::affected_summary) AND again at review/direct-
+     * deactivation time (never trusted as still current) — see
+     * FacultyRequestController and FacultyController::destroy().
+     *
+     * @return array{
+     *   has_active_assignments: bool,
+     *   subject_count: int,
+     *   section_count: int,
+     *   weekly_load: int,
+     *   load_unit: string,
+     *   subject_codes: array<int, string>,
+     *   section_codes: array<int, string>,
+     *   has_finalized_assignment: bool,
+     *   finalized_section_codes: array<int, string>,
+     * }
+     */
+    public function deactivationImpact(Faculty $faculty): array
+    {
+        $placements = $this->assignedPlacements($faculty);
+
+        $sectionIds = collect($placements)->pluck('id');
+        $finalizedSectionIds = SectionSubject::query()
+            ->whereIn('id', $sectionIds)
+            ->whereHas('section', fn ($q) => $q->where('is_finalized', true))
+            ->with('section:id,section_code')
+            ->get()
+            ->pluck('section.section_code')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $subjectCodes = collect($placements)->pluck('subject_code')->unique()->values()->all();
+        $sectionCodes = collect($placements)
+            ->flatMap(fn (array $p) => explode(' & ', $p['section_code']))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        return [
+            'has_active_assignments' => count($placements) > 0,
+            'subject_count' => count($subjectCodes),
+            'section_count' => count($sectionCodes),
+            'weekly_load' => collect($placements)->sum('load'),
+            'load_unit' => $this->unitLabel($faculty),
+            'subject_codes' => $subjectCodes,
+            'section_codes' => $sectionCodes,
+            'has_finalized_assignment' => count($finalizedSectionIds) > 0,
+            'finalized_section_codes' => $finalizedSectionIds,
+        ];
+    }
+
+    /**
      * How much load one Subject contributes, in whichever unit the
      * Faculty member's `workload_type` uses.
      */

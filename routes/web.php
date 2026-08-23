@@ -13,6 +13,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\FacultyLoadRequestController;
+use App\Http\Controllers\FacultyRequestController;
 use App\Http\Controllers\MajorController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ReportsController;
@@ -120,6 +121,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/scheduling/faculty-load-requests', [FacultyLoadRequestController::class, 'store'])->name('scheduling.faculty-load-requests.store');
     Route::put('/scheduling/faculty-load-requests/{facultyLoadRequest}/review', [FacultyLoadRequestController::class, 'review'])->name('scheduling.faculty-load-requests.review');
     Route::delete('/scheduling/faculty-load-requests/{facultyLoadRequest}', [FacultyLoadRequestController::class, 'destroy'])->name('scheduling.faculty-load-requests.destroy');
+
+    // Faculty Management requests — Dean/OIC/Assistant Dean's only path
+    // to creating or deactivating a Faculty member; Admin/Registrar
+    // review via {facultyRequest}/review. Queue renders as a section on
+    // the Faculty page itself (FacultyController@index).
+    Route::post('/scheduling/faculty-requests', [FacultyRequestController::class, 'storeCreation'])->name('scheduling.faculty-requests.store-creation');
+    Route::post('/scheduling/faculty/{faculty}/deactivation-request', [FacultyRequestController::class, 'storeDeactivation'])->name('scheduling.faculty-requests.store-deactivation');
+    Route::put('/scheduling/faculty-requests/{facultyRequest}/review', [FacultyRequestController::class, 'review'])->name('scheduling.faculty-requests.review');
+    Route::delete('/scheduling/faculty-requests/{facultyRequest}', [FacultyRequestController::class, 'cancel'])->name('scheduling.faculty-requests.cancel');
 
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');

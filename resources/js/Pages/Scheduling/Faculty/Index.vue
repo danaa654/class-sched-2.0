@@ -18,6 +18,8 @@ import Tag from 'primevue/tag';
 import Dialog from 'primevue/dialog';
 import Toast from 'primevue/toast';
 import InfoPopover from '@/Components/InfoPopover.vue';
+import RequestFacultyModal from '@/Components/Scheduling/RequestFacultyModal.vue';
+import FacultyRequestsPanel from '@/Components/Scheduling/FacultyRequestsPanel.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -39,6 +41,14 @@ const props = defineProps({
     hardCapUnits: { type: Number, default: 40 },
     loadRequestFaculties: { type: Array, default: () => [] },
     canReviewLoadRequests: { type: Boolean, default: false },
+
+    // Faculty Management requests (Creation/Deletion) — see
+    // FacultyController@facultyRequestsProps / FacultyRequestController.
+    facultyRequests: { type: Object, default: () => ({ data: [], total: 0, per_page: 10, current_page: 1 }) },
+    pendingFacultyRequestsCount: { type: Number, default: 0 },
+    canReviewFacultyRequests: { type: Boolean, default: false },
+    canCreateFacultyDirectly: { type: Boolean, default: false },
+    canRequestFacultyCreation: { type: Boolean, default: false },
 });
 
 const toast = useToast();
@@ -215,9 +225,11 @@ const onSubmitLoadRequest = () => {
 
 const loadRequestsLoading = ref(false);
 const loadRequestsListVisible = ref(false);
+const facultyRequestsListVisible = ref(false);
 // Dismiss is per page-visit only (not persisted) — a fresh load or a
 // newly-submitted request should surface the banner again.
 const pendingBannerDismissed = ref(false);
+const pendingFacultyBannerDismissed = ref(false);
 
 const onLoadRequestsPage = (event) => {
     loadRequestsLoading.value = true;
@@ -293,28 +305,34 @@ const onDeleteLoadRequest = (requestRow) => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Live-ish load request updates                                       */
+/* Live-ish load request AND faculty management request updates        */
 /*                                                                      */
 /* There's no Reverb/websocket push in this app — the bell already     */
 /* polls unread count every 20s, but the Faculty page's own data       */
-/* (the requests table, the pending-review banner, the "Teaching       */
+/* (the requests tables, the pending-review banners, the "Teaching     */
 /* Load" column) stays exactly as it was when the page loaded until    */
 /* someone manually refreshes. That's confusing on both ends of a      */
 /* request: the Dean/OIC who submitted it has no idea it was decided   */
 /* until they happen to open the bell, and Admin/Registrar's own       */
 /* pending count can be stale too if two reviewers are working at      */
 /* once. So, independently of the bell, poll the same lightweight      */
-/* "recent notifications" endpoint, watch for load-request events      */
-/* addressed to this user, and when one shows up: pop a toast right    */
-/* here on the page, and flag the data as stale with a one-click       */
-/* "Refresh" banner instead of quietly doing nothing until F5.         */
+/* "recent notifications" endpoint, watch for load-request AND         */
+/* faculty-request (Creation/Deletion) events addressed to this user,  */
+/* and when one shows up: pop a toast right here on the page, and flag */
+/* the relevant data as stale with a one-click "Refresh" banner        */
+/* instead of quietly doing nothing until F5.                          */
 /* ------------------------------------------------------------------ */
 
 const LOAD_REQUEST_NOTIFICATION_TYPES = ['FACULTY_LOAD_REQUEST_REVIEWED', 'FACULTY_LOAD_REQUEST_SUBMITTED'];
-const lastSeenLoadRequestNotificationId = ref(null);
+const FACULTY_REQUEST_NOTIFICATION_TYPES = ['FACULTY_REQUEST_SUBMITTED', 'FACULTY_REQUEST_REVIEWED'];
+const WATCHED_NOTIFICATION_TYPES = [...LOAD_REQUEST_NOTIFICATION_TYPES, ...FACULTY_REQUEST_NOTIFICATION_TYPES];
+
+const lastSeenPageNotificationId = ref(null);
 const staleLoadRequestUpdate = ref(false);
+const staleFacultyRequestUpdate = ref(false);
 const refreshingLoadRequests = ref(false);
-let loadRequestPollTimer = null;
+const refreshingFacultyRequests = ref(false);
+let pageNotificationPollTimer = null;
 
 const refreshLoadRequestData = () => {
     refreshingLoadRequests.value = true;
@@ -328,10 +346,22 @@ const refreshLoadRequestData = () => {
     });
 };
 
-const pollLoadRequestNotifications = async () => {
+const refreshFacultyRequestData = () => {
+    refreshingFacultyRequests.value = true;
+    router.reload({
+        only: ['facultyRequests', 'pendingFacultyRequestsCount', 'faculties'],
+        preserveScroll: true,
+        onFinish: () => {
+            refreshingFacultyRequests.value = false;
+            staleFacultyRequestUpdate.value = false;
+        },
+    });
+};
+
+const pollPageNotifications = async () => {
     try {
         const { data } = await axios.get(route('notifications.recent'));
-        const relevant = (data.notifications ?? []).filter((n) => LOAD_REQUEST_NOTIFICATION_TYPES.includes(n.type));
+        const relevant = (data.notifications ?? []).filter((n) => WATCHED_NOTIFICATION_TYPES.includes(n.type));
         if (relevant.length === 0) return;
 
         const newestId = Math.max(...relevant.map((n) => n.id));
@@ -339,20 +369,22 @@ const pollLoadRequestNotifications = async () => {
         // First tick after landing on the page just establishes the
         // baseline — nothing already sitting in the list should pop a
         // toast for something that happened before we started watching.
-        if (lastSeenLoadRequestNotificationId.value === null) {
-            lastSeenLoadRequestNotificationId.value = newestId;
+        if (lastSeenPageNotificationId.value === null) {
+            lastSeenPageNotificationId.value = newestId;
             return;
         }
 
-        const freshOnes = relevant.filter((n) => n.id > lastSeenLoadRequestNotificationId.value);
+        const freshOnes = relevant.filter((n) => n.id > lastSeenPageNotificationId.value);
         if (freshOnes.length === 0) return;
 
-        lastSeenLoadRequestNotificationId.value = newestId;
-        staleLoadRequestUpdate.value = true;
+        lastSeenPageNotificationId.value = newestId;
 
         freshOnes.forEach((n) => {
+            if (LOAD_REQUEST_NOTIFICATION_TYPES.includes(n.type)) staleLoadRequestUpdate.value = true;
+            if (FACULTY_REQUEST_NOTIFICATION_TYPES.includes(n.type)) staleFacultyRequestUpdate.value = true;
+
             toast.add({
-                severity: n.type === 'FACULTY_LOAD_REQUEST_REVIEWED'
+                severity: n.type.endsWith('REVIEWED')
                     ? (n.data?.status === 'Approved' ? 'success' : 'warn')
                     : 'info',
                 summary: n.title,
@@ -367,12 +399,12 @@ const pollLoadRequestNotifications = async () => {
 };
 
 onMounted(() => {
-    pollLoadRequestNotifications();
-    loadRequestPollTimer = setInterval(pollLoadRequestNotifications, 20000);
+    pollPageNotifications();
+    pageNotificationPollTimer = setInterval(pollPageNotifications, 20000);
 });
 
 onUnmounted(() => {
-    if (loadRequestPollTimer) clearInterval(loadRequestPollTimer);
+    if (pageNotificationPollTimer) clearInterval(pageNotificationPollTimer);
 });
 
 const facultyForm = useForm({
@@ -411,6 +443,15 @@ const openAdd = () => {
     facultyForm.clearErrors();
     facultyForm.faculty_id = props.nextFacultyId;
     addFacultyVisible.value = true;
+};
+
+// "Request New Faculty" — Dean/OIC/Assistant Dean's path, opens the
+// separate RequestFacultyModal (posts to scheduling.faculty-requests.store-creation
+// rather than scheduling.faculty.store, and never creates an active
+// record directly).
+const requestFacultyVisible = ref(false);
+const openRequestFaculty = () => {
+    requestFacultyVisible.value = true;
 };
 
 const openEdit = (faculty) => {
@@ -471,24 +512,80 @@ const onSaveFaculty = () => {
     }
 };
 
+// Admin/Registrar direct delete — for faculty that don't belong on
+// the roster at all (added by mistake, never actually with the
+// school, etc). Always double-confirmed, regardless of whether the
+// faculty has assignments, so an accidental click can never remove a
+// row outright. If the faculty ALSO has an active (non-finalized)
+// assigned subject, the second step additionally warns about that —
+// the backend re-derives the impact itself and is the authoritative
+// gate; this first request (confirmed=false, the default) just asks
+// it what the impact is so the dialog can show real numbers,
+// matching FacultyController::destroy()'s contract.
+//
+// Simple manual deactivation (faculty just isn't teaching this term,
+// but still belongs on the roster) is no longer done from this
+// button — use Edit → Status → Inactive instead, which keeps the row.
+const pendingDeleteFaculty = ref(null);
+
 const onDeleteFaculty = (faculty) => {
     Swal.fire({
         title: 'Delete this faculty member?',
-        text: `${faculty.faculty_id} — ${faculty.first_name} ${faculty.last_name} will be permanently deleted.`,
+        html: `<strong>${faculty.faculty_id} — ${faculty.first_name} ${faculty.last_name}</strong><br/><br/>
+            This permanently removes them from the Faculty Master. If they simply aren't teaching this term but still
+            belong on the roster, cancel this and use <strong>Edit → Status → Inactive</strong> instead.`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#DC2626',
-        cancelButtonColor: '#64748B',
-        confirmButtonText: 'Yes, delete it',
-    }).then((result) => {
-        if (result.isConfirmed) {
+        confirmButtonText: 'Continue',
+    }).then((confirmStep) => {
+        if (!confirmStep.isConfirmed) return;
+
+        pendingDeleteFaculty.value = faculty;
+        router.delete(route('scheduling.faculty.destroy', faculty.id), {
+            preserveScroll: true,
+            onSuccess: () => onRefresh(),
+            onError: () => {},
+            // If the backend has no assigned subject to warn about,
+            // it deletes immediately here and the watcher below never
+            // fires — this Swal chain is skipped entirely.
+        });
+    });
+};
+
+// Real double-confirmation flow, using the flashed impact summary the
+// backend returns when it declines an unconfirmed delete because the
+// faculty has an assigned subject already scheduled
+// (`facultyDeletionImpact` — see FacultyController::destroy()).
+watch(
+    () => page.props.flash?.facultyDeletionImpact,
+    (impact) => {
+        if (!impact || !pendingDeleteFaculty.value) return;
+        const faculty = pendingDeleteFaculty.value;
+        pendingDeleteFaculty.value = null;
+
+        Swal.fire({
+            title: '⚠ Faculty Has an Assigned Subject',
+            html: `<strong>${faculty.faculty_id} — ${faculty.first_name} ${faculty.last_name}</strong><br/>
+                Current active assignments:<br/>
+                ${impact.subject_count} subject(s), ${impact.section_count} section(s), ${impact.weekly_load} ${impact.load_unit}/week<br/><br/>
+                <span class="text-amber-600">Deleting this faculty will leave those scheduled subjects without an assigned faculty.</span><br/><br/>
+                Affected subjects: ${impact.subject_codes.join(', ') || '—'}<br/>
+                Affected sections: ${impact.section_codes.join(', ') || '—'}`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#DC2626',
+            confirmButtonText: 'Delete Faculty',
+        }).then((second) => {
+            if (!second.isConfirmed) return;
             router.delete(route('scheduling.faculty.destroy', faculty.id), {
+                data: { confirmed: true },
                 preserveScroll: true,
                 onSuccess: () => onRefresh(),
             });
-        }
-    });
-};
+        });
+    },
+);
 
 const fullName = (faculty) => {
     const middleInitial = faculty.middle_name ? ` ${faculty.middle_name.charAt(0)}.` : '';
@@ -589,6 +686,64 @@ const fullName = (faculty) => {
                 </div>
             </div>
 
+            <!-- Stale faculty-request data banner — same idea, for Faculty
+                 Management (Creation/Deletion) requests instead of Load. -->
+            <div
+                v-if="staleFacultyRequestUpdate"
+                class="mb-6 rounded-2xl border px-5 py-4 flex items-start sm:items-center gap-4 flex-col sm:flex-row justify-between"
+                :class="isDark
+                    ? 'bg-blue-500/10 border-blue-500/30'
+                    : 'bg-blue-50 border-blue-200'"
+            >
+                <div class="flex items-start sm:items-center gap-3">
+                    <i class="pi pi-info-circle text-lg mt-0.5 sm:mt-0" :class="isDark ? 'text-blue-300' : 'text-blue-600'" />
+                    <div>
+                        <p class="font-semibold text-sm" :class="isDark ? 'text-blue-200' : 'text-blue-800'">
+                            A faculty request was just updated
+                        </p>
+                        <p class="text-xs" :class="isDark ? 'text-blue-300/80' : 'text-blue-700'">
+                            This page doesn't auto-update — refresh to see the latest status and numbers.
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                    <Button
+                        label="Refresh"
+                        icon="pi pi-refresh"
+                        size="small"
+                        severity="info"
+                        :loading="refreshingFacultyRequests"
+                        @click="refreshFacultyRequestData"
+                    />
+                    <Button icon="pi pi-times" text rounded size="small" severity="secondary" aria-label="Dismiss" @click="staleFacultyRequestUpdate = false" />
+                </div>
+            </div>
+
+            <!-- Pending Faculty (Creation/Deletion) Requests reminder — Admin/Registrar only -->
+            <div
+                v-if="canReviewFacultyRequests && pendingFacultyRequestsCount > 0 && !pendingFacultyBannerDismissed"
+                class="mb-6 rounded-2xl border px-5 py-4 flex items-start sm:items-center gap-4 flex-col sm:flex-row justify-between"
+                :class="isDark
+                    ? 'bg-amber-500/10 border-amber-500/30'
+                    : 'bg-amber-50 border-amber-200'"
+            >
+                <div class="flex items-start sm:items-center gap-3">
+                    <i class="pi pi-bell text-lg mt-0.5 sm:mt-0" :class="isDark ? 'text-amber-400' : 'text-amber-600'" />
+                    <div>
+                        <p class="font-semibold text-sm" :class="isDark ? 'text-amber-200' : 'text-amber-800'">
+                            {{ pendingFacultyRequestsCount }} faculty {{ pendingFacultyRequestsCount === 1 ? 'request' : 'requests' }} awaiting your review
+                        </p>
+                        <p class="text-xs" :class="isDark ? 'text-amber-300/80' : 'text-amber-700'">
+                            A Dean/OIC/Assistant Dean has requested a faculty creation or deletion.
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                    <Button label="Review Now" size="small" severity="warning" @click="facultyRequestsListVisible = true" />
+                    <Button icon="pi pi-times" text rounded size="small" severity="secondary" aria-label="Dismiss" @click="pendingFacultyBannerDismissed = true" />
+                </div>
+            </div>
+
             <div class="neu-card rounded-2xl transition-colors duration-300">
             <Card
                 class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
@@ -630,7 +785,20 @@ const fullName = (faculty) => {
                                     @click="onRefresh"
                                     aria-label="Refresh"
                                 />
-                                <Button label="Add Faculty" icon="pi pi-plus" severity="success" @click="openAdd" />
+                                <Button
+                                    v-if="canCreateFacultyDirectly"
+                                    label="Add Faculty"
+                                    icon="pi pi-plus"
+                                    severity="success"
+                                    @click="openAdd"
+                                />
+                                <Button
+                                    v-else-if="canRequestFacultyCreation"
+                                    label="Request New Faculty"
+                                    icon="pi pi-send"
+                                    severity="success"
+                                    @click="openRequestFaculty"
+                                />
                             </div>
                         </template>
                     </Toolbar>
@@ -749,7 +917,23 @@ const fullName = (faculty) => {
                                 />
                             </template>
                         </Column>
-                        <Column header="Actions" style="width: 11rem">
+                        <Column style="width: 11rem">
+                            <template #header>
+                                <span class="flex items-center gap-1">
+                                    Actions
+                                    <InfoPopover
+                                        title="Actions"
+                                        :bullets="[
+                                            '👁 View — details, teaching qualifications & workload.',
+                                            '➤ Faculty Load Requests — raise this faculty member\'s teaching load ceiling.',
+                                            '📥 Faculty Requests — Creation/Deletion requests for review or tracking.',
+                                            '✏️ Edit — update this faculty member\'s details.',
+                                            canCreateFacultyDirectly ? '🗑 Delete — permanently remove this faculty member.' : null,
+                                        ].filter(Boolean)"
+                                        width="w-72"
+                                    />
+                                </span>
+                            </template>
                             <template #body="{ data }">
                                 <div class="flex gap-1">
                                     <Button
@@ -773,6 +957,16 @@ const fullName = (faculty) => {
                                         @click="loadRequestsListVisible = true"
                                     />
                                     <Button
+                                        v-tooltip.top="'Faculty Requests (Creation/Deletion)'"
+                                        icon="pi pi-inbox"
+                                        text
+                                        rounded
+                                        severity="help"
+                                        size="small"
+                                        aria-label="Faculty Requests"
+                                        @click="facultyRequestsListVisible = true"
+                                    />
+                                    <Button
                                         icon="pi pi-pencil"
                                         text
                                         rounded
@@ -782,12 +976,14 @@ const fullName = (faculty) => {
                                         @click="openEdit(data)"
                                     />
                                     <Button
+                                        v-if="canCreateFacultyDirectly"
                                         icon="pi pi-trash"
                                         text
                                         rounded
                                         severity="danger"
                                         size="small"
                                         aria-label="Delete"
+                                        v-tooltip.top="'Delete Faculty'"
                                         @click="onDeleteFaculty(data)"
                                     />
                                 </div>
@@ -1334,6 +1530,24 @@ const fullName = (faculty) => {
                 />
             </template>
         </Dialog>
+
+        <!-- Faculty Management Requests (Creation/Deletion) — opened via the
+             row icon beside "Faculty Load Requests" — see FacultyRequestController -->
+        <FacultyRequestsPanel
+            v-model:visible="facultyRequestsListVisible"
+            :faculty-requests="facultyRequests"
+            :pending-count="pendingFacultyRequestsCount"
+            :can-review="canReviewFacultyRequests"
+            :can-request-faculty-creation="canRequestFacultyCreation"
+            :can-create-faculty-directly="canCreateFacultyDirectly"
+            :deletion-faculties="loadRequestFaculties"
+            @request-new-faculty="openRequestFaculty"
+        />
+
+        <RequestFacultyModal
+            v-model:visible="requestFacultyVisible"
+            :next-faculty-id="nextFacultyId"
+        />
     </AppLayout>
 </template>
 

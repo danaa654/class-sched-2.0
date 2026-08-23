@@ -19,17 +19,24 @@ class FacultyPolicy
         return $this->canAccess($user, $faculty);
     }
 
+    /**
+     * Directly creating an ACTIVE Faculty record is Admin/Registrar
+     * only (Faculty Management request workflow). Dean/OIC/Assistant
+     * Dean may never activate a new Faculty record on their own — see
+     * requestCreate() below; they submit a FacultyRequest instead,
+     * reviewed via FacultyRequestController.
+     */
     public function create(User $user): bool
     {
-        return $user->hasAnyRole(['Administrator', 'Registrar', 'Dean', 'OIC']);
+        return AccessScope::isUnrestricted($user);
     }
 
     /**
-     * A College-scoped Dean/OIC creating a Faculty record may only
-     * assign it to their own College (or leave it a GenEd/Minor
-     * faculty with no College — but that is the Assistant Dean's
-     * lane to manage further; creation of the base record is allowed
-     * so Deans can rostering their own people).
+     * A College-scoped Dean/OIC/Assistant Dean creating a Faculty
+     * record may only assign it to their own College (or leave it a
+     * GenEd/Minor faculty with no College — but that is the Assistant
+     * Dean's lane to manage further; creation of the base record is
+     * allowed so Deans can roster their own people).
      */
     public function createForCollege(User $user, ?int $collegeId): bool
     {
@@ -37,8 +44,50 @@ class FacultyPolicy
             return true;
         }
 
+        if (AccessScope::isAssistantDean($user)) {
+            return $collegeId === null;
+        }
+
         if (AccessScope::isCollegeScoped($user)) {
             return AccessScope::canAccessCollege($user, $collegeId);
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the user may submit a Faculty CREATION request for the
+     * given (proposed) College. Only Dean/OIC/Assistant Dean use this
+     * path — Admin/Registrar use create()/createForCollege() directly
+     * instead (see FacultyRequestPolicy::create()).
+     */
+    public function requestCreate(User $user, ?int $collegeId): bool
+    {
+        if (AccessScope::isAssistantDean($user)) {
+            return $collegeId === null;
+        }
+
+        if (AccessScope::isCollegeScoped($user)) {
+            return AccessScope::canAccessCollege($user, $collegeId);
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the user may submit a Faculty DEACTIVATION/removal
+     * request for this Faculty member. Only Dean/OIC/Assistant Dean
+     * use this path — Admin/Registrar deactivate directly via
+     * delete() instead.
+     */
+    public function requestDeactivate(User $user, Faculty $faculty): bool
+    {
+        if (AccessScope::isAssistantDean($user)) {
+            return $faculty->college_id === null;
+        }
+
+        if (AccessScope::isCollegeScoped($user)) {
+            return AccessScope::canAccessCollege($user, $faculty->college_id);
         }
 
         return false;
@@ -49,10 +98,16 @@ class FacultyPolicy
         return $this->canAccess($user, $faculty);
     }
 
+    /**
+     * Directly deactivating/removing a Faculty record is Admin/
+     * Registrar only (Faculty Management request workflow). Dean/OIC/
+     * Assistant Dean may never deactivate a Faculty record on their
+     * own — see requestDeactivate() above; they submit a
+     * FacultyRequest instead.
+     */
     public function delete(User $user, Faculty $faculty): bool
     {
-        return AccessScope::isUnrestricted($user)
-            || (AccessScope::isCollegeScoped($user) && AccessScope::canAccessCollege($user, $faculty->college_id));
+        return AccessScope::isUnrestricted($user);
     }
 
     /**

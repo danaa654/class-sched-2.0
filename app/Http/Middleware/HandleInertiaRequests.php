@@ -89,6 +89,10 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
+                // Deletion-impact payload for the double-confirmation
+                // flow — see FacultyController::destroy() and
+                // Faculty/Index.vue's onDeleteFaculty().
+                'facultyDeletionImpact' => fn () => $request->session()->get('facultyDeletionImpact'),
             ],
             // The currently Active Academic Term (School Year +
             // Semester) — the real, system-wide one, unaffected by

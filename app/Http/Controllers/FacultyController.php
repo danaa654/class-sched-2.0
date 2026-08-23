@@ -7,12 +7,14 @@ use App\Http\Requests\UpdateFacultyRequest;
 use App\Models\College;
 use App\Models\Faculty;
 use App\Models\FacultyLoadRequest;
+use App\Models\FacultyRequest;
 use App\Models\Subject;
 use App\Services\FacultyWorkloadService;
 use App\Services\NotificationService;
 use App\Support\AccessScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -88,7 +90,39 @@ class FacultyController extends Controller
             // (formerly FacultyLoadRequestController@index) so it
             // renders as a section on the Faculty page itself.
             ...$this->loadRequestsProps($request),
+
+            // Faculty Management requests (Creation/Deactivation) —
+            // see FacultyRequestController.
+            ...$this->facultyRequestsProps($request),
         ]);
+    }
+
+    /**
+     * Props for the "Faculty Requests" section of the Faculty page.
+     * Admin/Registrar see the full review queue; Dean/OIC/Assistant
+     * Dean see only requests within their own scope (their own
+     * submissions), so they can track status.
+     */
+    private function facultyRequestsProps(Request $request): array
+    {
+        $user = $request->user();
+
+        $facultyRequests = FacultyRequest::query()
+            ->with(['faculty:id,faculty_id,first_name,last_name,college_id,status', 'college:id,name', 'requestedBy:id,name', 'reviewedBy:id,name'])
+            ->visibleTo($user)
+            ->latest()
+            ->paginate(10, ['*'], 'faculty_requests_page')
+            ->withQueryString();
+
+        $pendingFacultyRequestsCount = FacultyRequest::query()->visibleTo($user)->where('status', 'Pending')->count();
+
+        return [
+            'facultyRequests' => $facultyRequests,
+            'pendingFacultyRequestsCount' => $pendingFacultyRequestsCount,
+            'canReviewFacultyRequests' => $user->can('review', FacultyRequest::class),
+            'canCreateFacultyDirectly' => $user->can('create', Faculty::class),
+            'canRequestFacultyCreation' => $user->can('requestCreate', [Faculty::class, AccessScope::isAssistantDean($user) ? null : $user->college_id]),
+        ];
     }
 
     /**
@@ -162,8 +196,17 @@ class FacultyController extends Controller
         // figure, not just the summary numbers.
         $faculty->setAttribute('workload', $this->workloadService->evaluate($faculty, includePlacements: true));
 
+        $user = request()->user();
+
         return Inertia::render('Scheduling/Faculty/Details', [
             'faculty' => $faculty,
+            // Deactivation-impact preview (spec Section 7/8) — lets
+            // the page show the "⚠ Scheduled Assignments" / "🔒
+            // Finalized Schedule Assignment" indicators and pre-fill
+            // the confirmation dialog without a second round trip.
+            'deactivationImpact' => $this->workloadService->deactivationImpact($faculty),
+            'canDeactivateDirectly' => $user->can('delete', $faculty),
+            'canRequestDeactivation' => $user->can('requestDeactivate', $faculty),
             'colleges' => College::query()
                 ->where('status', 'Active')
                 ->orderBy('name')
@@ -254,13 +297,62 @@ class FacultyController extends Controller
     }
 
     /**
-     * Delete a faculty member from the Faculty Master.
+     * Permanently remove a faculty member from the Faculty Master
+     * (Admin/Registrar only — Dean/OIC/Assistant Dean have no direct
+     * delete path; they may still request deactivation instead, see
+     * FacultyRequestController::storeDeactivation()).
+     *
+     * This is for faculty who don't belong on the roster at all (e.g.
+     * added by mistake, never actually employed at the school) — not
+     * for faculty who are simply no longer teaching this term. That
+     * case is a manual status edit (Faculty Master → Edit → set
+     * Status to "Inactive"), which keeps the row and its history
+     * intact. This action instead soft-deletes the row (the
+     * `faculties` table already carries `deleted_at` — see
+     * Faculty::class's SoftDeletes trait): it disappears from the
+     * roster and every listing immediately, while historical
+     * schedule/qualification/workload records that reference it stay
+     * intact for audit purposes and can be restored if deleted by
+     * mistake.
+     *
+     * If the faculty has active scheduled assignments, the frontend
+     * is expected to have already shown the two-step confirmation
+     * (delete warning) and to resend with `confirmed=true` — but that
+     * frontend flag is never trusted on its own: the backend
+     * rechecks the live assignment/finalized-schedule state itself
+     * before proceeding, so a stale confirmation dialog can never
+     * push through an unsafe delete.
      */
-    public function destroy(Faculty $faculty): RedirectResponse
+    public function destroy(Request $request, Faculty $faculty): RedirectResponse
     {
         $this->authorize('delete', $faculty);
 
-        $faculty->delete();
+        $impact = $this->workloadService->deactivationImpact($faculty);
+
+        // Finalized-schedule protection — never delete a faculty
+        // member still tied to a finalized/locked Section, confirmed
+        // or not. They must be unassigned first.
+        if ($impact['has_finalized_assignment']) {
+            return back()->with('error', 'This faculty member is assigned to a finalized schedule ('.implode(', ', $impact['finalized_section_codes']).'). Unlock the affected section(s) and reassign before deleting.');
+        }
+
+        // Double confirmation — required only when there are active
+        // (non-finalized) assignments to warn about, i.e. the faculty
+        // already has a subject scheduled.
+        if ($impact['has_active_assignments'] && ! $request->boolean('confirmed')) {
+            return back()->with('error', 'This faculty member has an active assigned subject. Confirm the warning to proceed.')
+                ->with('facultyDeletionImpact', $impact);
+        }
+
+        DB::transaction(function () use ($faculty, $impact, $request) {
+            $this->notifications->facultyDeletedDirectly($faculty, $request->user());
+
+            if ($impact['has_active_assignments']) {
+                $this->notifications->facultyAssignmentsNeedAttention($faculty, $impact, $request->user(), 'deleted');
+            }
+
+            $faculty->delete();
+        });
 
         return redirect()->route('scheduling.faculty')->with('success', 'Faculty member deleted successfully.');
     }
