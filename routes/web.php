@@ -24,6 +24,7 @@ use App\Http\Controllers\SchoolYearController;
 use App\Http\Controllers\SectionController;
 use App\Http\Controllers\SectionSubjectController;
 use App\Http\Controllers\SemesterController;
+use App\Http\Controllers\ActiveSessionController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\TeachingQualificationController;
@@ -258,6 +259,12 @@ Route::middleware('auth')->group(function () {
     Route::put('/settings/irregular', [SettingsController::class, 'updateIrregular'])->name('settings.irregular.update');
     Route::put('/settings/notifications', [SettingsController::class, 'updateNotifications'])->name('settings.notifications.update');
     Route::post('/settings/system/refresh-cache', [SettingsController::class, 'refreshCache'])->name('settings.system.refresh-cache');
+
+    // ACTIVE SESSIONS — Administrator-only "who's logged in" tab on
+    // the Settings page. See ActiveSessionController::activeSessions()
+    // (called from SettingsController::index()) and ::destroy() below
+    // for the force-logout action.
+    Route::delete('/settings/active-sessions/{session}', [ActiveSessionController::class, 'destroy'])->name('settings.active-sessions.destroy');
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });

@@ -88,6 +88,7 @@ class SettingsController extends Controller
                     \App\Models\SystemSetting::query()->latest('updated_at')->first()
                 )->updated_at : null,
             ] : null,
+            'activeSessions' => $isAdministrator ? ActiveSessionController::activeSessions($request) : [],
         ]);
     }
 

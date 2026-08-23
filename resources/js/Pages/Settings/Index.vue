@@ -34,6 +34,7 @@ const props = defineProps({
     settings: { type: Object, default: () => ({}) },
     schoolYear: { type: Object, default: null },
     system: { type: Object, default: null },
+    activeSessions: { type: Array, default: () => [] },
 });
 
 const toast = useToast();
@@ -104,6 +105,24 @@ const refreshCache = () => {
 };
 
 /* ------------------------------------------------------------------ */
+/* Active Sessions                                                     */
+/* ------------------------------------------------------------------ */
+function refreshSessions() {
+    router.reload({ only: ['activeSessions'] });
+}
+
+function forceLogout(session) {
+    if (! confirm('Log this device out now? The user will be signed out immediately.')) {
+        return;
+    }
+
+    router.delete(route('settings.active-sessions.destroy', session.id), {
+        preserveScroll: true,
+        onSuccess: () => refreshSessions(),
+    });
+}
+
+/* ------------------------------------------------------------------ */
 /* Manage Account (Registrar / Dean / OIC / Assistant Dean)            */
 /* ------------------------------------------------------------------ */
 const accountForm = useForm({
@@ -156,6 +175,7 @@ const onUpdateAccount = () => {
                     <Tab v-if="has('general')" value="general">General</Tab>
                     <Tab v-if="has('academic')" value="academic">Academic</Tab>
                     <Tab v-if="has('workload')" value="workload">Faculty &amp; Workload</Tab>
+                    <Tab v-if="has('system')" value="activeSessions">Active Sessions</Tab>
                     <Tab v-if="has('system')" value="system">System</Tab>
                     <Tab v-if="!isAdministrator" value="account">Manage Account</Tab>
                 </TabList>
@@ -278,6 +298,71 @@ const onUpdateAccount = () => {
                         </div>
                     </TabPanel>
 
+                    <!-- ============================== ACTIVE SESSIONS ============================== -->
+                    <TabPanel v-if="has('system')" value="activeSessions">
+                        <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
+                        <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
+                            <template #content>
+                                <div class="flex items-start justify-between gap-4 mb-5">
+                                    <div>
+                                        <h2 class="text-lg font-bold text-[#1E293B] mb-1">Active Sessions</h2>
+                                        <p class="text-sm text-slate-500 max-w-2xl">
+                                            Everyone currently signed in to Classly. A user can appear more than once if
+                                            they're signed in on more than one device. Visible to Administrators only.
+                                        </p>
+                                    </div>
+                                    <Button icon="pi pi-refresh" label="Refresh" text @click="refreshSessions" />
+                                </div>
+
+                                <div v-if="!activeSessions || activeSessions.length === 0" class="neu-inset rounded-2xl p-8 text-center text-slate-500">
+                                    No one else is currently signed in.
+                                </div>
+
+                                <div v-else class="space-y-4">
+                                    <div v-for="entry in activeSessions" :key="entry.user_id" class="neu-inset rounded-2xl p-5">
+                                        <div class="flex items-center justify-between mb-3">
+                                            <div>
+                                                <span class="font-semibold text-[#1E293B]">{{ entry.name }}</span>
+                                                <Tag v-if="entry.role" :value="entry.role" severity="secondary" class="!text-[10px] ml-2 align-middle" />
+                                            </div>
+                                            <span class="text-xs text-slate-400">
+                                                {{ entry.sessions.length }} device{{ entry.sessions.length === 1 ? '' : 's' }}
+                                            </span>
+                                        </div>
+
+                                        <ul class="space-y-2">
+                                            <li
+                                                v-for="session in entry.sessions"
+                                                :key="session.id"
+                                                class="neu-card flex items-center justify-between rounded-xl px-3 py-2"
+                                            >
+                                                <div class="flex flex-col">
+                                                    <span class="text-sm text-[#1E293B]">
+                                                        {{ session.device }}
+                                                        <Tag v-if="session.is_current" value="This device" severity="success" class="!text-[10px] ml-1 align-middle" />
+                                                    </span>
+                                                    <span class="text-xs text-slate-400">
+                                                        {{ session.ip_address ?? 'Unknown IP' }} · Last active {{ session.last_active }}
+                                                    </span>
+                                                </div>
+                                                <Button
+                                                    v-if="!session.is_current"
+                                                    label="Log out"
+                                                    icon="pi pi-sign-out"
+                                                    size="small"
+                                                    severity="danger"
+                                                    text
+                                                    @click="forceLogout(session)"
+                                                />
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </template>
+                        </Card>
+                        </div>
+                    </TabPanel>
+
                     <!-- ============================== SYSTEM ============================== -->
                     <TabPanel v-if="has('system') && system" value="system">
                         <div class="neu-card rounded-2xl p-6 transition-colors duration-300">
@@ -302,7 +387,6 @@ const onUpdateAccount = () => {
                         </div>
                     </TabPanel>
 
-                    <!-- ============================== MANAGE ACCOUNT ============================== -->
                     <TabPanel v-if="!isAdministrator" value="account">
                         <div class="neu-card rounded-2xl p-6 transition-colors duration-300 max-w-2xl">
                         <Card class="!rounded-2xl !bg-transparent !border-0 !shadow-none" :pt="{ body: { class: '!bg-transparent !p-0' } }">
