@@ -85,6 +85,7 @@ const iconFor = (type) => ({
     SUBJECT_REMOVED: '📕',
     AUTO_SCHEDULE_COMPLETED: '✅',
     AUTO_SCHEDULE_NEEDS_ATTENTION: '🛠️',
+    PASSWORD_CHANGE_REQUIRED: '🔑',
 }[type] ?? '🔔');
 
 const PRIORITY_COLORS = {

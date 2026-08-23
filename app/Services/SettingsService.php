@@ -100,6 +100,29 @@ class SettingsService
             'irregular.enable_merge_recommendations' => ['group' => 'irregular', 'type' => 'bool', 'default' => true],
             'irregular.default_mode' => ['group' => 'irregular', 'type' => 'string', 'default' => 'auto_select'], // auto_select|recommend_merge|independent_class
 
+            // ---- Security ---------------------------------------------------
+            // Consumed by App\Services\PasswordPolicyService, which is the
+            // ONLY place these turn into an actual validation rule chain.
+            // Deliberately read-only from the Settings > Security tab for
+            // now (see SettingsController — 'security' is in
+            // visibleGroups but intentionally absent from EDITABLE_BY) —
+            // this just makes the enforced policy visible, not editable.
+            //
+            // Scope reminder: this policy governs a USER SETTING THEIR
+            // OWN PASSWORD (voluntary self-service change, forced change
+            // via must_change_password, or an expired password). It is
+            // deliberately NOT applied when an Administrator creates or
+            // edits another user's account (UsersController::rules()) —
+            // that stays a simple 'min:8' so an Administrator can set up
+            // a new CCS Dean/Registrar/etc. account without friction.
+            'security.min_password_length' => ['group' => 'security', 'type' => 'int', 'default' => 10],
+            'security.require_uppercase' => ['group' => 'security', 'type' => 'bool', 'default' => true],
+            'security.require_number' => ['group' => 'security', 'type' => 'bool', 'default' => true],
+            'security.require_symbol' => ['group' => 'security', 'type' => 'bool', 'default' => true],
+            // 0 = expiry disabled. See PasswordPolicyService::isExpired()
+            // and App\Http\Middleware\EnsurePasswordIsCurrent.
+            'security.password_expiry_days' => ['group' => 'security', 'type' => 'int', 'default' => 0],
+
             // ---- Notifications --------------------------------------------
             'notifications.schedule_conflict' => ['group' => 'notifications', 'type' => 'bool', 'default' => true],
             'notifications.workload_warning' => ['group' => 'notifications', 'type' => 'bool', 'default' => true],

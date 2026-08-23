@@ -26,6 +26,7 @@ import TabPanel from 'primevue/tabpanel';
 import Menu from 'primevue/menu';
 import Swal from 'sweetalert2';
 import InfoPopover from '@/Components/InfoPopover.vue';
+import PasswordRequirementsChecklist from '@/Components/PasswordRequirementsChecklist.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -36,6 +37,7 @@ const props = defineProps({
     colleges: { type: Array, default: () => [] },
     departments: { type: Array, default: () => [] },
     nextEmployeeId: { type: String, default: '' },
+    passwordPolicy: { type: Object, default: () => ({ minLength: 8, requireUppercase: false, requireNumber: false, requireSymbol: false }) },
 });
 
 const toast = useToast();
@@ -67,7 +69,9 @@ const search = ref('');
 // only sees the Users tab.
 const authRoles = computed(() => page.props.auth?.roles ?? []);
 const isAdministrator = computed(() => authRoles.value.includes('Administrator'));
-const activeTab = ref('users');
+// Lets a notification (e.g. "Password Change Required") deep-link
+// straight into the Manage Account tab via ?tab=account.
+const activeTab = ref(new URLSearchParams(window.location.search).get('tab') ?? 'users');
 
 const roleOptions = [
     { label: 'Administrator', value: 'Administrator' },
@@ -291,6 +295,12 @@ const rowMenuItemsFor = (user) => {
             command: () => onToggleStatus(user),
         },
         {
+            label: user.mustChangePassword ? 'Cancel required password change' : 'Require password change on next login',
+            icon: 'pi pi-key',
+            disabled: isSelf,
+            command: () => onToggleMustChangePassword(user),
+        },
+        {
             separator: true,
         },
         {
@@ -301,6 +311,27 @@ const rowMenuItemsFor = (user) => {
             command: () => onDeleteUser(user),
         },
     ];
+};
+
+const mustChangePasswordForm = useForm({});
+const onToggleMustChangePassword = async (user) => {
+    const requiring = !user.mustChangePassword;
+
+    const result = await Swal.fire({
+        title: requiring ? 'Require a password change?' : 'Cancel the required password change?',
+        text: requiring
+            ? `${user.fullName} will be prompted to set a new password the next time they log in. Their access is not affected until then.`
+            : `${user.fullName} will no longer be prompted to change their password on next login.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: requiring ? 'Require change' : 'Cancel requirement',
+        confirmButtonColor: requiring ? '#D97706' : '#64748B',
+        cancelButtonText: 'Close',
+    });
+
+    if (!result.isConfirmed) return;
+
+    mustChangePasswordForm.patch(route('users.must-change-password', user.id), { preserveScroll: true });
 };
 
 const statusForm = useForm({});
@@ -471,6 +502,12 @@ const onUpdateAccount = () => {
                                                 :value="data.status"
                                                 :severity="data.status === 'Active' ? 'success' : 'secondary'"
                                             />
+                                            <Tag
+                                                v-if="data.mustChangePassword"
+                                                value="Password change required"
+                                                severity="warn"
+                                                class="ml-1"
+                                            />
                                         </template>
                                     </Column>
                                     <Column header="Actions" style="width: 9rem">
@@ -608,6 +645,11 @@ const onUpdateAccount = () => {
                                             <label for="accPasswordConfirm">Confirm New Password</label>
                                         </FloatLabel>
                                     </div>
+                                    <PasswordRequirementsChecklist
+                                        :password="accountForm.password"
+                                        :policy="passwordPolicy"
+                                        :is-dark="isDark"
+                                    />
                                     <small v-if="accountForm.errors.password" class="text-red-500">{{ accountForm.errors.password }}</small>
                                     <p class="text-xs text-slate-400 mt-1">Leave blank to keep your current password.</p>
 

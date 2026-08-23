@@ -132,6 +132,17 @@ class NotificationController extends Controller
             return route('scheduling.faculty');
         }
 
+        // Sends the recipient straight to their own Manage Account tab
+        // — Administrators manage their account from User Management,
+        // everyone else from Settings (see UsersController::updateAccount()).
+        if ($notification->type === \App\Services\NotificationService::TYPE_PASSWORD_CHANGE_REQUIRED) {
+            $notification->loadMissing('recipient.roles');
+
+            return $notification->recipient?->hasRole('Administrator')
+                ? route('users', ['tab' => 'account'])
+                : route('settings', ['tab' => 'account']);
+        }
+
         if (! $notification->section_id) {
             return null;
         }

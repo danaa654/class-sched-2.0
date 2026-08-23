@@ -24,6 +24,7 @@ import Tag from 'primevue/tag';
 import Message from 'primevue/message';
 import DatePicker from 'primevue/datepicker';
 import InfoPopover from '@/Components/InfoPopover.vue';
+import PasswordRequirementsChecklist from '@/Components/PasswordRequirementsChecklist.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -35,6 +36,7 @@ const props = defineProps({
     settings: { type: Object, default: () => ({}) },
     schoolYear: { type: Object, default: null },
     system: { type: Object, default: null },
+    passwordPolicy: { type: Object, default: null },
     activeSessions: { type: Array, default: () => [] },
     activityLog: { type: Object, default: () => ({}) },
 });
@@ -53,7 +55,12 @@ watch(
 
 const authRoles = computed(() => page.props.auth?.roles ?? []);
 const isAdministrator = computed(() => authRoles.value.includes('Administrator'));
-const activeTab = ref(props.visibleGroups[0] ?? 'general');
+
+// Lets a notification (e.g. "Password Change Required") deep-link
+// straight into the Manage Account tab via ?tab=account instead of
+// always landing on whatever the first visible group is.
+const requestedTab = new URLSearchParams(window.location.search).get('tab');
+const activeTab = ref(requestedTab ?? (props.visibleGroups[0] ?? 'general'));
 
 const canEdit = (group) => props.editableGroups.includes(group);
 const has = (group) => props.visibleGroups.includes(group);
@@ -582,6 +589,11 @@ const onUpdateAccount = () => {
                                             <label for="accPasswordConfirm">Confirm New Password</label>
                                         </FloatLabel>
                                     </div>
+                                    <PasswordRequirementsChecklist
+                                        :password="accountForm.password"
+                                        :policy="passwordPolicy"
+                                        :is-dark="isDark"
+                                    />
                                     <small v-if="accountForm.errors.password" class="text-red-500">{{ accountForm.errors.password }}</small>
                                     <p class="text-xs text-slate-400 mt-1">Leave blank to keep your current password.</p>
 

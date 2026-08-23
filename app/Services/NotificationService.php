@@ -87,6 +87,13 @@ class NotificationService
 
     public const TYPE_FACULTY_DELETED_DIRECTLY = 'FACULTY_DELETED_DIRECTLY';
 
+    // An Administrator flipped "Require password change on next
+    // login" for a user in User Management — see
+    // UsersController::updateMustChangePassword(). Sent to the
+    // affected user only, so they know to go change it; never sent
+    // when the requirement is being cancelled.
+    public const TYPE_PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
+
     // Priority levels (spec Section 13). Never escalate to CRITICAL
     // for routine events — nothing in this service currently uses it;
     // it's reserved for a finalized schedule found invalid or a data
@@ -911,6 +918,27 @@ class NotificationService
             'new_value' => $newValue,
             'created_at' => now(),
         ]);
+    }
+
+    /**
+     * An Administrator required a password change for `$user`. Sent to
+     * that user only (not the whole college/institution — this is a
+     * personal account action, not a scheduling event), so they see it
+     * next time they check notifications and can jump straight to
+     * Manage Account. See NotificationController::routeFor() for the
+     * Manage Account redirect this resolves to.
+     */
+    public function passwordChangeRequired(User $user, User $actor): void
+    {
+        $this->writeNotification(
+            recipient: $user,
+            actor: $actor,
+            type: self::TYPE_PASSWORD_CHANGE_REQUIRED,
+            priority: self::PRIORITY_WARNING,
+            title: 'Password Change Required',
+            message: "{$actor->full_name} requires you to change your password on your next action. Go to Manage Account to set a new one.",
+            data: [],
+        );
     }
 
     /**

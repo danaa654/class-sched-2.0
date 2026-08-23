@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\SchoolYear;
+use App\Services\PasswordPolicyService;
 use App\Services\SettingsService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,7 +39,10 @@ class SettingsController extends Controller
         'notifications' => ['Registrar', 'Assistant Dean', 'Dean', 'OIC'],
     ];
 
-    public function __construct(private readonly SettingsService $settings) {}
+    public function __construct(
+        private readonly SettingsService $settings,
+        private readonly PasswordPolicyService $passwordPolicy,
+    ) {}
 
     /**
      * Display the Settings page. Only sends the groups + fields the
@@ -71,6 +75,11 @@ class SettingsController extends Controller
             'visibleGroups' => $visibleGroups,
             'editableGroups' => $this->editableGroupsFor($user, $role, $isAdministrator, $visibleGroups),
             'settings' => $this->settings->all(),
+            // Read by every role's Manage Account tab to render the
+            // live password requirements checklist — no longer
+            // Administrator-only now that the read-only Security tab
+            // has been folded into Manage Account (see PasswordPolicyService).
+            'passwordPolicy' => $this->passwordPolicy->requirements(),
             'schoolYear' => $activeSchoolYear ? [
                 'name' => $activeSchoolYear->name,
                 'class_start_time' => $activeSchoolYear->classStartTime(),
@@ -280,12 +289,18 @@ class SettingsController extends Controller
      */
     private function editableGroupsFor($user, ?string $role, bool $isAdministrator, array $visibleGroups): array
     {
+        // 'system' is informational for everyone (including
+        // Administrator), and 'security' is deliberately read-only for
+        // now (see index() — no updateSecurity() action exists), so
+        // both are excluded from editableGroups regardless of role.
+        $readOnlyGroups = ['system', 'security'];
+
         if ($isAdministrator) {
-            return $visibleGroups;
+            return array_values(array_diff($visibleGroups, $readOnlyGroups));
         }
 
-        return array_values(array_filter($visibleGroups, function (string $group) use ($role) {
-            if ($group === 'system') {
+        return array_values(array_filter($visibleGroups, function (string $group) use ($role, $readOnlyGroups) {
+            if (in_array($group, $readOnlyGroups, true)) {
                 return false;
             }
 

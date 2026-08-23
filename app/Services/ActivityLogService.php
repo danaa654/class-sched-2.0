@@ -59,6 +59,11 @@ class ActivityLogService
 
     public const PASSWORD_RESET_REQUESTED = 'PASSWORD_RESET_REQUESTED';
 
+    // Administrator toggled "require password change on next login"
+    // for a specific user, on or off — see
+    // UsersController::updateMustChangePassword().
+    public const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
+
     /**
      * Every action code above, for the Activity Log tab's filter
      * dropdown — kept in one place so it can never drift out of sync
@@ -84,6 +89,7 @@ class ActivityLogService
             self::SUBJECT_REMOVED_FROM_SECTION,
             self::SESSION_FORCE_LOGOUT,
             self::PASSWORD_RESET_REQUESTED,
+            self::PASSWORD_CHANGE_REQUIRED,
         ];
     }
 

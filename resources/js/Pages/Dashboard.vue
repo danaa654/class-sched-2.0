@@ -1,6 +1,7 @@
 <script setup>
-import { Head, Link, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import Swal from 'sweetalert2';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import KpiCard from '@/Components/Dashboard/KpiCard.vue';
 import SchedulingProgressCard from '@/Components/Dashboard/SchedulingProgressCard.vue';
@@ -27,6 +28,36 @@ const user = page.props.auth.user;
 // Settings → General (single source of truth).
 const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null, logoUrl: null });
 
+/**
+ * An Administrator required this user to change their password (User
+ * Management > "Require password change on next login"). Rather than
+ * relying only on the middleware's forced redirect, the Dashboard
+ * also greets them with a blocking prompt on load pointing straight
+ * at the right Manage Account tab — Administrators manage their own
+ * account from User Management, everyone else from Settings (see
+ * UsersController::updateAccount()).
+ */
+function promptPasswordChangeIfRequired() {
+    if (!user?.must_change_password) return;
+
+    const isAdministrator = props.roles.includes('Administrator');
+    const target = isAdministrator ? route('users', { tab: 'account' }) : route('settings', { tab: 'account' });
+
+    Swal.fire({
+        icon: 'warning',
+        title: 'Password Change Required',
+        text: 'An Administrator requires you to change your password before continuing.',
+        confirmButtonText: 'Change Password',
+        confirmButtonColor: '#2563EB',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.visit(target);
+        }
+    });
+}
+
 // Live clock — ticks every second while the Dashboard is mounted.
 const now = ref(new Date());
 let clockInterval = null;
@@ -35,6 +66,8 @@ onMounted(() => {
     clockInterval = setInterval(() => {
         now.value = new Date();
     }, 1000);
+
+    promptPasswordChangeIfRequired();
 });
 
 onUnmounted(() => {
@@ -43,6 +76,7 @@ onUnmounted(() => {
 
 const currentDateLabel = computed(() =>
     now.value.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+
 );
 const currentTimeLabel = computed(() =>
     now.value.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),

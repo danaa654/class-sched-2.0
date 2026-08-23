@@ -58,6 +58,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/users', [UsersController::class, 'store'])->name('users.store');
     Route::put('/users/{user}', [UsersController::class, 'update'])->name('users.update');
     Route::patch('/users/{user}/status', [UsersController::class, 'updateStatus'])->name('users.status');
+    Route::patch('/users/{user}/must-change-password', [UsersController::class, 'updateMustChangePassword'])->name('users.must-change-password');
     Route::delete('/users/{user}', [UsersController::class, 'destroy'])->name('users.destroy');
     Route::put('/account', [UsersController::class, 'updateAccount'])->name('account.update');
     Route::get('/academic-calendar', [AcademicCalendarController::class, 'index'])->name('academic-calendar');

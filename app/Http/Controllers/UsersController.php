@@ -5,6 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\College;
 use App\Models\Department;
 use App\Models\User;
+use App\Services\ActivityLogService;
+use App\Services\NotificationService;
+use App\Services\PasswordPolicyService;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,6 +34,12 @@ class UsersController extends Controller
      */
     private const ROLES_REQUIRING_DEPARTMENT = ['OIC'];
 
+    public function __construct(
+        private readonly PasswordPolicyService $policy,
+        private readonly ActivityLogService $activityLog = new ActivityLogService,
+        private readonly NotificationService $notifications = new NotificationService,
+    ) {}
+
     /**
      * Display the User Management page. Administrator only — Registrar,
      * Dean, OIC and Assistant Dean must never see or reach this page;
@@ -50,6 +59,10 @@ class UsersController extends Controller
             'colleges' => College::orderBy('name')->get(['id', 'name']),
             'departments' => Department::orderBy('name')->get(['id', 'name', 'college_id']),
             'nextEmployeeId' => $this->nextEmployeeId(),
+            // Live checklist under the New Password field in the
+            // Manage Account tab below — same source PasswordPolicyService
+            // feeds to Settings' Manage Account tab for every other role.
+            'passwordPolicy' => $this->policy->requirements(),
         ]);
     }
 
@@ -71,6 +84,7 @@ class UsersController extends Controller
             'suffix' => $validated['suffix'] ?? null,
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
+            'password_changed_at' => now(),
             'status' => $validated['status'],
             'college_id' => $validated['college_id'] ?? null,
             'email_verified_at' => now(),
@@ -111,8 +125,13 @@ class UsersController extends Controller
         ]);
 
         // Password is optional on edit — only touch it if one was given.
+        // Note: this does NOT clear must_change_password — an
+        // Administrator resetting the credential isn't the same as the
+        // account holder actually changing it themselves, so a pending
+        // "require password change on next login" stays pending.
         if (! empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);
+            $user->password_changed_at = now();
         }
 
         $user->save();
@@ -146,6 +165,48 @@ class UsersController extends Controller
         $message = $user->status === 'Active'
             ? 'User account activated.'
             : 'User account deactivated.';
+
+        return redirect()->route('users')->with('success', $message);
+    }
+
+    /**
+     * Toggle "Require password change on next login" for one user (a row
+     * action in User Management). Administrator only.
+     *
+     * This is the ONLY place must_change_password gets flipped to true —
+     * an explicit, per-user, Administrator-triggered action. Nothing
+     * else in the app sets it (creating an account doesn't, resetting a
+     * password from update() above doesn't), so existing accounts are
+     * never retroactively forced to change their password just because
+     * this feature/tab now exists.
+     */
+    public function updateMustChangePassword(Request $request, User $user): RedirectResponse
+    {
+        $this->authorizeAdministrator($request);
+
+        if ($user->id === $request->user()->id) {
+            return redirect()->route('users')->with('error', 'You cannot force this on your own account — change your password from Manage Account instead.');
+        }
+
+        $user->must_change_password = ! $user->must_change_password;
+        $user->save();
+
+        $message = $user->must_change_password
+            ? "{$user->full_name} will be required to change their password on next login."
+            : "The required password change for {$user->full_name} was cancelled.";
+
+        $this->activityLog->record(
+            ActivityLogService::PASSWORD_CHANGE_REQUIRED,
+            $message,
+            $user,
+            $request->user(),
+        );
+
+        // Only notify the user when the requirement is being turned ON
+        // — cancelling it isn't something they need to act on.
+        if ($user->must_change_password) {
+            $this->notifications->passwordChangeRequired($user, $request->user());
+        }
 
         return redirect()->route('users')->with('success', $message);
     }
@@ -191,7 +252,13 @@ class UsersController extends Controller
             'last_name' => ['required', 'string', 'max:255'],
             'suffix' => ['nullable', 'string', 'max:50'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
-            'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+            // STRONG tier — this is a user setting their OWN password
+            // (voluntary self-service change), so it goes through
+            // PasswordPolicyService like every other self-set-password
+            // path (Auth\ChangePasswordController). Never swap this back
+            // to a bare 'min:8' — that belongs only to rules() below,
+            // where an ADMINISTRATOR is setting someone else's password.
+            'password' => ['nullable', 'confirmed', ...$this->policy->rules()],
         ]);
 
         $user->fill([
@@ -205,6 +272,8 @@ class UsersController extends Controller
 
         if (! empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);
+            $user->password_changed_at = now();
+            $user->must_change_password = false;
         }
 
         $user->save();
@@ -251,6 +320,16 @@ class UsersController extends Controller
                 'required', 'email', 'max:255',
                 Rule::unique('users', 'email')->ignore($user?->id),
             ],
+            // RELAXED tier — deliberate. An Administrator is setting up
+            // or resetting ANOTHER PERSON's account here (new CCS Dean,
+            // Registrar, etc.) and hands the credential to them directly,
+            // so friction is a cost with no security benefit — the
+            // account is forced through the strong policy the moment
+            // that person changes it themselves (see must_change_password
+            // below and Auth\ChangePasswordController). Do NOT replace
+            // this with PasswordPolicyService::rules() — that's reserved
+            // for self-service password changes only (see
+            // updateAccount() above).
             'password' => [$user ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
             'status' => ['required', Rule::in(['Active', 'Inactive'])],
             'oversees_all_departments' => ['boolean'],
@@ -308,6 +387,7 @@ class UsersController extends Controller
             'suffix' => $user->suffix,
             'email' => $user->email,
             'role' => $role,
+            'mustChangePassword' => $user->must_change_password,
             'collegeId' => $user->college_id,
             'departmentIds' => $user->departments->pluck('id'),
             'college' => $user->college?->name,
