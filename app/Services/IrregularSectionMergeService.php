@@ -250,6 +250,176 @@ class IrregularSectionMergeService
     }
 
     /**
+     * SHARED CLASS — REVERSE DIRECTION. recommend()/findHostCandidates()
+     * above only ever look for an Irregular row that can fold into an
+     * ALREADY-SAVED Regular section's class. This is the mirror image,
+     * for the opposite real-world case: $subject is a row about to be
+     * scheduled RIGHT NOW at $proposedSlot, and $target is a DIFFERENT
+     * section's row that ALREADY occupies that exact slot (most often
+     * a Regular section being placed directly on top of an Irregular
+     * section's existing class — see the "Regular + IRREG" example).
+     * Business rule stays the same either way — a Regular section's
+     * class is always the host, never the guest — it just means the
+     * row being placed here ends up as host and $target gets
+     * re-pointed onto IT, instead of $subject folding into $target.
+     *
+     * Never writes anything — purely evaluates compatibility so the
+     * caller can show a "Combine Sections?" confirmation before
+     * anything is saved (spec: offer the merge, don't force it).
+     *
+     * @param  array{room_id:?int, faculty_id:?int, days:list<string>, start_time:?string, end_time:?string}  $proposedSlot
+     * @return array{compatible:bool, blocking_reason:?string, capacity:int, current_headcount:int, projected_headcount:int}
+     */
+    public function evaluateReversePlacement(SectionSubject $subject, array $proposedSlot, SectionSubject $target): array
+    {
+        $empty = ['capacity' => 0, 'current_headcount' => 0, 'projected_headcount' => 0];
+
+        $target->loadMissing(['section', 'room', 'faculty']);
+        $subjectSection = $subject->section ?? $subject->section()->first();
+        $targetSection = $target->section;
+
+        if (! $subjectSection || ! $targetSection) {
+            return [...$empty, 'compatible' => false, 'blocking_reason' => 'Section record is missing.'];
+        }
+
+        if ((int) $target->section_id === (int) $subject->section_id) {
+            return [...$empty, 'compatible' => false, 'blocking_reason' => 'That class already belongs to this section.'];
+        }
+
+        if ((int) $target->subject_id !== (int) $subject->subject_id) {
+            return [...$empty, 'compatible' => false, 'blocking_reason' => 'Different subjects cannot share a class session.'];
+        }
+
+        // Same Major, and same/equivalent Curriculum under it —
+        // mirrors findHostCandidates()'s #2/#3 criteria.
+        $equivalentCurriculumIds = \App\Models\Curriculum::query()
+            ->where('major_id', $subjectSection->major_id)
+            ->pluck('id');
+
+        if ((int) $targetSection->major_id !== (int) $subjectSection->major_id
+            || ! $equivalentCurriculumIds->contains($targetSection->curriculum_id)) {
+            return [...$empty, 'compatible' => false, 'blocking_reason' => 'The existing class belongs to a different program/curriculum.'];
+        }
+
+        if ($targetSection->academic_year !== $subjectSection->academic_year || $targetSection->semester !== $subjectSection->semester) {
+            return [...$empty, 'compatible' => false, 'blocking_reason' => 'The existing class belongs to a different academic term.'];
+        }
+
+        if (! $target->faculty_id || ! $target->room_id || ! $target->days || ! $target->start_time || ! $target->end_time) {
+            return [...$empty, 'compatible' => false, 'blocking_reason' => 'The existing class has no complete schedule to share.'];
+        }
+
+        // EXACT SLOT MATCH REQUIRED — sharing only ever applies to an
+        // identical Faculty + Room + Day(s) + Start/End Time; anything
+        // else (including a partial day/time overlap) is a genuine
+        // conflict, never an automatic merge candidate.
+        $proposedDays = array_values(array_unique(array_filter($proposedSlot['days'] ?? [])));
+        $targetDays = array_values(array_unique(array_filter(explode(',', (string) $target->days))));
+        sort($proposedDays);
+        sort($targetDays);
+
+        $exactMatch = (int) ($proposedSlot['faculty_id'] ?? 0) === (int) $target->faculty_id
+            && (int) ($proposedSlot['room_id'] ?? 0) === (int) $target->room_id
+            && $proposedDays === $targetDays
+            && ($proposedSlot['start_time'] ?? null) === $target->start_time
+            && ($proposedSlot['end_time'] ?? null) === $target->end_time;
+
+        if (! $exactMatch) {
+            return [...$empty, 'compatible' => false, 'blocking_reason' => 'This is not an exact Faculty/Room/Day/Time match with the existing class, so it cannot share the same schedule.'];
+        }
+
+        // Room capacity — combine everyone who would end up sharing
+        // this one class session: the target's own section, every
+        // OTHER row already merged into it, and $subject's own
+        // section.
+        $roomCapacity = $target->room?->capacity ?? 0;
+        $alreadySeated = ($targetSection->estimated_students ?? 0)
+            + $target->mergedPlacements()
+                ->with('section:id,estimated_students')
+                ->get()
+                ->sum(fn (SectionSubject $m) => $m->section->estimated_students ?? 0);
+        $incoming = $subjectSection->estimated_students ?? 0;
+        $projected = $alreadySeated + $incoming;
+
+        if ($roomCapacity > 0 && $projected > $roomCapacity) {
+            return [
+                'compatible' => false,
+                'blocking_reason' => "The combined enrollment exceeds Room {$target->room?->room_code}'s capacity ({$roomCapacity}) by ".($projected - $roomCapacity).' students. Please select a larger room or a different schedule.',
+                'capacity' => $roomCapacity,
+                'current_headcount' => $alreadySeated,
+                'projected_headcount' => $projected,
+            ];
+        }
+
+        // $subject's own Section must not already have a different
+        // class in this window (excluding $subject itself).
+        $sectionConflict = $this->conflictService->findSectionConflict(
+            $subjectSection->id,
+            $subject->id,
+            $proposedDays,
+            (string) $proposedSlot['start_time'],
+            (string) $proposedSlot['end_time'],
+        );
+        if ($sectionConflict) {
+            return [
+                'compatible' => false,
+                'blocking_reason' => 'This section already has another class scheduled during this day/time window.',
+                'capacity' => $roomCapacity,
+                'current_headcount' => $alreadySeated,
+                'projected_headcount' => $projected,
+            ];
+        }
+
+        return [
+            'compatible' => true,
+            'blocking_reason' => null,
+            'capacity' => $roomCapacity,
+            'current_headcount' => $alreadySeated,
+            'projected_headcount' => $projected,
+        ];
+    }
+
+    /**
+     * Applies a REVERSE merge — the mirror image of applyMerge().
+     * $hostRow must already have been saved (in the SAME transaction,
+     * by the normal schedule-write path) with its own real Faculty/
+     * Room/Days/Time/Status; this re-points $existingGuestRow — which
+     * previously had its OWN independent booking at the exact same
+     * slot — onto it, exactly the way applyMerge() re-points an
+     * Irregular row onto an existing Regular host, just in the
+     * opposite direction. Any row that was ALREADY merged into
+     * $existingGuestRow (it was a host of its own before this) is
+     * re-parented onto $hostRow too, so a merge chain never ends up
+     * two levels deep.
+     */
+    public function applyReverseMerge(SectionSubject $hostRow, SectionSubject $existingGuestRow, ?array $recommendationMeta = null): SectionSubject
+    {
+        /** @var SectionSubject $lockedHost */
+        $lockedHost = SectionSubject::whereKey($hostRow->id)->lockForUpdate()->firstOrFail();
+        /** @var SectionSubject $lockedGuest */
+        $lockedGuest = SectionSubject::whereKey($existingGuestRow->id)->lockForUpdate()->firstOrFail();
+
+        SectionSubject::where('merged_into_section_subject_id', $lockedGuest->id)
+            ->update(['merged_into_section_subject_id' => $lockedHost->id]);
+
+        $lockedGuest->update([
+            'faculty_id' => $lockedHost->faculty_id,
+            'room_id' => $lockedHost->room_id,
+            'days' => $lockedHost->days,
+            'start_time' => $lockedHost->start_time,
+            'end_time' => $lockedHost->end_time,
+            'status' => $lockedHost->status,
+            'is_auto_generated' => true,
+            'is_merged' => true,
+            'merged_into_section_subject_id' => $lockedHost->id,
+            'auto_generated_meta' => null,
+            'merge_recommendation' => $recommendationMeta,
+        ]);
+
+        return $lockedHost->refresh();
+    }
+
+    /**
      * Every OTHER SectionSubject row, belonging to a Regular section,
      * that is a structural candidate to merge this Irregular
      * placement into (criteria #1–#5 from the class docblock — the

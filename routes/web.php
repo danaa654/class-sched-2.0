@@ -218,6 +218,7 @@ Route::middleware('auth')->group(function () {
     // INTELLIGENT IRREGULAR SECTION SCHEDULING — merge recommendation
     // modal + Administrator override actions (see IrregularSectionMergeService).
     Route::get('/scheduling/section-subjects/{section}/{subject}/merge-recommendation', [SectionSubjectController::class, 'mergeRecommendation'])->name('scheduling.section-subjects.merge-recommendation');
+    Route::get('/scheduling/section-subjects/{section}/{subject}/reverse-merge-recommendation', [SectionSubjectController::class, 'reverseMergeRecommendation'])->name('scheduling.section-subjects.reverse-merge-recommendation');
     Route::post('/scheduling/section-subjects/{section}/{subject}/merge', [SectionSubjectController::class, 'applyMerge'])->name('scheduling.section-subjects.merge');
     Route::post('/scheduling/section-subjects/{section}/{subject}/schedule-independently', [SectionSubjectController::class, 'scheduleIndependently'])->name('scheduling.section-subjects.schedule-independently');
 

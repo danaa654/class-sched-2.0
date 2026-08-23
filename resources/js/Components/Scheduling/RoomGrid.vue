@@ -1166,6 +1166,42 @@ const openAssignModal = (row, day, rowIndex) => {
     const subject = row.subject || {};
     const defaultHours = (Number(subject.lecture_hours) || 0) + (Number(subject.laboratory_hours) || 0) || 3;
 
+    // SHARED CLASS — if this exact slot is already occupied by a
+    // DIFFERENT section's class for the SAME subject, prefill the
+    // form to match that existing class's Faculty/Days/Hours instead
+    // of the subject's own defaults. Without this, the form opens
+    // with "Unassigned" Faculty and the curriculum's default Hours/
+    // Week — which almost never happens to equal the existing class's
+    // own Faculty/Time, so Save then fails on an unrelated Faculty/
+    // Section conflict instead of ever reaching the "Combine
+    // Sections?" check in confirmAssign(). Matching the values up
+    // front is what makes that check actually fire on Save.
+    const targetBlock = blockAt(day, rowIndex);
+    const isShareable = targetBlock
+        && !targetBlock.is_current_section
+        && targetBlock.subject_code === subject.subject_code;
+
+    if (isShareable) {
+        const targetDays = (targetBlock.days || '').split(',').filter(Boolean);
+        const meetingsPerWeek = targetDays.length || 1;
+        const perMeetingHours = ((toMinutes(targetBlock.end_time) - toMinutes(targetBlock.start_time)) || 60) / 60;
+
+        assignForm.value = {
+            row,
+            day,
+            rowIndex,
+            hoursPerWeek: Math.round(perMeetingHours * meetingsPerWeek * 100) / 100,
+            requiredHours: defaultHours,
+            meetingsPerWeek,
+            selectedDays: targetDays.includes(day) ? [...targetDays] : [day],
+            facultyId: targetBlock.faculty_id ?? null,
+            editing: false,
+        };
+        assignModalVisible.value = true;
+        loadFacultyRecommendations(row.id);
+        return;
+    }
+
     assignForm.value = {
         row,
         day,
@@ -1418,8 +1454,7 @@ const confirmAssign = async () => {
     const startTime = hourRows.value[rowIndex];
     const endTime = toHHMM(toMinutes(startTime) + perMeeting);
 
-    assignSaving.value = true;
-    const ok = await writeSchedule(row.id, {
+    const schedulePayload = {
         room_id: selectedRoom.value.id,
         days: selectedDays,
         start_time: startTime,
@@ -1427,13 +1462,129 @@ const confirmAssign = async () => {
         faculty_id: assignForm.value.facultyId,
         hours_confirmed: !assignHoursValid.value,
         room_type_confirmed: !assignRoomTypeValid.value,
-    }, { successMessage: `${row.subject?.subject_code ?? 'Subject'} ${assignForm.value.editing ? 'updated' : 'scheduled'}.` });
+    };
+
+    // SHARED CLASS — the exact slot this row is about to be saved at
+    // may already be occupied by a DIFFERENT section's class for the
+    // SAME subject (e.g. dropping a Regular section's CAP102 onto an
+    // Irregular section's existing CAP102 booking). Rather than let
+    // that go straight to writeSchedule() and dead-end on a plain
+    // "Faculty Conflict", check whether the two can share the
+    // schedule and, if so, offer to combine them — same pattern as
+    // attemptMergeDrop()/attemptMergeDropExisting() already use for
+    // the direct drag-onto-occupied-cell case, just covering the
+    // Assign modal's manual Save path too.
+    const mergeTargetId = await checkSharedClassOpportunity(row, schedulePayload);
+    if (mergeTargetId === 'declined') {
+        assignModalVisible.value = true; // reopen so they can adjust
+        return;
+    }
+    if (mergeTargetId) {
+        schedulePayload.merge_target_section_subject_id = mergeTargetId;
+    }
+
+    assignSaving.value = true;
+    const ok = await writeSchedule(row.id, schedulePayload, {
+        successMessage: mergeTargetId
+            ? `${row.subject?.subject_code ?? 'Subject'} combined into the shared class.`
+            : `${row.subject?.subject_code ?? 'Subject'} ${assignForm.value.editing ? 'updated' : 'scheduled'}.`,
+    });
     assignSaving.value = false;
 
     // If the write itself failed (e.g. a Faculty/Room conflict caught
     // server-side), bring the form back so they can see the error
     // toast and adjust rather than being left with nothing on screen.
     assignModalVisible.value = !ok;
+};
+
+// SHARED CLASS — checks whether the slot this row is about to save at
+// is already occupied by a DIFFERENT section's class for the SAME
+// subject, and if the two are compatible to share it, asks the
+// Registrar to confirm before anything is written. Returns:
+//   - a section_subject_id  → confirmed, include as merge_target_section_subject_id
+//   - null                  → no occupied/compatible target, proceed as a normal save
+//   - 'declined'            → a compatible target exists but the Registrar said No
+const checkSharedClassOpportunity = async (row, schedulePayload) => {
+    const targetBlock = blockAt(assignForm.value.day, assignForm.value.rowIndex);
+    if (
+        !targetBlock
+        || targetBlock.is_current_section
+        || targetBlock.subject_code !== row.subject?.subject_code
+    ) {
+        return null;
+    }
+
+    let evaluation;
+    try {
+        const response = await fetch(
+            route('scheduling.section-subjects.reverse-merge-recommendation', [props.section.id, row.id])
+                + `?${new URLSearchParams({
+                    target_section_subject_id: targetBlock.section_subject_id,
+                    room_id: schedulePayload.room_id,
+                    faculty_id: schedulePayload.faculty_id ?? '',
+                    start_time: schedulePayload.start_time,
+                    end_time: schedulePayload.end_time,
+                    ...Object.fromEntries(schedulePayload.days.map((d, i) => [`days[${i}]`, d])),
+                }).toString()}`,
+            { headers: { Accept: 'application/json' } },
+        );
+        evaluation = await response.json();
+        if (!response.ok) return null;
+    } catch (e) {
+        return null; // fall through to the normal save/conflict path
+    }
+
+    if (!evaluation.compatible) {
+        // Everything lined up (same subject/program/term, exact
+        // Faculty/Room/Day/Time match) EXCEPT room capacity — this is
+        // specifically a "Cannot Combine" case, not a silent
+        // fallthrough, since the two classes clearly could share this
+        // schedule if the room were bigger.
+        if (evaluation.capacity > 0 && evaluation.projected_headcount > evaluation.capacity) {
+            assignModalVisible.value = false;
+            await Swal.fire({
+                icon: 'error',
+                title: 'Cannot Combine',
+                html: `<div class="text-left text-sm">The combined enrollment exceeds the room capacity by ${evaluation.projected_headcount - evaluation.capacity} students. Please select a larger room or a different schedule.</div>`,
+                confirmButtonText: 'OK',
+                customClass: { container: 'roomgrid-swal-on-top' },
+            });
+            return 'declined';
+        }
+        // Otherwise not shareable (different program, not an exact
+        // match, etc.) — fall through silently to the normal save,
+        // which will report the real conflict if there is one.
+        return null;
+    }
+
+    assignModalVisible.value = false;
+    const result = await Swal.fire({
+        icon: 'question',
+        title: 'Combine Sections?',
+        html: `
+            <div class="text-left text-sm space-y-2">
+                <div>This section has the same subject, faculty, room, and schedule as an existing class.</div>
+                <div class="space-y-0.5">
+                    <div>Existing: <strong>${targetBlock.section_code}</strong></div>
+                    <div>New: <strong>${props.section.section_code}</strong></div>
+                </div>
+                <div>Both sections can share this class schedule.</div>
+                <div class="pt-1 text-slate-600">
+                    Room capacity: ${evaluation.capacity}<br>
+                    Current students: ${evaluation.current_headcount}<br>
+                    New students: ${evaluation.projected_headcount - evaluation.current_headcount}<br>
+                    Combined: ${evaluation.projected_headcount} / ${evaluation.capacity}
+                </div>
+                <div class="pt-1">Do you want to combine these sections?</div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'Combine Sections',
+        cancelButtonText: 'Cancel',
+        customClass: { container: 'roomgrid-swal-on-top' },
+    });
+
+    return result.isConfirmed ? targetBlock.section_subject_id : 'declined';
 };
 
 // Remove this block from the room — only ever reachable in Edit mode

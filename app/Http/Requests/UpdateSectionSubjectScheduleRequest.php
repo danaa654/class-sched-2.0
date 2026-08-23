@@ -120,6 +120,20 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             // request rather than failing it, so older/partial
             // payloads keep working exactly as before.
             'expected_schedule_version' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            // SHARED CLASS (reverse merge) — set when the Registrar
+            // confirmed "Combine Sections?" after dropping/saving this
+            // row onto a slot an existing, DIFFERENT section's class
+            // already occupies. This row becomes the host of record
+            // (its own real Faculty/Room booking, saved normally by
+            // this same request); the referenced row is re-pointed
+            // onto it as a merged rider — see
+            // IrregularSectionMergeService::applyReversePlacement()/
+            // evaluateReversePlacement() and
+            // SectionSubjectController::reverseMergeRecommendation().
+            // Re-validated server-side against the CURRENT state of
+            // both rows before anything is written — never trusted
+            // from a stale client-side recommendation.
+            'merge_target_section_subject_id' => ['sometimes', 'nullable', 'integer', 'exists:section_subjects,id'],
         ];
     }
 

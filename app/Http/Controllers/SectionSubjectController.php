@@ -598,6 +598,40 @@ class SectionSubjectController extends Controller implements HasMiddleware
         $endTime = array_key_exists('end_time', $validated) ? $validated['end_time'] : $subject->end_time;
         $capacity = array_key_exists('capacity', $validated) ? $validated['capacity'] : $subject->capacity;
 
+        // SHARED CLASS (reverse merge) — re-validated fresh here,
+        // never trusted from whatever the client's earlier
+        // reverseMergeRecommendation() call saw, since the target row
+        // (or this row's own proposed slot) may have changed since.
+        // A no-longer-compatible target simply falls through to the
+        // normal conflict check below, which will report the real
+        // Faculty/Room conflict exactly as it would without this
+        // feature — never a silent, unconfirmed merge.
+        $mergeTarget = null;
+        if (! empty($validated['merge_target_section_subject_id'])) {
+            $mergeTarget = SectionSubject::find($validated['merge_target_section_subject_id']);
+            if ($mergeTarget) {
+                // $dayTokens proper isn't computed until below (it's
+                // derived together with the Weekly Hours Mismatch
+                // warning) — this block runs earlier, so it derives
+                // its own copy from the same $days value rather than
+                // reordering the rest of the method around it.
+                $mergeCheckDayTokens = array_values(array_filter(explode(',', (string) $days)));
+                $reverseEvaluation = $this->mergeService->evaluateReversePlacement($subject, [
+                    'room_id' => $roomId,
+                    'faculty_id' => $facultyId,
+                    'days' => $mergeCheckDayTokens,
+                    'start_time' => $startTime,
+                    'end_time' => $endTime,
+                ], $mergeTarget);
+
+                if (! $reverseEvaluation['compatible']) {
+                    return response()->json([
+                        'message' => $reverseEvaluation['blocking_reason'] ?? 'This class is no longer a compatible Shared Class target. Please refresh and try again.',
+                    ], 422);
+                }
+            }
+        }
+
         $errors = [];
 
         // Room Capacity Warning — Section Capacity > Room Capacity is not
@@ -724,7 +758,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
         try {
             $subject = DB::transaction(function () use (
                 $subject, $facultyId, $roomId, $dayTokens, $startTime, $endTime,
-                $days, $capacity, $request, $validated, $workloadWarning,
+                $days, $capacity, $request, $validated, $workloadWarning, $mergeTarget,
             ) {
                 $lockedSection = $this->conflictService->lockResources($roomId, $facultyId, $subject->section_id);
 
@@ -758,8 +792,15 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // Merge-aware — a merged row sharing its host's exact
                     // Faculty/Room/Time is by design, never a conflict to
                     // flag against itself. See ScheduleConflictService::
-                    // mergeExclusionIds().
-                    $this->conflictService->mergeExclusionIds($subject)
+                    // mergeExclusionIds(). SHARED CLASS (reverse merge):
+                    // also exclude the confirmed merge target itself —
+                    // this row is intentionally taking its exact same
+                    // slot, re-evaluated above via evaluateReversePlacement()
+                    // rather than a plain conflict.
+                    array_values(array_unique([
+                        ...$this->conflictService->mergeExclusionIds($subject),
+                        ...($mergeTarget ? [$mergeTarget->id] : []),
+                    ]))
                 );
 
                 if (! empty($conflictErrors)) {
@@ -838,6 +879,16 @@ class SectionSubjectController extends Controller implements HasMiddleware
                         'merged_into_section_subject_id' => null,
                     ] : []),
                 ]);
+
+                // SHARED CLASS (reverse merge) — this row just saved
+                // its OWN real Faculty/Room booking above, making it
+                // the host of record; now re-point the confirmed
+                // target's row onto it as a merged rider, inside this
+                // same locked transaction, so the two writes can never
+                // land only-one-succeeded.
+                if ($mergeTarget) {
+                    $this->mergeService->applyReverseMerge($subject, $mergeTarget);
+                }
 
                 // Only reached after a successful, conflict-free
                 // write — the version is never advanced on a rolled
@@ -1806,6 +1857,43 @@ class SectionSubjectController extends Controller implements HasMiddleware
         $subject->loadMissing('subject');
 
         return response()->json($this->mergeService->recommend($subject));
+    }
+
+    /**
+     * SHARED CLASS — REVERSE DIRECTION compatibility check. Used
+     * before $subject has been saved at all: the Registrar just
+     * dropped/configured $subject at a slot ($room_id/$faculty_id/
+     * $days/$start_time/$end_time) that an existing, DIFFERENT
+     * section's class ($target_section_subject_id) already occupies.
+     * Read-only — see IrregularSectionMergeService::
+     * evaluateReversePlacement(). The actual write (and a second,
+     * authoritative re-check) happens via updateSchedule() with
+     * merge_target_section_subject_id set, once the Registrar
+     * confirms the "Combine Sections?" dialog this powers.
+     */
+    public function reverseMergeRecommendation(Request $request, Section $section, SectionSubject $subject): JsonResponse
+    {
+        abort_unless($subject->section_id === $section->id, 404);
+
+        $validated = $request->validate([
+            'target_section_subject_id' => ['required', 'integer', 'exists:section_subjects,id'],
+            'room_id' => ['required', 'integer'],
+            'faculty_id' => ['nullable', 'integer'],
+            'days' => ['required', 'array', 'min:1'],
+            'days.*' => ['string'],
+            'start_time' => ['required'],
+            'end_time' => ['required'],
+        ]);
+
+        $target = SectionSubject::findOrFail($validated['target_section_subject_id']);
+
+        return response()->json($this->mergeService->evaluateReversePlacement($subject, [
+            'room_id' => $validated['room_id'],
+            'faculty_id' => $validated['faculty_id'] ?? null,
+            'days' => $validated['days'],
+            'start_time' => $validated['start_time'],
+            'end_time' => $validated['end_time'],
+        ], $target));
     }
 
     /**

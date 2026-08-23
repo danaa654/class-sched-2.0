@@ -162,15 +162,17 @@ class ScheduleConflictServiceTest extends TestCase
         $sectionA = $this->makeSection('BSIT-4A');
         $sectionB = $this->makeSection('BSIT-4B');
 
-        $this->placeScheduled($sectionA, 'CAP101', $this->facultyA, $this->roomA, ['Mon'], '10:00', '12:00');
+        // Kept deliberately clear of the fixed 12:00 PM-1:00 PM lunch break
+        // window so this test isolates the boundary-overlap math only.
+        $this->placeScheduled($sectionA, 'CAP101', $this->facultyA, $this->roomA, ['Mon'], '08:00', '10:00');
 
         $errors = $this->service->validate([
             'section_id' => $sectionB->id,
             'faculty_id' => $this->facultyB->id,
             'room_id' => $this->roomA->id,
             'days' => ['Mon'],
-            'start_time' => '12:00',
-            'end_time' => '14:00',
+            'start_time' => '10:00',
+            'end_time' => '12:00',
         ], excludingSectionSubjectId: 0);
 
         $this->assertSame([], $errors);
