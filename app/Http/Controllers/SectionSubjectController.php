@@ -363,8 +363,9 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $activeRoomsList = Room::query()
             ->where('status', 'Active')
+            ->with('college:id,name,short_name')
             ->orderBy('room_code')
-            ->get(['id', 'room_code', 'room_name', 'room_type', 'capacity']);
+            ->get(['id', 'room_code', 'room_name', 'room_type', 'capacity', 'college_id']);
 
         // Same source (RoomUtilizationService) the Rooms page and the
         // recommendation ranking already read — shown next to every
@@ -379,6 +380,17 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'room_name' => $room->room_name,
             'room_type' => $room->room_type,
             'capacity' => $room->capacity,
+            // college_id/college_name — a null college_id means a
+            // Shared room usable by any College (mirrors Faculty's
+            // null-college_id = General Education pool above). MUST
+            // be sent so the scheduling table's client-side Room
+            // College Mismatch check (Show.vue's tableConflicts) can
+            // flag a room that belongs to a DIFFERENT College than
+            // this Section's own — e.g. an SHTM Lab picked for a
+            // BSIT class — the same way it already flags a Room Type
+            // Mismatch, before the Registrar saves.
+            'college_id' => $room->college_id,
+            'college_name' => $room->college?->short_name ?? $room->college?->name ?? null,
             'scheduled_hours' => $roomUtilization[$room->id]['scheduled_hours'] ?? 0,
             'max_hours' => $roomUtilization[$room->id]['max_hours'] ?? 0,
         ]);
@@ -634,6 +646,20 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $errors = [];
 
+        // ROOM GRID DEFERRED CONFIRMATION — see
+        // UpdateSectionSubjectScheduleRequest's docblock. When set, the
+        // Room/Hours mismatch checks below are allowed to save WITHOUT
+        // being blocked, but — critically — WITHOUT being treated as
+        // confirmed either: room_type_confirmed/room_college_confirmed/
+        // hours_confirmed still get whatever was actually passed in the
+        // request (false, since Room Grid never sends true anymore), so
+        // the mismatch stays a live "Scheduling Issue" until the
+        // Registrar confirms it for real via the Subjects tab's batch
+        // "Save Schedule". Room Capacity is deliberately NOT covered —
+        // capacity_confirmed keeps its original immediate-confirm
+        // behavior, unaffected by this flag.
+        $deferMismatchConfirmation = $request->boolean('defer_mismatch_confirmation');
+
         // Room Capacity Warning — Section Capacity > Room Capacity is not
         // a hard block, but the Registrar must explicitly confirm before
         // it's allowed to save (see UpdateSectionSubjectScheduleRequest).
@@ -652,12 +678,14 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // lab time booked into a plain Lecture room. Not a hard block —
         // some rooms legitimately double up — so this follows the exact
         // same "flagged, not blocked" pattern as Room Capacity above:
-        // needs an explicit room_type_confirmed=true to save anyway. See
+        // needs an explicit room_type_confirmed=true to save anyway, OR
+        // $deferMismatchConfirmation (Room Grid placing without
+        // permanently confirming — see above). See
         // RoomGrid.vue's confirmAssign()/writeSchedule() and
         // SectionSubjects/Show.vue's tableConflicts() for where the
         // Registrar is prompted to confirm.
         $subject->loadMissing('subject');
-        if ($room && $room->room_type && ! $request->boolean('room_type_confirmed')) {
+        if ($room && $room->room_type && ! $request->boolean('room_type_confirmed') && ! $deferMismatchConfirmation) {
             $wantsLaboratory = (int) $subject->subject->laboratory_hours > 0;
             $typeMismatch = $wantsLaboratory
                 ? $room->room_type !== 'Laboratory'
@@ -671,6 +699,35 @@ class SectionSubjectController extends Controller implements HasMiddleware
             }
         }
 
+        // Room College Mismatch Warning — a Room owned by a DIFFERENT
+        // College than this Subject's own (e.g. a BSIT/Major subject
+        // dropped into an SHTM Laboratory). Not a hard block — a Minor
+        // subject legitimately borrowing another College's lab, or an
+        // Administrator/Registrar override, is allowed — but it needs
+        // an explicit room_college_confirmed=true first (or
+        // $deferMismatchConfirmation), exactly the
+        // same "flagged, not blocked" pattern as Room Type above.
+        // Shared rooms (no college_id at all) and General Education
+        // subjects (which have no single owning College) are never
+        // flagged, matching resolveRoomScopeTier()'s 'shared' tier in
+        // RecommendationService.
+        $subject->loadMissing('section.major.department');
+        if (
+            $room
+            && $room->college_id
+            && $subject->subject->category !== 'General Education'
+            && ! $request->boolean('room_college_confirmed')
+            && ! $deferMismatchConfirmation
+        ) {
+            $sectionCollegeId = $subject->section->major?->department?->college_id;
+            if ($sectionCollegeId && (int) $room->college_id !== (int) $sectionCollegeId) {
+                $room->loadMissing('college');
+                $roomCollegeName = $room->college?->short_name ?? $room->college?->name ?? 'another college';
+                $errors['room_college'] = "{$subject->subject->subject_code} belongs to this section's own college, but "
+                    ."{$room->room_name} belongs to {$roomCollegeName}. Confirm to save anyway.";
+            }
+        }
+
         $dayTokens = array_filter(explode(',', (string) $days));
 
         // Weekly Hours Mismatch Warning — the scheduled Days x
@@ -679,7 +736,8 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // Registrar could only fit 4 because of Room/Faculty
         // availability). Same "flagged, not blocked" pattern as
         // Room Capacity above — needs an explicit hours_confirmed=true
-        // to save anyway. Soft warnings (Capacity/Hours) are read-only
+        // to save anyway, OR $deferMismatchConfirmation. Soft warnings
+        // (Capacity/Hours) are read-only
         // checks against data that can't be raced the way a Room/
         // Faculty/Section booking can, so these stay OUTSIDE the
         // locked transaction below — only the actual booking conflict
@@ -694,7 +752,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
             $actualMinutes = $this->minutesBetween($startTime, $endTime) * count($dayTokens);
             $actualHours = round($actualMinutes / 60, 2);
 
-            if ($actualHours !== (float) $requiredHours && ! $request->boolean('hours_confirmed')) {
+            if ($actualHours !== (float) $requiredHours && ! $request->boolean('hours_confirmed') && ! $deferMismatchConfirmation) {
                 $errors['hours'] = "This schedule totals {$actualHours} hrs/week, but {$subject->subject->subject_code} requires {$requiredHours} hrs/week. "
                     .'Confirm to save anyway.';
             }
@@ -859,6 +917,15 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // the boolean falls back to false, which is correct too.
                     'capacity_confirmed' => $request->boolean('capacity_confirmed'),
                     'hours_confirmed' => $request->boolean('hours_confirmed'),
+                    // Room Type Mismatch / Room College Mismatch — same
+                    // persisted-confirmation pattern as capacity_confirmed/
+                    // hours_confirmed above (previously read off the
+                    // request for validation only, then discarded, which
+                    // is why "Save Anyway" on these two kept coming back
+                    // after every reload — see the 2026_08_24_180000
+                    // migration's docblock).
+                    'room_type_confirmed' => $request->boolean('room_type_confirmed'),
+                    'room_college_confirmed' => $request->boolean('room_college_confirmed'),
                     // A hand-edited row is no longer purely "Auto Generated" —
                     // untag it so Clear Generated Schedule / Regenerate never
                     // touch what the Registrar just chose themselves.
@@ -1456,6 +1523,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     'room_category' => $room->room_category,
                     'capacity' => $room->capacity,
                     'department_name' => $room->department?->name,
+                    'college_id' => $room->college_id,
                     'college_name' => $room->college?->name,
                     // Whether this search result is outside the current
                     // Section's own Department — the frontend uses this
@@ -2146,6 +2214,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     'status' => 'Draft',
                     'capacity_confirmed' => false,
                     'hours_confirmed' => false,
+                    // room_id is being wiped above, so any Room Type/
+                    // College Mismatch confirmation tied to that room no
+                    // longer applies either.
+                    'room_type_confirmed' => false,
+                    'room_college_confirmed' => false,
                     'is_auto_generated' => false,
                     'auto_generated_meta' => null,
                     'is_workload_override' => false,
@@ -2236,6 +2309,13 @@ class SectionSubjectController extends Controller implements HasMiddleware
             $lockedSection = Section::whereKey($section->id)->lockForUpdate()->first();
             $this->conflictService->checkSectionVersion($lockedSection, $expectedVersion);
 
+            // Resolved once for the whole batch (not per row) — every
+            // row in this request belongs to the same Section, so its
+            // owning College never changes row to row. Feeds the Room
+            // College Mismatch Warning check below.
+            $lockedSection->loadMissing('major.department');
+            $sectionCollegeId = $lockedSection->major?->department?->college_id;
+
             foreach ($rows as $rowData) {
                 $subject = SectionSubject::query()->where('id', $rowData['id'])->lockForUpdate()->first();
                 $subject->loadMissing('subject');
@@ -2276,6 +2356,27 @@ class SectionSubjectController extends Controller implements HasMiddleware
                             ." subject, but {$room->room_name} is a {$room->room_type} room. "
                             .'Confirm to save anyway.';
                     }
+                }
+
+                // Room College Mismatch Warning — same rule/gate as
+                // performScheduleAssignmentUpdate() above, run here too
+                // since a batch save can persist rows that never went
+                // through the single-cell endpoint (e.g. Auto Generate
+                // results accepted as-is). $sectionCollegeId is
+                // resolved once outside this loop, right after the
+                // Section is locked, below.
+                if (
+                    $room
+                    && $room->college_id
+                    && $subject->subject->category !== 'General Education'
+                    && empty($rowData['room_college_confirmed'])
+                    && $sectionCollegeId
+                    && (int) $room->college_id !== (int) $sectionCollegeId
+                ) {
+                    $room->loadMissing('college');
+                    $roomCollegeName = $room->college?->short_name ?? $room->college?->name ?? 'another college';
+                    $rowErrors['room_college'] = "{$subject->subject->subject_code} belongs to this section's own college, but "
+                        ."{$room->room_name} belongs to {$roomCollegeName}. Confirm to save anyway.";
                 }
 
                 // Weekly Hours Mismatch Warning — same rule/gate as
@@ -2392,6 +2493,14 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // 2026_08_13_120000 migration's docblock.
                     'capacity_confirmed' => ! empty($rowData['capacity_confirmed']),
                     'hours_confirmed' => ! empty($rowData['hours_confirmed']),
+                    // Same persisted-confirmation pattern as
+                    // capacity_confirmed/hours_confirmed above — see the
+                    // 2026_08_24_180000 migration's docblock. Previously
+                    // missing here, so a Room Type/College Mismatch
+                    // confirmed via batch Save Schedule still reappeared
+                    // on the next reload.
+                    'room_type_confirmed' => ! empty($rowData['room_type_confirmed']),
+                    'room_college_confirmed' => ! empty($rowData['room_college_confirmed']),
                     // "Save Schedule" finalizes any Auto Generated rows
                     // it saves — once saved they're a normal schedule,
                     // no longer a pending suggestion to clear/regenerate.

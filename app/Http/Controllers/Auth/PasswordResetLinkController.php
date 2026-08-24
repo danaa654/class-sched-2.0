@@ -60,13 +60,21 @@ class PasswordResetLinkController extends Controller
                 $user,
             );
 
-            return back()->with('status', __($status));
+            // Redirect explicitly to the Forgot Password route rather than
+            // back() — the "Forgot password?" link only flips the card
+            // client-side (the browser never actually visits
+            // /forgot-password when reached from /login), so back()'s
+            // url()->previous() would land on /login instead and render
+            // the LOGIN face, silently dropping this success message
+            // instead of showing it on the Forgot Password face where
+            // the user is expecting confirmation the email was sent.
+            return redirect()->route('password.request')->with('status', __($status));
         }
 
         // Still route back with a generic "check your inbox" style status so
         // the login screen can't be used to enumerate registered accounts.
         if ($status === Password::INVALID_USER) {
-            return back()->with('status', __(Password::RESET_LINK_SENT));
+            return redirect()->route('password.request')->with('status', __(Password::RESET_LINK_SENT));
         }
 
         throw ValidationException::withMessages([

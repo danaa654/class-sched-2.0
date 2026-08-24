@@ -485,7 +485,17 @@ const onDragStartBlock = (block) => {
 // OTHER error key (room_id/faculty_id/days — real Room/Faculty/
 // Section/Time conflicts from ScheduleConflictService) is a hard
 // block and must never be offered a "confirm anyway" retry.
-const CONFIRMABLE_WARNING_KEYS = { capacity: 'capacity_confirmed', hours: 'hours_confirmed', room_type: 'room_type_confirmed' };
+const CONFIRMABLE_WARNING_KEYS = { capacity: 'capacity_confirmed', hours: 'hours_confirmed', room_type: 'room_type_confirmed', room_college: 'room_college_confirmed' };
+
+// Of the warning keys above, only Room Capacity is confirmed
+// immediately from Room Grid's own retry dialog. Room Type/Room
+// College/Hours are DEFERRED — the Registrar can place the subject
+// despite the mismatch, but it isn't treated as resolved until
+// confirmed for real via the Subjects tab's batch "Save Schedule"
+// (see confirmAssign()'s matching dialogs above and
+// UpdateSectionSubjectScheduleRequest's docblock for
+// defer_mismatch_confirmation).
+const DEFERRABLE_WARNING_KEYS = new Set(['hours', 'room_type', 'room_college']);
 
 const writeSchedule = async (subjectId, payload, { successMessage, crossSection = false, silent = false } = {}) => {
     try {
@@ -542,12 +552,22 @@ const writeSchedule = async (subjectId, payload, { successMessage, crossSection 
             // on a permanent error toast.
             if (isConfirmable) {
                 const detail = Object.values(data.errors).join(' ');
+                // Room Type/Room College/Hours are deferred (placed,
+                // but only truly resolved via the Subjects tab's "Save
+                // Schedule"); only Room Capacity is confirmed outright
+                // from this dialog. Mixed batches (capacity together
+                // with a deferrable one) still defer the deferrable
+                // ones and confirm capacity — never silently promote a
+                // deferrable one to fully confirmed.
+                const hasDeferrable = errorKeys.some((k) => DEFERRABLE_WARNING_KEYS.has(k));
                 const result = await Swal.fire({
                     icon: 'warning',
                     title: 'Conflict',
-                    text: detail,
+                    html: hasDeferrable
+                        ? `<div class="text-left text-sm">${detail} This will still need to be confirmed on the Subjects tab's "Save Schedule" before it's fully resolved.</div>`
+                        : detail,
                     showCancelButton: true,
-                    confirmButtonText: 'Confirm & Save',
+                    confirmButtonText: hasDeferrable ? 'Place Anyway' : 'Confirm & Save',
                     cancelButtonText: 'Cancel',
                     customClass: { container: 'roomgrid-swal-on-top' },
                 });
@@ -555,9 +575,18 @@ const writeSchedule = async (subjectId, payload, { successMessage, crossSection 
                 if (!result.isConfirmed) return false;
 
                 const confirmedPayload = { ...payload };
+                let deferMismatchConfirmation = false;
                 errorKeys.forEach((key) => {
-                    confirmedPayload[CONFIRMABLE_WARNING_KEYS[key]] = true;
+                    if (DEFERRABLE_WARNING_KEYS.has(key)) {
+                        confirmedPayload[CONFIRMABLE_WARNING_KEYS[key]] = false;
+                        deferMismatchConfirmation = true;
+                    } else {
+                        confirmedPayload[CONFIRMABLE_WARNING_KEYS[key]] = true;
+                    }
                 });
+                if (deferMismatchConfirmation) {
+                    confirmedPayload.defer_mismatch_confirmation = true;
+                }
 
                 return writeSchedule(subjectId, confirmedPayload, { successMessage, crossSection, silent });
             }
@@ -1327,6 +1356,23 @@ const assignRoomTypeValid = computed(() => {
     return wantsLaboratory ? room.room_type === 'Laboratory' : room.room_type !== 'Laboratory';
 });
 
+// ROOM COLLEGE MISMATCH — same "check client-side before Save,
+// confirmable, not a hard block" pattern as assignRoomTypeValid
+// above. A room owned by a DIFFERENT College than this Section's own
+// (e.g. an SHTM Lab dropped for a BSIT class) still saves once the
+// Registrar explicitly confirms — see confirmAssign()'s "Room
+// Belongs to Another College" Swal below. Shared rooms (no
+// college_id) and General Education subjects (no single owning
+// College) are never flagged, mirroring the Subjects tab's own
+// roomCollege check in SectionSubjects/Show.vue.
+const assignRoomCollegeValid = computed(() => {
+    const room = selectedRoom.value;
+    const subject = assignForm.value.row?.subject;
+    if (!room?.college_id || !sectionCollegeId.value) return true;
+    if (subject?.category === 'General Education') return true;
+    return room.college_id === sectionCollegeId.value;
+});
+
 const perMeetingPreview = computed(() => {
     const step = intervalMinutes.value;
     const totalMinutes = (assignForm.value.hoursPerWeek || 0) * 60;
@@ -1392,23 +1438,27 @@ const confirmAssign = async () => {
     // just saves the round trip and shows the reason inline instead.
     if (sectionScheduleConflict.value) return;
 
-    // Weekly Hours Mismatch — confirmable, not a hard block. A
-    // Registrar may intentionally trim/extend a meeting because of
-    // Room/Faculty availability constraints; this just makes sure
-    // they see the mismatch before it's saved, same "flagged, not
-    // blocked" pattern as the Subjects tab's batch save uses.
+    // Weekly Hours Mismatch — confirmable, but NOT here. Room Grid is an
+    // instant place/drag surface, not the final confirmation point —
+    // that's the Subjects tab's batch "Save Schedule" (see its own
+    // tableConflicts()/"Save Anyway" flow in Show.vue). So this only
+    // warns and, if the Registrar proceeds, the placement saves with
+    // defer_mismatch_confirmation so the server accepts it WITHOUT
+    // marking hours_confirmed true — it stays a live Scheduling Issue
+    // until confirmed for real on the Subjects tab.
+    let deferMismatchConfirmation = false;
     if (!assignHoursValid.value) {
         // Hide the Schedule Subject dialog while the confirm popup is
         // up rather than relying on z-index to win against PrimeVue's
-        // own dynamically-assigned Dialog stacking — guarantees "Save
+        // own dynamically-assigned Dialog stacking — guarantees "Place
         // Anyway" is always reachable regardless of stacking context.
         assignModalVisible.value = false;
         const result = await Swal.fire({
             icon: 'warning',
             title: 'Weekly Hours Mismatch',
-            html: `<div class="text-left text-sm">This schedule totals ${hoursPerWeek} hrs/week, but ${row.subject?.subject_code ?? 'this subject'} requires ${requiredHours} hrs/week.</div>`,
+            html: `<div class="text-left text-sm">This schedule totals ${hoursPerWeek} hrs/week, but ${row.subject?.subject_code ?? 'this subject'} requires ${requiredHours} hrs/week. This will still need to be confirmed on the Subjects tab's "Save Schedule" before it's fully resolved.</div>`,
             showCancelButton: true,
-            confirmButtonText: 'Save Anyway',
+            confirmButtonText: 'Place Anyway',
             cancelButtonText: 'Go Back',
             confirmButtonColor: '#dc2626',
             customClass: { container: 'roomgrid-swal-on-top' },
@@ -1417,22 +1467,22 @@ const confirmAssign = async () => {
             assignModalVisible.value = true; // reopen so they can adjust
             return;
         }
+        deferMismatchConfirmation = true;
     }
 
-    // Room Type Mismatch — confirmable, not a hard block. Same
-    // "flagged, not blocked" pattern as Weekly Hours Mismatch above:
-    // the Registrar explicitly confirms before a Lecture-only (e.g.
-    // Minor/GenEd) subject saves into a Laboratory room, or vice
-    // versa.
+    // Room Type Mismatch — same deferred-confirmation pattern as
+    // Weekly Hours Mismatch above: the Registrar acknowledges it here
+    // just to place the subject, but the mismatch only actually
+    // resolves via the Subjects tab's "Save Schedule".
     if (!assignRoomTypeValid.value) {
         assignModalVisible.value = false;
         const wantsLaboratory = Number(row.subject?.laboratory_hours ?? 0) > 0;
         const result = await Swal.fire({
             icon: 'warning',
             title: 'Room Type Mismatch',
-            html: `<div class="text-left text-sm">${row.subject?.subject_code ?? 'This subject'} is a ${wantsLaboratory ? 'Laboratory' : 'Lecture'} subject, but ${roomLabel(selectedRoom.value)} is a ${selectedRoom.value?.room_type ?? 'different type of'} room.</div>`,
+            html: `<div class="text-left text-sm">${row.subject?.subject_code ?? 'This subject'} is a ${wantsLaboratory ? 'Laboratory' : 'Lecture'} subject, but ${roomLabel(selectedRoom.value)} is a ${selectedRoom.value?.room_type ?? 'different type of'} room. This will still need to be confirmed on the Subjects tab's "Save Schedule" before it's fully resolved.</div>`,
             showCancelButton: true,
-            confirmButtonText: 'Save Anyway',
+            confirmButtonText: 'Place Anyway',
             cancelButtonText: 'Go Back',
             confirmButtonColor: '#dc2626',
             customClass: { container: 'roomgrid-swal-on-top' },
@@ -1441,6 +1491,29 @@ const confirmAssign = async () => {
             assignModalVisible.value = true; // reopen so they can adjust
             return;
         }
+        deferMismatchConfirmation = true;
+    }
+
+    // Room College Mismatch — same deferred-confirmation pattern as
+    // above.
+    if (!assignRoomCollegeValid.value) {
+        assignModalVisible.value = false;
+        const roomCollegeLabel = selectedRoom.value?.college_name ?? 'another college';
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Room Belongs to Another College',
+            html: `<div class="text-left text-sm">${row.subject?.subject_code ?? 'This subject'} belongs to this section's own college, but ${roomLabel(selectedRoom.value)} belongs to ${roomCollegeLabel}. This will still need to be confirmed on the Subjects tab's "Save Schedule" before it's fully resolved.</div>`,
+            showCancelButton: true,
+            confirmButtonText: 'Place Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+            customClass: { container: 'roomgrid-swal-on-top' },
+        });
+        if (!result.isConfirmed) {
+            assignModalVisible.value = true; // reopen so they can adjust
+            return;
+        }
+        deferMismatchConfirmation = true;
     }
 
     // Duration per meeting, rounded to the nearest 30 minutes so the
@@ -1460,8 +1533,14 @@ const confirmAssign = async () => {
         start_time: startTime,
         end_time: endTime,
         faculty_id: assignForm.value.facultyId,
-        hours_confirmed: !assignHoursValid.value,
-        room_type_confirmed: !assignRoomTypeValid.value,
+        // Deliberately never sent as true from Room Grid — see the
+        // deferMismatchConfirmation dialogs above. Only the Subjects
+        // tab's batch "Save Schedule" is allowed to actually confirm
+        // these.
+        hours_confirmed: false,
+        room_type_confirmed: false,
+        room_college_confirmed: false,
+        defer_mismatch_confirmation: deferMismatchConfirmation,
     };
 
     // SHARED CLASS — the exact slot this row is about to be saved at
@@ -1946,6 +2025,9 @@ const removeAssignment = async () => {
                     </p>
                     <p v-if="!assignRoomTypeValid" class="text-xs text-amber-600 mt-1">
                         {{ selectedRoom?.room_name ?? 'This room' }} is a {{ selectedRoom?.room_type }} room, but {{ assignForm.row?.subject?.subject_code ?? 'this subject' }} is a {{ Number(assignForm.row?.subject?.laboratory_hours ?? 0) > 0 ? 'Laboratory' : 'Lecture' }} subject — you'll be asked to confirm before saving.
+                    </p>
+                    <p v-if="!assignRoomCollegeValid" class="text-xs text-amber-600 mt-1">
+                        {{ selectedRoom?.room_name ?? 'This room' }} belongs to {{ selectedRoom?.college_name ?? 'another college' }}, not this section's own college — you'll be asked to confirm before saving.
                     </p>
                     <p v-if="!assignHoursValid" class="text-xs text-amber-600 mt-1">
                         Hours/Week doesn't match {{ assignForm.row?.subject?.subject_code ?? 'this subject' }}'s required {{ assignForm.requiredHours }} hrs/week — you'll be asked to confirm before saving.

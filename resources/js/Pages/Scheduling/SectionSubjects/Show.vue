@@ -232,12 +232,19 @@ const stateFor = (rowId) => {
             capacityConfirmed: Boolean(row?.capacity_confirmed),
             workloadConfirmed: false,
             hoursConfirmed: Boolean(row?.hours_confirmed),
-            // Room Type Mismatch (Lecture-only subject in a Laboratory
-            // room, or vice versa) — not persisted server-side (same as
-            // workloadConfirmed above), so it always starts unconfirmed
-            // and must be re-confirmed each session; onRoomChange below
-            // resets it the moment the Room actually changes too.
-            roomTypeConfirmed: false,
+            // BUG FIX — Room Type Mismatch reappearing after every
+            // reload, same root cause and fix as hoursConfirmed above:
+            // room_type_confirmed/room_college_confirmed are now
+            // persisted columns (see the 2026_08_24_180000 migration),
+            // so seed from them instead of always starting false.
+            // onRoomChange below still resets both the moment the Room
+            // actually changes, so a genuinely new mismatch on an
+            // edited row is never silently hidden.
+            roomTypeConfirmed: Boolean(row?.room_type_confirmed),
+            // Room College Mismatch (a room owned by a different
+            // College than this Section's own — e.g. an SHTM Lab used
+            // for a BSIT class) — same persisted-confirmation pattern.
+            roomCollegeConfirmed: Boolean(row?.room_college_confirmed),
         };
     }
     return rowState[rowId];
@@ -458,8 +465,21 @@ const roomGroupsFor = (row) => {
             maxHours: r.max_hours,
         }));
 
+    // A room belongs to a "different College" when it carries a
+    // college_id that ISN'T this Section's own — a Shared room
+    // (college_id null) is never flagged, and General Education
+    // subjects have no single owning College so every room is
+    // fair game for them. Mirrors the roomCollegeMismatch() check in
+    // tableConflicts() below and the server's own
+    // room_college_confirmed gate, so the dropdown's grouping never
+    // disagrees with what actually triggers the warning.
+    const isGenEdSubject = subject?.category === 'General Education';
+    const isDifferentCollege = (room) =>
+        !isGenEdSubject && room.college_id && sectionCollegeId.value && room.college_id !== sectionCollegeId.value;
+
     const typeMatched = [];
     const others = [];
+    const differentCollege = [];
 
     props.activeRooms.forEach((room) => {
         if (recommendedIds.has(room.id)) return;
@@ -468,8 +488,11 @@ const roomGroupsFor = (row) => {
             value: room.id,
             scheduledHours: room.scheduled_hours,
             maxHours: room.max_hours,
+            differentCollege: isDifferentCollege(room),
         };
-        if (room.room_type === typeMatch) {
+        if (isDifferentCollege(room)) {
+            differentCollege.push(option);
+        } else if (room.room_type === typeMatch) {
             typeMatched.push(option);
         } else {
             others.push(option);
@@ -490,6 +513,14 @@ const roomGroupsFor = (row) => {
         groups.push({ label: wantsLaboratory ? 'Laboratory Rooms' : 'Lecture Rooms', items: typeMatched });
     }
     if (others.length) groups.push({ label: 'Other Rooms', items: others });
+    // Kept as its own, clearly-labeled group at the bottom rather than
+    // folded into "Other Rooms" — picking one still works exactly the
+    // same way (Manual Override), but the Registrar sees up front that
+    // this pool belongs to another College before they click it,
+    // instead of only finding out from the warning after the fact.
+    if (differentCollege.length) {
+        groups.push({ label: 'Other College Rooms (Override)', items: differentCollege });
+    }
     return groups;
 };
 
@@ -764,6 +795,36 @@ const tableConflicts = computed(() => {
             }
         }
 
+        // Room College Mismatch Warning — this Room belongs to a
+        // DIFFERENT College than the Section's own (e.g. a BSIT/Major
+        // subject dropped into an SHTM Laboratory). Confirmable, not a
+        // hard block — a Minor/GenEd subject legitimately borrowing
+        // another College's room, or a deliberate Registrar override,
+        // is allowed, but must be explicitly confirmed first. Mirrors
+        // the Room Type Mismatch check above and the server's own
+        // room_college_confirmed gate exactly. Shared rooms (no
+        // college_id) and General Education subjects (no single
+        // owning College) are never flagged.
+        if (a.room_id) {
+            const room = roomsById.value[a.room_id];
+            if (
+                room
+                && room.college_id
+                && a.subject?.category !== 'General Education'
+                && sectionCollegeId.value
+                && room.college_id !== sectionCollegeId.value
+                && !stateFor(a.id).roomCollegeConfirmed
+            ) {
+                const roomCollegeLabel = room.college_name ?? 'another college';
+                list.push({
+                    type: 'roomCollege',
+                    rowIds: [a.id],
+                    label: 'Room College Mismatch',
+                    detail: `${a.subject?.subject_code ?? 'Subject'} belongs to ${sectionCollegeName.value ?? "this section's own college"}, but ${room.room_name} belongs to ${roomCollegeLabel}.`,
+                });
+            }
+        }
+
         // Faculty/Room/Section Double-Booking — set on the row when a
         // manual Time override (see onTimeOverride) was applied
         // against a slot ScheduleConflictService already found
@@ -889,10 +950,16 @@ const unconfirmedRoomTypeRowIds = computed(() =>
     tableConflicts.value.filter((c) => c.type === 'roomType').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).roomTypeConfirmed),
 );
 
+// Rows with an unconfirmed Room College Mismatch — confirmable, same
+// pattern as unconfirmedRoomTypeRowIds above.
+const unconfirmedRoomCollegeRowIds = computed(() =>
+    tableConflicts.value.filter((c) => c.type === 'roomCollege').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).roomCollegeConfirmed),
+);
+
 // A row is "blocking" (true Conflict — Faculty/Room/Section) if it
-// appears in any non-capacity/hours/roomType conflict entry.
+// appears in any non-capacity/hours/roomType/roomCollege conflict entry.
 const blockingConflictRowIds = computed(
-    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity' && c.type !== 'hours' && c.type !== 'roomType').flatMap((c) => c.rowIds)),
+    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity' && c.type !== 'hours' && c.type !== 'roomType' && c.type !== 'roomCollege').flatMap((c) => c.rowIds)),
 );
 
 const rowHasBlockingConflict = (rowId) => blockingConflictRowIds.value.has(rowId);
@@ -924,6 +991,7 @@ const roomConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c
 const sectionConflictRowIds = computed(() => new Set(tableConflicts.value.filter((c) => c.type === 'section').flatMap((c) => c.rowIds)));
 const rowHasCapacityWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'capacity' && c.rowIds.includes(rowId));
 const rowHasRoomTypeWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'roomType' && c.rowIds.includes(rowId));
+const rowHasRoomCollegeWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'roomCollege' && c.rowIds.includes(rowId));
 
 const conflictTooltip = (rowId) => {
     const clientMessages = tableConflicts.value
@@ -1374,6 +1442,16 @@ const onRoomChange = (row, value) => {
     // re-confirmed against the new Room.
     stateFor(row.id).capacityConfirmed = false;
     stateFor(row.id).roomTypeConfirmed = false;
+    stateFor(row.id).roomCollegeConfirmed = false;
+    // BUG FIX — same reasoning as onDaysChange's row.hours_confirmed
+    // reset below: row.room_type_confirmed/room_college_confirmed are
+    // the PERSISTED flags loaded from the server (true if a prior save
+    // confirmed a mismatch against the OLD Room). Only resetting the
+    // local session flags above left these stale, so tableConflicts()'s
+    // guard would keep treating the row as still-confirmed against a
+    // Room that no longer applies.
+    row.room_type_confirmed = false;
+    row.room_college_confirmed = false;
     fetchBusyTimes(row);
 };
 const onDaysChange = (row, value) => {
@@ -1575,6 +1653,35 @@ const saveSchedule = async () => {
         });
     }
 
+    // Room College Mismatch — also confirmable, not a hard block. A
+    // Minor/GenEd subject legitimately borrowing another College's
+    // room, or a deliberate cross-college override, is allowed; this
+    // just makes sure the Registrar explicitly sees and accepts it
+    // before it's saved. Same pattern as Room Type Mismatch above.
+    const stillUnconfirmedRoomCollege = unconfirmedRoomCollegeRowIds.value;
+    if (stillUnconfirmedRoomCollege.length > 0) {
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Room Belongs to Another College',
+            html: tableConflicts.value
+                .filter((c) => c.type === 'roomCollege' && stillUnconfirmedRoomCollege.includes(c.rowIds[0]))
+                .map((c) => `<div class="text-left text-sm">${c.detail}</div>`)
+                .join(''),
+            showCancelButton: true,
+            confirmButtonText: 'Save Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+        });
+
+        if (!result.isConfirmed) {
+            return;
+        }
+
+        stillUnconfirmedRoomCollege.forEach((rowId) => {
+            stateFor(rowId).roomCollegeConfirmed = true;
+        });
+    }
+
     savingSchedule.value = true;
 
     const buildPayload = () =>
@@ -1590,6 +1697,7 @@ const saveSchedule = async () => {
             workload_confirmed: Boolean(stateFor(row.id).workloadConfirmed),
             hours_confirmed: Boolean(stateFor(row.id).hoursConfirmed),
             room_type_confirmed: Boolean(stateFor(row.id).roomTypeConfirmed),
+            room_college_confirmed: Boolean(stateFor(row.id).roomCollegeConfirmed),
         }));
 
     const submit = async () => {
@@ -2761,7 +2869,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         >
                             <Tag
                                 :value="conflict.label"
-                                :severity="conflict.type === 'capacity' || conflict.type === 'hours' || conflict.type === 'roomType' ? 'warning' : 'danger'"
+                                :severity="conflict.type === 'capacity' || conflict.type === 'hours' || conflict.type === 'roomType' || conflict.type === 'roomCollege' ? 'warning' : 'danger'"
                                 class="!text-xs shrink-0"
                             />
                             <span class="text-slate-600">{{ conflict.detail }}</span>
@@ -3145,6 +3253,9 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                             </p>
                                             <p v-else-if="rowHasRoomTypeWarning(data.id)" class="text-amber-600 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>Room type doesn't match this subject — you'll be asked to confirm before saving.
+                                            </p>
+                                            <p v-else-if="rowHasRoomCollegeWarning(data.id)" class="text-amber-600 text-xs mt-1">
+                                                <i class="pi pi-exclamation-triangle mr-1"></i>This room belongs to another college — you'll be asked to confirm before saving.
                                             </p>
                                         </div>
 

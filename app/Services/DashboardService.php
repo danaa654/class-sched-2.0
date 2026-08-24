@@ -60,7 +60,7 @@ class DashboardService
      *     scope: array{type: string, college_id: ?int, label: ?string},
      *     kpis: array{active_sections: int, faculty_members: int, rooms: int, scheduled_subjects: int, total_subjects: int},
      *     progress: array{overall_percent: int, sections_scheduled: int, sections_total: int, faculty_assigned: int, rooms_assigned: int, total_subjects: int},
-     *     conflicts: array{faculty_conflicts: int, room_conflicts: int, time_conflicts: int, unscheduled_subjects: int, missing_faculty: int, missing_rooms: int},
+     *     conflicts: array{faculty_conflicts: int, faculty_conflicts_detail: list<array<string, mixed>>, room_conflicts: int, room_conflicts_detail: list<array<string, mixed>>, time_conflicts: int, time_conflicts_detail: list<array<string, mixed>>, unscheduled_subjects: int, major_subjects_scheduled: int, major_subjects_total: int, minor_gened_subjects_scheduled: int, minor_gened_subjects_total: int, major_subjects_by_program: list<array{program_code: string, program_name: string, scheduled: int, total: int}>, minor_gened_subjects_by_program: list<array{program_code: string, program_name: string, scheduled: int, total: int}>},
      * }
      */
     public function overview(User $user): array
@@ -220,69 +220,197 @@ class DashboardService
     }
 
     /**
-     * @return array{faculty_conflicts: int, room_conflicts: int, time_conflicts: int, unscheduled_subjects: int, missing_faculty: int, missing_rooms: int}
+     * @return array{faculty_conflicts: int, faculty_conflicts_detail: list<array<string, mixed>>, room_conflicts: int, room_conflicts_detail: list<array<string, mixed>>, time_conflicts: int, time_conflicts_detail: list<array<string, mixed>>, unscheduled_subjects: int, major_subjects_scheduled: int, major_subjects_total: int, minor_gened_subjects_scheduled: int, minor_gened_subjects_total: int, major_subjects_by_program: list<array{program_code: string, program_name: string, scheduled: int, total: int}>, minor_gened_subjects_by_program: list<array{program_code: string, program_name: string, scheduled: int, total: int}>}
      */
     private function conflictSummary(array $scope, Collection $sectionIds): array
     {
         $subjectsQuery = $this->sectionSubjectsQuery($scope, $sectionIds);
 
-        $missingFaculty = (clone $subjectsQuery)->whereNull('faculty_id')->count();
-        $missingRooms = (clone $subjectsQuery)->whereNull('room_id')->count();
+        // "Missing Faculty"/"Missing Rooms" were dropped from this
+        // panel — a subject offering with no Faculty/Room assigned
+        // yet is already surfaced by Unscheduled Subjects (it can't
+        // be Scheduled without both), so the two tiles were counting
+        // the same underlying problem twice. Replaced with a
+        // scheduled/total breakdown (same "N / N" shape as the
+        // Sections/Faculty/Rooms Assigned cards above) split by
+        // Subject::category, so a Dean can see progress within Major
+        // vs Minor/GenEd, not just a flat count.
+        $majorQuery = (clone $subjectsQuery)
+            ->whereHas('subject', fn (Builder $q) => $q->where('category', 'Major'));
+        $minorGenedQuery = (clone $subjectsQuery)
+            ->whereHas('subject', fn (Builder $q) => $q->whereIn('category', ['Minor', 'General Education']));
+
+        $majorTotal = (clone $majorQuery)->count();
+        $majorScheduled = (clone $majorQuery)->where('status', 'Scheduled')->count();
+        $minorGenedTotal = (clone $minorGenedQuery)->count();
+        $minorGenedScheduled = (clone $minorGenedQuery)->where('status', 'Scheduled')->count();
+
         $unscheduled = (clone $subjectsQuery)
             ->where(function (Builder $q) {
                 $q->whereNull('days')->orWhereNull('start_time')->orWhereNull('end_time');
             })
             ->count();
 
-        // Only fully-timed placements can meaningfully overlap —
-        // pulled once and reused for all three overlap scans below.
+        // Only fully-timed placements can meaningfully overlap or be
+        // checked for a Room Type / Hours mismatch — pulled once and
+        // reused for every check below, with the display relations
+        // (section/subject/faculty/room) eager-loaded so the
+        // breakdown dialogs can name names instead of just counting.
+        // merged_into_section_subject_id is pulled alongside so
+        // overlappingPairs() can recognise a merged Irregular-section
+        // row and its Regular-section host (or two rows merged into
+        // the same host) as the SAME class occupying the room/
+        // faculty/slot on purpose, not a double-booking — mirrors
+        // ScheduleConflictService::mergeExclusionIds().
         $placements = (clone $subjectsQuery)
             ->whereNotNull('days')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
-            ->get(['id', 'section_id', 'faculty_id', 'room_id', 'days', 'start_time', 'end_time']);
+            ->with(['section:id,section_code', 'subject:id,subject_code,lecture_hours,laboratory_hours', 'faculty:id,first_name,last_name', 'room:id,room_code,room_name,room_type'])
+            ->get(['id', 'section_id', 'subject_id', 'faculty_id', 'room_id', 'days', 'start_time', 'end_time', 'merged_into_section_subject_id', 'hours_confirmed', 'room_type_confirmed', 'room_college_confirmed']);
+
+        // Double-booking pairs — Faculty/Room/Section sharing a Day +
+        // overlapping Time. Faculty double-booking has no "flavor" of
+        // false-positive to fold in (unlike Room/Time below), so it
+        // stays a pure double-booking count, same as before.
+        $facultyPairs = $this->overlappingPairs($placements, 'faculty_id');
+        $roomPairs = $this->overlappingPairs($placements, 'room_id');
+        $sectionPairs = $this->overlappingPairs($placements, 'section_id');
+
+        // Room Conflicts now also folds in Room Type Mismatch (a
+        // Lecture/Laboratory subject sitting in the wrong kind of
+        // room) — same "problem with the Room this class landed in"
+        // family as a double-booking, just non-blocking rather than
+        // blocking. Mirrors SectionSubjectController's own
+        // room_type_confirmed check.
+        $roomTypeMismatches = $this->roomTypeMismatchDetails($placements);
+
+        // Time Conflicts now also folds in Weekly Hours Mismatch (the
+        // scheduled Days x Start/End doesn't add up to what the
+        // Subject's curriculum requires) — same "problem with the
+        // time this class landed in" family as a same-section
+        // overlap, just non-blocking rather than blocking. Mirrors
+        // SectionSubjectController's own hours_confirmed check.
+        $hoursMismatches = $this->hoursMismatchDetails($placements);
+
+        $roomConflictIds = $this->pairConflictIds($roomPairs);
+        foreach ($roomTypeMismatches as $row) {
+            $roomConflictIds[$row['id']] = true;
+        }
+
+        $timeConflictIds = $this->pairConflictIds($sectionPairs);
+        foreach ($hoursMismatches as $row) {
+            $timeConflictIds[$row['id']] = true;
+        }
 
         return [
             // Faculty double-booked across any Section/College.
-            'faculty_conflicts' => $this->countOverlapping($placements, 'faculty_id'),
-            // Room double-booked across any Section/College.
-            'room_conflicts' => $this->countOverlapping($placements, 'room_id'),
+            'faculty_conflicts' => count($this->pairConflictIds($facultyPairs)),
+            'faculty_conflicts_detail' => $this->pairDetails($facultyPairs, 'Double-Booked', 'faculty'),
+            // Room double-booked across any Section/College, PLUS Room
+            // Type Mismatch (Lecture subject in a Lab room or vice
+            // versa).
+            'room_conflicts' => count($roomConflictIds),
+            'room_conflicts_detail' => array_merge(
+                $this->pairDetails($roomPairs, 'Double-Booked', 'room'),
+                array_map(fn ($row) => $this->stripId($row), $roomTypeMismatches),
+            ),
             // A single Section's own two classes overlapping each
             // other ("Time Conflicts" in the spec) — distinct from
-            // the two checks above, which compare across Sections.
-            'time_conflicts' => $this->countOverlapping($placements, 'section_id'),
+            // the double-booking checks above, which compare across
+            // Sections — PLUS Weekly Hours Mismatch (scheduled hours
+            // don't add up to the Subject's required weekly hours).
+            'time_conflicts' => count($timeConflictIds),
+            'time_conflicts_detail' => array_merge(
+                $this->pairDetails($sectionPairs, 'Overlapping Classes', 'section'),
+                array_map(fn ($row) => $this->stripId($row), $hoursMismatches),
+            ),
             'unscheduled_subjects' => $unscheduled,
-            'missing_faculty' => $missingFaculty,
-            'missing_rooms' => $missingRooms,
+            'major_subjects_scheduled' => $majorScheduled,
+            'major_subjects_total' => $majorTotal,
+            'minor_gened_subjects_scheduled' => $minorGenedScheduled,
+            'minor_gened_subjects_total' => $minorGenedTotal,
+            'major_subjects_by_program' => $this->byProgram($majorQuery),
+            'minor_gened_subjects_by_program' => $this->byProgram($minorGenedQuery),
         ];
     }
 
     /**
-     * Counts placements that overlap another placement sharing the
-     * same $groupKey (faculty_id / room_id / section_id), using the
-     * exact same Day/Time overlap rule as
-     * ScheduleConflictService::sharesDay()/overlaps() — so this
-     * count can never quietly disagree with what the scheduling
-     * workspace itself would flag as a conflict. Groups are small
-     * (one faculty/room/section's own placements), so the pairwise
-     * scan below stays cheap despite being O(n^2) per group.
+     * Breaks a (Major or Minor/GenEd) subjects query down per Program
+     * — i.e. per Major record, since that's the "program" a Section
+     * belongs to (Section::major_id; see Major model docblock: "the
+     * major this section belongs to"). Powers the drill-down when a
+     * Dean clicks the Major Subjects / Minor-GenEd Subjects tile —
+     * e.g. a CCS Dean with 4 programs sees BSCS/BSIT/BSCRIMFI/etc.
+     * broken out individually instead of one lump total.
+     *
+     * A GenEd subject offering still lives inside a Section that
+     * belongs to a Major/Program (GenEd is shared curriculum content,
+     * not a program-less Section), so grouping by the Section's own
+     * Program works identically for both callers.
+     *
+     * @return list<array{program_code: string, program_name: string, scheduled: int, total: int}>
+     */
+    private function byProgram(Builder $subjectsQuery): Collection
+    {
+        return (clone $subjectsQuery)
+            ->join('sections', 'sections.id', '=', 'section_subjects.section_id')
+            ->join('majors', 'majors.id', '=', 'sections.major_id')
+            ->selectRaw('majors.id as program_id, majors.code as program_code, majors.name as program_name, '
+                .'COUNT(*) as total, SUM(section_subjects.status = "Scheduled") as scheduled')
+            ->groupBy('majors.id', 'majors.code', 'majors.name')
+            ->orderBy('majors.code')
+            ->get()
+            ->map(fn ($row) => [
+                'program_code' => $row->program_code,
+                'program_name' => $row->program_name,
+                'scheduled' => (int) $row->scheduled,
+                'total' => (int) $row->total,
+            ])
+            ->values();
+    }
+
+    /**
+     * Finds every pair of placements that overlap another placement
+     * sharing the same $groupKey (faculty_id / room_id / section_id),
+     * using the exact same Day/Time overlap rule as
+     * ScheduleConflictService::sharesDay()/overlaps() — so this can
+     * never quietly disagree with what the scheduling workspace
+     * itself would flag as a conflict. Groups are small (one
+     * faculty/room/section's own placements), so the pairwise scan
+     * below stays cheap despite being O(n^2) per group.
      *
      * @param  Collection<int, SectionSubject>  $placements
+     * @return Collection<int, array{0: SectionSubject, 1: SectionSubject}>
      */
-    private function countOverlapping(Collection $placements, string $groupKey): int
+    private function overlappingPairs(Collection $placements, string $groupKey): Collection
     {
-        $conflictingIds = [];
+        $pairs = collect();
 
         $placements
             ->filter(fn (SectionSubject $p) => $p->{$groupKey} !== null)
             ->groupBy($groupKey)
-            ->each(function (Collection $group) use (&$conflictingIds) {
+            ->each(function (Collection $group) use (&$pairs) {
                 $items = $group->values();
 
                 for ($i = 0; $i < $items->count(); $i++) {
                     for ($j = $i + 1; $j < $items->count(); $j++) {
                         $a = $items[$i];
                         $b = $items[$j];
+
+                        // Same class, not a conflict: $a and $b belong
+                        // to the same merge group when one is merged
+                        // into the other, or both are merged into the
+                        // same host (Regular + Irregular riders sharing
+                        // one Faculty/Room/Day/Time on purpose).
+                        $sameMergeGroup = $a->id === $b->merged_into_section_subject_id
+                            || $b->id === $a->merged_into_section_subject_id
+                            || ($a->merged_into_section_subject_id !== null
+                                && $a->merged_into_section_subject_id === $b->merged_into_section_subject_id);
+
+                        if ($sameMergeGroup) {
+                            continue;
+                        }
 
                         $daysA = array_values(array_filter(explode(',', (string) $a->days)));
                         $daysB = array_values(array_filter(explode(',', (string) $b->days)));
@@ -291,13 +419,237 @@ class DashboardService
                             $this->conflictService->sharesDay($daysA, $daysB)
                             && $this->conflictService->overlaps($a->start_time, $a->end_time, $b->start_time, $b->end_time)
                         ) {
-                            $conflictingIds[$a->id] = true;
-                            $conflictingIds[$b->id] = true;
+                            $pairs->push([$a, $b]);
                         }
                     }
                 }
             });
 
-        return count($conflictingIds);
+        return $pairs;
+    }
+
+    /**
+     * Every SectionSubject id (from either side of every pair) that
+     * shows up in $pairs, as a lookup set — used both to size a tile
+     * (count of distinct affected placements, not pair count) and to
+     * union with a mismatch id list without double-counting a row
+     * that has both problems at once.
+     *
+     * @param  Collection<int, array{0: SectionSubject, 1: SectionSubject}>  $pairs
+     * @return array<int, true>
+     */
+    private function pairConflictIds(Collection $pairs): array
+    {
+        $ids = [];
+
+        foreach ($pairs as [$a, $b]) {
+            $ids[$a->id] = true;
+            $ids[$b->id] = true;
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Turns overlap pairs into breakdown-dialog rows. $focus picks
+     * which shared resource the row is "about" (Room/Faculty/
+     * Section), matching the tile the row will be shown under.
+     *
+     * @param  Collection<int, array{0: SectionSubject, 1: SectionSubject}>  $pairs
+     * @return list<array<string, mixed>>
+     */
+    private function pairDetails(Collection $pairs, string $type, string $focus): array
+    {
+        return $pairs->map(function (array $pair) use ($type, $focus) {
+            [$a, $b] = $pair;
+
+            $sharedDays = array_values(array_intersect(
+                array_filter(explode(',', (string) $a->days)),
+                array_filter(explode(',', (string) $b->days)),
+            ));
+
+            $resource = match ($focus) {
+                'room' => $a->room?->room_name ?? $a->room?->room_code ?? 'this room',
+                'faculty' => $a->faculty?->full_name ?? 'this faculty member',
+                'section' => $a->section?->section_code ?? 'this section',
+                default => '—',
+            };
+
+            $subjectA = $a->subject?->subject_code ?? '—';
+            $subjectB = $b->subject?->subject_code ?? '—';
+            $sectionA = $a->section?->section_code ?? '—';
+            $sectionB = $b->section?->section_code ?? '—';
+
+            return [
+                'id' => $a->id,
+                'type' => $type,
+                'section_a' => $sectionA,
+                'subject_a' => $subjectA,
+                'section_b' => $sectionB,
+                'subject_b' => $subjectB,
+                'day' => $this->formatDays($sharedDays),
+                'time' => $this->formatTimeRange12h($a->start_time, $a->end_time),
+                'note' => $focus === 'section'
+                    ? "{$subjectA} and {$subjectB} are both scheduled for {$sectionA} at the same time."
+                    : "{$subjectA} ({$sectionA}) and {$subjectB} ({$sectionB}) are both booked on {$resource} at the same time.",
+                'open_section_id' => $a->section_id,
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Placements whose Room's type (Lecture/Laboratory) doesn't match
+     * what the Subject needs — same rule SectionSubjectController
+     * checks at save time before requiring room_type_confirmed=true.
+     *
+     * A row the Registrar already confirmed via "Save Anyway"
+     * (room_type_confirmed=true, persisted at save time — see the
+     * 2026_08_24_180000 migration) is intentional, not a conflict, so
+     * it's excluded here exactly the same way the Section Subjects
+     * page's own "Scheduling Issues" panel stops flagging it: this
+     * Dashboard tile and that panel now read the same persisted
+     * confirmation instead of the Dashboard silently disagreeing with
+     * what the Registrar already acknowledged.
+     *
+     * @param  Collection<int, SectionSubject>  $placements
+     * @return list<array<string, mixed>>
+     */
+    private function roomTypeMismatchDetails(Collection $placements): array
+    {
+        return $placements
+            ->filter(function (SectionSubject $p) {
+                if (! $p->room_id || ! $p->room || ! $p->subject || $p->room_type_confirmed) {
+                    return false;
+                }
+
+                $wantsLaboratory = (int) $p->subject->laboratory_hours > 0;
+
+                return $wantsLaboratory
+                    ? $p->room->room_type !== 'Laboratory'
+                    : $p->room->room_type === 'Laboratory';
+            })
+            ->map(function (SectionSubject $p) {
+                $wantsLaboratory = (int) $p->subject->laboratory_hours > 0;
+
+                return [
+                    'id' => $p->id,
+                    'type' => 'Room Type Mismatch',
+                    'section_a' => $p->section?->section_code ?? '—',
+                    'subject_a' => $p->subject->subject_code,
+                    'section_b' => null,
+                    'subject_b' => null,
+                    'day' => $this->formatDays(array_values(array_filter(explode(',', (string) $p->days)))),
+                    'time' => $this->formatTimeRange12h($p->start_time, $p->end_time),
+                    'note' => "{$p->subject->subject_code} is a ".($wantsLaboratory ? 'Laboratory' : 'Lecture')
+                        ." subject, but {$p->room->room_name} is a {$p->room->room_type} room.",
+                    'open_section_id' => $p->section_id,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Placements whose scheduled Days x Start/End doesn't add up to
+     * the Subject's declared weekly hours — same formula
+     * SectionSubjectController checks at save time before requiring
+     * hours_confirmed=true (falls back to 3 hrs/week when the Subject
+     * declares none, matching RecommendationService's own fallback).
+     *
+     * A row already confirmed (hours_confirmed=true, persisted at
+     * save time) is excluded — see roomTypeMismatchDetails()'s
+     * docblock above for why.
+     *
+     * @param  Collection<int, SectionSubject>  $placements
+     * @return list<array<string, mixed>>
+     */
+    private function hoursMismatchDetails(Collection $placements): array
+    {
+        return $placements
+            ->filter(fn (SectionSubject $p) => $p->subject !== null && ! $p->hours_confirmed)
+            ->map(function (SectionSubject $p) {
+                $dayTokens = array_values(array_filter(explode(',', (string) $p->days)));
+                $requiredHours = ((int) $p->subject->lecture_hours) + ((int) $p->subject->laboratory_hours);
+                if ($requiredHours <= 0) {
+                    $requiredHours = 3;
+                }
+
+                $actualMinutes = (strtotime($p->end_time) - strtotime($p->start_time)) / 60 * count($dayTokens);
+                $actualHours = round($actualMinutes / 60, 2);
+
+                return [$p, $requiredHours, $actualHours];
+            })
+            ->filter(fn (array $row) => $row[2] !== (float) $row[1])
+            ->map(function (array $row) {
+                [$p, $requiredHours, $actualHours] = $row;
+
+                return [
+                    'id' => $p->id,
+                    'type' => 'Hours Mismatch',
+                    'section_a' => $p->section?->section_code ?? '—',
+                    'subject_a' => $p->subject->subject_code,
+                    'section_b' => null,
+                    'subject_b' => null,
+                    'day' => $this->formatDays(array_values(array_filter(explode(',', (string) $p->days)))),
+                    'time' => $this->formatTimeRange12h($p->start_time, $p->end_time),
+                    'note' => "This schedule totals {$actualHours} hrs/week, but {$p->subject->subject_code} requires {$requiredHours} hrs/week.",
+                    'open_section_id' => $p->section_id,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Drops the internal 'id' key (only used for building the union
+     * of conflicting ids) before a detail row is sent to the
+     * frontend.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private function stripId(array $row): array
+    {
+        unset($row['id']);
+
+        return $row;
+    }
+
+    /**
+     * Compact "MWF" / "TTH" style day abbreviations, matching the
+     * frontend's own formatDays() (see SectionSubjects/Show.vue) so
+     * the Dashboard's breakdown dialogs read identically to the
+     * scheduling workspace.
+     *
+     * @param  list<string>  $days
+     */
+    private function formatDays(array $days): string
+    {
+        $abbreviations = ['Mon' => 'M', 'Tue' => 'T', 'Wed' => 'W', 'Thu' => 'TH', 'Fri' => 'F', 'Sat' => 'SAT', 'Sun' => 'SUN'];
+        $order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+        return collect($order)
+            ->filter(fn ($token) => in_array($token, $days, true))
+            ->map(fn ($token) => $abbreviations[$token])
+            ->implode('');
+    }
+
+    /**
+     * Formats a "h:mm AM/PM – h:mm AM/PM" range, mirroring
+     * ReportsService::formatTimeRange12h() so this reads identically
+     * to the Scheduling Conflicts report.
+     */
+    private function formatTimeRange12h(?string $start, ?string $end): string
+    {
+        if (! $start || ! $end) {
+            return '—';
+        }
+
+        return $this->formatTime12h($start).'–'.$this->formatTime12h($end);
+    }
+
+    private function formatTime12h(string $time): string
+    {
+        return date('g:i A', strtotime($time));
     }
 }

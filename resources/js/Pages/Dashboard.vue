@@ -236,7 +236,7 @@ const roleLabel = computed(() => props.roles.join(', ') || 'No role assigned');
         <!-- 3. Scheduling Progress + 4. Conflict Detection -->
         <div class="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
             <SchedulingProgressCard :progress="progress" :is-dark="isDark" />
-            <ConflictPanel :conflicts="conflicts" :is-dark="isDark" />
+            <ConflictPanel :conflicts="conflicts" :roles="roles" :is-dark="isDark" />
         </div>
 
         <!-- 9. Quick Actions -->

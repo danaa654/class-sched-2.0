@@ -74,6 +74,25 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             // proceed despite the warning. See
             // SectionSubjectController::performScheduleAssignmentUpdate().
             'room_type_confirmed' => ['sometimes', 'boolean'],
+            'room_college_confirmed' => ['sometimes', 'boolean'],
+            // ROOM GRID DEFERRED CONFIRMATION — set true by the Room
+            // Grid tab (RoomGrid.vue's confirmAssign()/writeSchedule())
+            // when the Registrar chooses to place a subject despite a
+            // Room Type / Room College / Weekly Hours mismatch WITHOUT
+            // treating it as permanently confirmed. Lets
+            // performScheduleAssignmentUpdate() skip the room_type/
+            // room_college/hours 422 block for THIS save while still
+            // persisting room_type_confirmed/room_college_confirmed/
+            // hours_confirmed as false (never coerced true) — so the
+            // placement saves immediately (Room Grid's whole UX is
+            // instant drag/drop), but the mismatch stays a live
+            // "Scheduling Issue" until the Registrar explicitly
+            // confirms it via the Subjects tab's batch "Save Schedule"
+            // (see UpdateSectionSubjectScheduleRequest's docblock and
+            // BatchUpdateSectionSubjectScheduleRequest, which has no
+            // equivalent — that endpoint's confirmation IS the final
+            // one).
+            'defer_mismatch_confirmation' => ['sometimes', 'boolean'],
             // Set true once an Administrator has explicitly acknowledged
             // a Teaching Load Limit warning ("⚠ Teaching Load Limit
             // Exceeded") — lets the save proceed despite the faculty
