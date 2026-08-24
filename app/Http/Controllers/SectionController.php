@@ -548,8 +548,28 @@ class SectionController extends Controller
     {
         $this->authorize('update', $section);
 
+        $data = $request->validated();
+
+        // KEEP CODE/NAME IN SYNC FOR IRREGULAR SECTIONS — an Irregular
+        // section is a single scheduling group with one name, never a
+        // set of A/B/C blocks (see SectionBatchGeneratorService's
+        // nextIrregularName() docblock), and both storeBatch() and
+        // store() already set section_code === section_name for it at
+        // creation time. The Edit dialog, however, exposes Section
+        // Code and Section Name as two independently-editable fields,
+        // so an edit that only touches one of them (e.g. renaming the
+        // code to disambiguate it from another Irregular group) used
+        // to silently leave the other stale — producing a header like
+        // "BSIT-4A-IRREG — BSIT-4-IRREG" that looks like two different
+        // sections got merged together. Enforcing the same "one name"
+        // rule here, server-side, means it can never drift again
+        // regardless of what the frontend sends.
+        if (($data['section_type'] ?? $section->section_type) === 'Irregular') {
+            $data['section_name'] = $data['section_code'];
+        }
+
         try {
-            $section->update($request->validated());
+            $section->update($data);
         } catch (UniqueConstraintViolationException $e) {
             throw ValidationException::withMessages([
                 'section_code' => 'This section code was just taken by another request. Please use a different code.',

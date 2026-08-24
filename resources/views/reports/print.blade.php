@@ -89,6 +89,49 @@
             background: #f8fafc;
         }
 
+        /* ---- Classly text credit strip (sits above the school letterhead) ---- */
+        .classly-brand {
+            margin-bottom: 6px;
+        }
+
+        .classly-brand span {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            color: #2563eb;
+        }
+
+        /* ---- Per-section print header (program / term / section) ---- */
+        .section-header {
+            margin-bottom: 10px;
+        }
+
+        .section-header .program {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        .section-header .term {
+            margin: 2px 0 0;
+            font-size: 11px;
+            color: #64748b;
+        }
+
+        .section-heading {
+            margin: 0 0 8px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #1e293b;
+            border-bottom: 1px solid #cbd5e1;
+            padding-bottom: 4px;
+        }
+
+        .section-block + .section-block {
+            margin-top: 20px;
+        }
+
         .empty {
             text-align: center;
             padding: 24px 0;
@@ -112,19 +155,13 @@
 </head>
 <body>
 
-    <div class="letterhead">
-        <img src="{{ $schoolLogoUrl ?: asset('logo.png') }}" alt="School Logo">
-        <div>
-            <h1>{{ $schoolName }}</h1>
-            <p>{{ $report['title'] ?? 'Report' }}</p>
-        </div>
-    </div>
+    @include('reports.partials.letterhead')
 
     <div class="meta">
-        @if($academicYear)
+        @if($academicYear && empty($report['groups']))
             <p><strong>Academic Year:</strong> {{ $academicYear }}</p>
         @endif
-        @if($semester)
+        @if($semester && empty($report['groups']))
             <p><strong>Semester:</strong> {{ $semester }}</p>
         @endif
         @if($sectionLabel)
@@ -135,6 +172,69 @@
     @if(! $report || empty($report['rows']) || count($report['rows']) === 0)
 
         <p class="empty">{{ $report['empty_message'] ?? 'No data found for the selected filters.' }}</p>
+
+    @elseif($reportType === 'schedule_by_section' && !empty($report['groups']))
+
+        {{-- Several specific (possibly non-contiguous — e.g. BSIT-1,
+             BSIT-3, BSIT-4, skipping BSIT-2) sections picked at once:
+             each gets its own heading + table + page break, instead of
+             one continuous merged table, so this prints/saves as one
+             document per section. --}}
+        @foreach($report['groups'] as $index => $group)
+            <div class="section-block" @if($index > 0) style="page-break-before: always;" @endif>
+                @if($index > 0)
+                    {{-- New physical page: repeat the full letterhead so this
+                         section reads as a standalone document on its own. --}}
+                    @include('reports.partials.letterhead')
+                @endif
+
+                <div class="section-header">
+                    @if($group['program'])
+                        <p class="program">{{ $group['program'] }}</p>
+                    @endif
+                    @if($group['academic_year'] || $group['semester'])
+                        <p class="term">S.Y. {{ $group['academic_year'] }}{{ $group['academic_year'] && $group['semester'] ? ' · ' : '' }}{{ $group['semester'] }}</p>
+                    @endif
+                </div>
+
+                <h2 class="section-heading">{{ $group['section_code'] }}</h2>
+
+                @if(empty($group['rows']))
+                    <p class="empty">No schedule found for this section.</p>
+                @else
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>EDP Code</th>
+                                <th>Subject Code</th>
+                                <th>Subject</th>
+                                <th>Faculty</th>
+                                <th>Room</th>
+                                <th>Day / Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($group['rows'] as $row)
+                                <tr>
+                                    <td>{{ $row['EDP Code'] ?? '—' }}</td>
+                                    <td>{{ $row['Subject Code'] ?? '—' }}</td>
+                                    <td>{{ $row['Subject'] ?? '—' }}</td>
+                                    <td>{{ $row['Faculty'] ?? '—' }}</td>
+                                    <td>{{ $row['Room'] ?? '—' }}</td>
+                                    <td>
+                                        @if(!empty($row['Day']) && !empty($row['Start']) && !empty($row['End']))
+                                            {{ $row['Day'] }} · {{ $row['Start'] }}–{{ $row['End'] }}
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                @endif
+            </div>
+        @endforeach
 
     @elseif($reportType === 'schedule_by_section')
 
@@ -173,6 +273,59 @@
                 @endforeach
             </tbody>
         </table>
+
+    @elseif($reportType === 'schedule_by_faculty' && !empty($report['groups']))
+
+        {{-- Multiple faculty picked at once: each gets its own heading +
+             table + page break, same flow as Schedule by Section. --}}
+        @foreach($report['groups'] as $index => $group)
+            <div class="section-block" @if($index > 0) style="page-break-before: always;" @endif>
+                @if($index > 0)
+                    @include('reports.partials.letterhead')
+                @endif
+
+                <div class="section-header">
+                    @if($group['academic_year'] || $group['semester'])
+                        <p class="term">S.Y. {{ $group['academic_year'] }}{{ $group['academic_year'] && $group['semester'] ? ' · ' : '' }}{{ $group['semester'] }}</p>
+                    @endif
+                </div>
+
+                <h2 class="section-heading">{{ $group['label'] }}</h2>
+
+                @if(empty($group['rows']))
+                    <p class="empty">No schedule found for this faculty member.</p>
+                @else
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Subject</th>
+                                <th>Section</th>
+                                <th>Room</th>
+                                <th>Day / Time</th>
+                                <th>Units</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($group['rows'] as $row)
+                                <tr>
+                                    <td>{{ $row['Subject'] ?? '—' }}</td>
+                                    <td>{{ $row['Section'] ?? '—' }}</td>
+                                    <td>{{ $row['Room'] ?? '—' }}</td>
+                                    <td>
+                                        @if(!empty($row['Day']) && !empty($row['Start']) && !empty($row['End']))
+                                            {{ $row['Day'] }} · {{ $row['Start'] }}–{{ $row['End'] }}
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
+                                    <td>{{ $row['Units'] ?? '—' }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                @endif
+            </div>
+        @endforeach
 
     @else
 

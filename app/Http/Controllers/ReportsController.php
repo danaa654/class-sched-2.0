@@ -41,8 +41,43 @@ class ReportsController extends Controller
             'reportType' => $reportType,
             'summary' => $this->reports->dashboardSummary($filters['academic_year'] ?: null, $filters['semester'] ?: null),
             'report' => $reportType !== '' ? $this->reports->generate($reportType, $cleanFilters) : null,
+            // Grid view (Reports/Index.vue's Schedule by Room / Schedule by
+            // Faculty toggle) lays classes out against the same 30-min-row
+            // + fixed-lunch-break scheduling window RoomGrid.vue already
+            // uses when actually placing schedules — matches whichever
+            // School Year the selected Academic Year belongs to, so a
+            // report scoped to a past/future term still shows that
+            // term's own window rather than always the currently Active
+            // one. Falls back to the Active School Year, then to the
+            // model's built-in defaults, when nothing matches.
+            'schedulingWindow' => $this->schedulingWindowFor($filters['academic_year'] ?: null),
             'generatedAt' => now()->toDateTimeString(),
         ]);
+    }
+
+    /**
+     * The scheduling window (Class Start/End Time, Time Interval,
+     * Available Days, fixed Lunch Break) for the given Academic Year's
+     * School Year — or the Active School Year if no Academic Year is
+     * selected/matched. Shared shape with RoomGrid.vue's own
+     * `schedulingWindow` prop so the Reports grid view renders exactly
+     * the same 30-min-row layout the scheduling screens already use.
+     */
+    private function schedulingWindowFor(?string $academicYear): array
+    {
+        $schoolYear = $academicYear
+            ? \App\Models\SchoolYear::query()->where('name', $academicYear)->first()
+            : null;
+        $schoolYear ??= \App\Models\SchoolYear::active();
+
+        return [
+            'start_time' => $schoolYear?->classStartTime() ?? \App\Models\SchoolYear::DEFAULT_CLASS_START_TIME,
+            'end_time' => $schoolYear?->classEndTime() ?? \App\Models\SchoolYear::DEFAULT_CLASS_END_TIME,
+            'available_days' => $schoolYear?->allowedDays() ?? \App\Models\SchoolYear::DEFAULT_CLASS_DAYS,
+            'interval_minutes' => $schoolYear?->intervalMinutes() ?? \App\Models\SchoolYear::DEFAULT_TIME_INTERVAL_MINUTES,
+            'lunch_start' => \App\Models\SchoolYear::LUNCH_BREAK_START,
+            'lunch_end' => \App\Models\SchoolYear::LUNCH_BREAK_END,
+        ];
     }
 
     /**
@@ -67,7 +102,12 @@ class ReportsController extends Controller
 
         $reportType = (string) $request->query('report_type', '');
 
-        $section = $filters['section_id']
+        // section_id is a plain id for every other report, but Schedule by
+        // Section supports picking several specific (possibly non-contiguous)
+        // sections at once — in that case there's no single "Section:" label
+        // to show in the header, so leave $section null and let the print
+        // view fall back to its per-section group headings instead.
+        $section = (! is_array($filters['section_id']) && $filters['section_id'])
             ? Section::query()->find($filters['section_id'], ['id', 'section_code'])
             : null;
 
@@ -159,6 +199,11 @@ class ReportsController extends Controller
                 : $request->query('college_id', ''),
             'major_id' => $request->query('major_id', ''),
             'year_level' => $request->query('year_level', ''),
+            // Schedule by Section sends section_id[] (array) when the user
+            // picked specific sections via the multi-select; every other
+            // report still sends a plain string id (or '' for "all"). Laravel
+            // already returns whichever shape the querystring used, so just
+            // pass it through — buildFilters/sectionsQuery handle both.
             'section_id' => $request->query('section_id', ''),
             'section_type' => $request->query('section_type', ''),
             'faculty_id' => $request->query('faculty_id', ''),

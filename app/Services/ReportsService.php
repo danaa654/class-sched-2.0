@@ -88,8 +88,8 @@ class ReportsService
                 ->orderBy('section_code')
                 ->get(['id', 'section_code', 'academic_year', 'semester', 'major_id', 'year_level', 'section_type']),
             'yearLevels' => Section::query()->whereNotNull('year_level')->distinct()->orderBy('year_level')->pluck('year_level'),
-            'faculty' => Faculty::query()->orderBy('last_name')->get()->map(fn (Faculty $f) => ['id' => $f->id, 'name' => $f->full_name]),
-            'rooms' => Room::query()->orderBy('room_code')->get(['id', 'room_code']),
+            'faculty' => Faculty::query()->orderBy('last_name')->get()->map(fn (Faculty $f) => ['id' => $f->id, 'name' => $f->full_name, 'college_id' => $f->college_id]),
+            'rooms' => Room::query()->orderBy('room_code')->get(['id', 'room_code', 'room_name', 'college_id']),
             'reportGroups' => self::REPORT_GROUPS,
         ];
     }
@@ -167,7 +167,11 @@ class ReportsService
             ->when($filters['semester'] ?? null, fn ($q, $v) => $q->where('semester', $v))
             ->when($filters['major_id'] ?? null, fn ($q, $v) => $q->where('major_id', $v))
             ->when($filters['year_level'] ?? null, fn ($q, $v) => $q->where('year_level', $v))
-            ->when($filters['section_id'] ?? null, fn ($q, $v) => $q->where('id', $v))
+            // section_id may now be a single id (most reports) or an array of
+            // ids (Schedule by Section's "pick specific sections" multi-select,
+            // e.g. BSIT-1 + BSIT-3 + BSIT-4 with no BSIT-2) — support both so
+            // every other report type that still sends a plain id is untouched.
+            ->when($filters['section_id'] ?? null, fn ($q, $v) => is_array($v) ? $q->whereIn('id', $v) : $q->where('id', $v))
             ->when($filters['section_type'] ?? null, fn ($q, $v) => $q->where('section_type', $v))
             ->when($filters['college_id'] ?? null, function ($q, $collegeId) {
                 $q->whereHas('major.department', fn ($dq) => $dq->where('college_id', $collegeId));
@@ -245,36 +249,118 @@ class ReportsService
             'Type' => $ss->section?->section_type,
         ]);
 
-        return $this->table('Schedule by Section', $rows);
+        $result = $this->table('Schedule by Section', $rows);
+
+        // Multiple, explicitly-picked (possibly non-contiguous — e.g.
+        // BSIT-1, BSIT-3, BSIT-4, skipping BSIT-2) sections: also hand
+        // the print view a per-section breakdown, ordered to match the
+        // order the sections were actually selected in, so it can print
+        // each one as its own separate block/page instead of one
+        // continuous merged table.
+        $sectionIds = $filters['section_id'] ?? null;
+
+        if (is_array($sectionIds) && count($sectionIds) > 1) {
+            $bySection = $rows->groupBy('Section');
+
+            $result['groups'] = collect($sectionIds)
+                ->map(fn ($id) => Section::query()->with('major')->find($id, ['id', 'section_code', 'major_id', 'academic_year', 'semester']))
+                ->filter()
+                ->map(fn (Section $section) => [
+                    'section_code' => $section->section_code,
+                    'program' => $section->major?->name ?? $this->programName($section),
+                    'academic_year' => $section->academic_year,
+                    'semester' => $section->semester,
+                    'rows' => $bySection->get($section->section_code, collect())->values()->all(),
+                ])
+                ->values()
+                ->all();
+        }
+
+        return $result;
     }
 
     private function scheduleByFaculty(array $filters): array
     {
-        $query = $this->sectionSubjectsQuery($filters);
+        $query = $this->sectionSubjectsQuery($filters)
+            // INTELLIGENT IRREGULAR SECTION SCHEDULING — same "one class
+            // session, one row" rule FacultyWorkloadService::assignedPlacements()
+            // already applies on the Faculty Workload tab: a merged
+            // Irregular-section row is the same session as its host row,
+            // just ridden along on by another Section, never a second
+            // class the faculty actually teaches. Excluding riders here
+            // and folding their Section Code into the host row (below)
+            // keeps this report's counts consistent with the Workload
+            // tab instead of double-listing/double-counting the class.
+            ->whereNull('merged_into_section_subject_id')
+            ->with('mergedPlacements.section:id,section_code');
 
-        if (! empty($filters['faculty_id'])) {
-            $query->where('faculty_id', $filters['faculty_id']);
+        $facultyIds = $filters['faculty_id'] ?? null;
+
+        if (is_array($facultyIds) && ! empty($facultyIds)) {
+            $query->whereIn('faculty_id', $facultyIds);
+        } elseif (! empty($facultyIds)) {
+            $query->where('faculty_id', $facultyIds);
         } else {
             $query->whereNotNull('faculty_id');
         }
 
-        $rows = $query->get()->map(fn (SectionSubject $ss) => [
-            'Faculty' => $ss->faculty?->full_name,
-            'Subject' => $ss->subject?->subject_title,
-            'Section' => $ss->section?->section_code,
-            'Room' => $ss->room?->room_code,
-            'Day' => $ss->days,
-            'Start' => $this->formatTime12h($ss->start_time),
-            'End' => $this->formatTime12h($ss->end_time),
-            'Units' => $ss->subject?->units,
-        ]);
+        $rows = $query->get()->map(function (SectionSubject $ss) {
+            $sectionCodes = collect([$ss->section?->section_code])
+                ->merge($ss->mergedPlacements->pluck('section.section_code'))
+                ->filter()
+                ->unique()
+                ->values();
 
-        return $this->table('Schedule by Faculty', $rows);
+            return [
+                'Faculty' => $ss->faculty?->full_name,
+                'Subject' => $ss->subject?->subject_title,
+                // Host + every merged rider's Section Code, joined with
+                // " & " (e.g. "BSIT-4A & BSIT-4A-IRREG") — same format
+                // as the Workload tab's Assigned Subjects list.
+                'Section' => $sectionCodes->implode(' & '),
+                'Room' => $ss->room?->room_code,
+                'Day' => $ss->days,
+                'Start' => $this->formatTime12h($ss->start_time),
+                'End' => $this->formatTime12h($ss->end_time),
+                'Units' => $ss->subject?->units,
+            ];
+        });
+
+        $result = $this->table('Schedule by Faculty', $rows);
+
+        // Multiple, explicitly-picked faculty: also hand the print view a
+        // per-faculty breakdown, ordered to match selection order, so it
+        // can print each faculty member's load as its own separate
+        // block/page — same "print each one separately" flow as Schedule
+        // by Section.
+        if (is_array($facultyIds) && count($facultyIds) > 1) {
+            $byFaculty = $rows->groupBy('Faculty');
+
+            $result['groups'] = collect($facultyIds)
+                ->map(fn ($id) => Faculty::query()->find($id, ['id', 'first_name', 'middle_name', 'last_name', 'suffix']))
+                ->filter()
+                ->map(fn (Faculty $faculty) => [
+                    'label' => $faculty->full_name,
+                    'academic_year' => $filters['academic_year'] ?? null,
+                    'semester' => $filters['semester'] ?? null,
+                    'rows' => $byFaculty->get($faculty->full_name, collect())->values()->all(),
+                ])
+                ->values()
+                ->all();
+        }
+
+        return $result;
     }
 
     private function scheduleByRoom(array $filters): array
     {
-        $query = $this->sectionSubjectsQuery($filters);
+        $query = $this->sectionSubjectsQuery($filters)
+            // Same "one class session, one row" rule as scheduleByFaculty()
+            // — a merged Irregular-section rider row is the same session
+            // as its host row, just ridden along on by another Section,
+            // never a second class actually meeting in this room.
+            ->whereNull('merged_into_section_subject_id')
+            ->with('mergedPlacements.section:id,section_code');
 
         if (! empty($filters['room_id'])) {
             $query->where('room_id', $filters['room_id']);
@@ -282,16 +368,27 @@ class ReportsService
             $query->whereNotNull('room_id');
         }
 
-        $rows = $query->get()->map(fn (SectionSubject $ss) => [
-            'Room' => $ss->room?->room_code,
-            'Subject' => $ss->subject?->subject_title,
-            'Section' => $ss->section?->section_code,
-            'Faculty' => $ss->faculty?->full_name,
-            'Day' => $ss->days,
-            'Start' => $this->formatTime12h($ss->start_time),
-            'End' => $this->formatTime12h($ss->end_time),
-            'Room Capacity' => $ss->room?->capacity,
-        ]);
+        $rows = $query->get()->map(function (SectionSubject $ss) {
+            $sectionCodes = collect([$ss->section?->section_code])
+                ->merge($ss->mergedPlacements->pluck('section.section_code'))
+                ->filter()
+                ->unique()
+                ->values();
+
+            return [
+                'Room' => $ss->room?->room_code,
+                'Subject' => $ss->subject?->subject_title,
+                // Host + every merged rider's Section Code, joined with
+                // " & " (e.g. "BSIT-4A & BSIT-4A-IRREG") — same format
+                // as Schedule by Faculty and the Workload tab.
+                'Section' => $sectionCodes->implode(' & '),
+                'Faculty' => $ss->faculty?->full_name,
+                'Day' => $ss->days,
+                'Start' => $this->formatTime12h($ss->start_time),
+                'End' => $this->formatTime12h($ss->end_time),
+                'Room Capacity' => $ss->room?->capacity,
+            ];
+        });
 
         return $this->table('Schedule by Room', $rows);
     }
@@ -346,14 +443,28 @@ class ReportsService
         foreach ($placements as $ss) {
             $dayTokens = array_filter(explode(',', (string) $ss->days));
 
+            // INTELLIGENT IRREGULAR SECTION SCHEDULING — a merged
+            // Irregular-section row (and its host, and every other
+            // rider merged into the same host) is the SAME class
+            // session, not a second class overlapping it. Every other
+            // conflict check in the app (Save Schedule, Auto Generate,
+            // Room Grid moves) excludes the whole merge group via
+            // ScheduleConflictService::mergeExclusionIds() — this report
+            // previously excluded only $ss->id itself, so a merged
+            // pair sharing the identical Faculty/Room/Day/Time by
+            // design was flagged here as a false Faculty/Room
+            // "conflict" even though Save Schedule never rejected it
+            // and nothing about it is actually broken.
+            $excludingIds = $this->conflicts->mergeExclusionIds($ss);
+
             $checks = [
                 'Faculty' => fn () => $ss->faculty_id
-                    ? $this->conflicts->findFacultyConflict($ss->faculty_id, $ss->id, $dayTokens, $ss->start_time, $ss->end_time)
+                    ? $this->conflicts->findFacultyConflict($ss->faculty_id, $excludingIds, $dayTokens, $ss->start_time, $ss->end_time)
                     : null,
                 'Room' => fn () => $ss->room_id
-                    ? $this->conflicts->findRoomConflict($ss->room_id, $ss->id, $dayTokens, $ss->start_time, $ss->end_time)
+                    ? $this->conflicts->findRoomConflict($ss->room_id, $excludingIds, $dayTokens, $ss->start_time, $ss->end_time)
                     : null,
-                'Section' => fn () => $this->conflicts->findSectionConflict($ss->section_id, $ss->id, $dayTokens, $ss->start_time, $ss->end_time),
+                'Section' => fn () => $this->conflicts->findSectionConflict($ss->section_id, $excludingIds, $dayTokens, $ss->start_time, $ss->end_time),
             ];
 
             foreach ($checks as $type => $check) {
@@ -384,7 +495,65 @@ class ReportsService
                     'Room' => $ss->room?->room_code ?? '—',
                     'Day' => $ss->days,
                     'Time' => $this->formatTimeRange12h($ss->start_time, $ss->end_time),
+                    // Faculty/Room/Section double-booking has no
+                    // "Save Anyway" override anywhere in the app — Save
+                    // Schedule hard-blocks it with a 422 (see
+                    // SectionSubjectController). So every row here is
+                    // still genuinely unresolved; only Hours Mismatch
+                    // below can be Acknowledged.
+                    'Status' => 'Unresolved',
+                    'Note' => '—',
                 ]);
+            }
+
+            // WEEKLY HOURS MISMATCH — same formula
+            // SectionSubjectController's own save-time check uses
+            // (minutes between Start/End) × meeting days ÷ 60, compared
+            // against the Subject's declared lecture+laboratory hours
+            // (falls back to 3, matching RecommendationService's own
+            // fallback). That warning is confirmable at save time
+            // ("Save Anyway"/hours_confirmed) — a Registrar CAN save a
+            // schedule that doesn't add up to the required weekly
+            // hours, same "flagged, not blocked" pattern as Room
+            // Capacity. This surfaces those already-SAVED mismatches
+            // here too, since Scheduling Conflicts previously only
+            // checked for double-booking (Faculty/Room/Section) and
+            // silently had no way to show a saved Hours Mismatch at
+            // all — not because saving made it "not a conflict", but
+            // because this report never looked for that kind of issue
+            // in the first place.
+            if (! $onlyType && $ss->subject) {
+                $requiredHours = ((int) $ss->subject->lecture_hours) + ((int) $ss->subject->laboratory_hours);
+                if ($requiredHours <= 0) {
+                    $requiredHours = 3;
+                }
+
+                $actualMinutes = (strtotime($ss->end_time) - strtotime($ss->start_time)) / 60 * count($dayTokens);
+                $actualHours = round($actualMinutes / 60, 2);
+
+                if ($actualHours !== (float) $requiredHours) {
+                    $rows->push([
+                        'Conflict Type' => 'Hours Mismatch',
+                        'Section A' => $ss->section?->section_code,
+                        'Subject A' => $ss->subject?->subject_code,
+                        'Section B' => '—',
+                        'Subject B' => '—',
+                        'Faculty' => $ss->faculty?->full_name ?? '—',
+                        'Room' => $ss->room?->room_code ?? '—',
+                        'Day' => $ss->days,
+                        'Time' => $this->formatTimeRange12h($ss->start_time, $ss->end_time),
+                        // Unlike Faculty/Room/Section conflicts, this
+                        // one IS confirmable at save time
+                        // (hours_confirmed / "Save Anyway"). A row here
+                        // with hours_confirmed=true was already seen
+                        // and knowingly accepted by whoever scheduled
+                        // it — flag it as Acknowledged rather than
+                        // Unresolved so an auditor isn't chasing an
+                        // issue that's already been reviewed.
+                        'Status' => $ss->hours_confirmed ? 'Acknowledged' : 'Unresolved',
+                        'Note' => "Scheduled {$actualHours} hrs/week, requires {$requiredHours} hrs/week.",
+                    ]);
+                }
             }
         }
 

@@ -3,6 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { ref, computed, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Select from 'primevue/select';
+import MultiSelect from 'primevue/multiselect';
 import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
@@ -21,6 +22,22 @@ const props = defineProps({
     summary: { type: Object, required: true },
     report: { type: Object, default: null },
     generatedAt: { type: String, default: '' },
+    // Same shape as RoomGrid.vue's own schedulingWindow prop (Class
+    // Start/End Time, Time Interval, Available Days, fixed Lunch
+    // Break) — reused here so the Reports Grid view lays classes out
+    // on the exact same 30-min-row grid the scheduling screens use,
+    // for whichever School Year the selected Academic Year belongs to.
+    schedulingWindow: {
+        type: Object,
+        default: () => ({
+            start_time: '07:00',
+            end_time: '17:00',
+            available_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+            interval_minutes: 30,
+            lunch_start: '12:00',
+            lunch_end: '13:00',
+        }),
+    },
 });
 
 // --- Local filter state (mirrors querystring) ---
@@ -30,12 +47,26 @@ const form = ref({
     college_id: props.filters.college_id || '',
     major_id: props.filters.major_id || '',
     year_level: props.filters.year_level || '',
-    section_id: props.filters.section_id || '',
+    // Single-select value, used by every report type except Schedule by
+    // Section (see section_ids below + sectionIsMultiple).
+    section_id: Array.isArray(props.filters.section_id) ? '' : (props.filters.section_id || ''),
     section_type: props.filters.section_type || '',
     faculty_id: props.filters.faculty_id || '',
     room_id: props.filters.room_id || '',
 });
 const reportType = ref(props.reportType || '');
+
+// Schedule by Section can print several specific, possibly non-contiguous
+// sections at once (e.g. BSIT-1, BSIT-3, BSIT-4 — skipping BSIT-2), each
+// printed as its own separate block/page rather than merged into one
+// continuous table. Kept as its own array field (separate from the plain
+// single-select `section_id` every other report still uses) so the two
+// selection modes never collide.
+const sectionIds = ref(Array.isArray(props.filters.section_id) ? props.filters.section_id : (props.filters.section_id ? [props.filters.section_id] : []));
+// Same multi-pick-and-print-separately flow as Schedule by Section, but
+// for Schedule by Faculty — pick several faculty at once, each printed as
+// its own separate block/page.
+const facultyIds = ref(Array.isArray(props.filters.faculty_id) ? props.filters.faculty_id : (props.filters.faculty_id ? [props.filters.faculty_id] : []));
 
 // Academic Term quick filter — same "{academic_year}|{semester}" value
 // shape and "All Terms" / Archived-tagged options as the Sections page
@@ -59,8 +90,22 @@ function onTermChange() {
 
 const academicYearOptions = computed(() => props.filterOptions.academicYears.map((v) => ({ label: v, value: v })));
 const semesterOptions = computed(() => props.filterOptions.semesters.map((v) => ({ label: v, value: v })));
-const collegeOptions = computed(() => [{ label: 'All Programs', value: '' }, ...props.filterOptions.colleges.map((c) => ({ label: c.name, value: c.id }))]);
+// Pseudo College/Program value: "General Education Faculty" — GenEd/Minor
+// faculty (college_id null) don't belong to any real College, so they get
+// their own explicit entry in this dropdown instead of being silently
+// mixed into every real College's faculty list.
+const GENED_COLLEGE_VALUE = '__gened__';
+// "General Education Faculty" only makes sense as a College/Program choice
+// when picking Faculty (Schedule by Faculty) — Schedule by Section and
+// every other report filters by real Programs/Sections, which GenEd
+// doesn't have, so the entry is hidden there.
+const collegeOptions = computed(() => [
+    { label: 'All Programs', value: '' },
+    ...(needsFaculty.value ? [{ label: 'General Education Faculty', value: GENED_COLLEGE_VALUE }] : []),
+    ...props.filterOptions.colleges.map((c) => ({ label: c.name, value: c.id })),
+]);
 const majorOptions = computed(() => {
+    if (form.value.college_id === GENED_COLLEGE_VALUE) return [{ label: 'All Majors', value: '' }];
     const college = props.filterOptions.colleges.find((c) => c.id === form.value.college_id);
     const majors = college ? college.majors : props.filterOptions.colleges.flatMap((c) => c.majors);
     return [{ label: 'All Majors', value: '' }, ...majors.map((m) => ({ label: m.name, value: m.id }))];
@@ -76,7 +121,9 @@ const yearLevelOptions = computed(() => [{ label: 'All Year Levels', value: '' }
 // filters. collegeToMajorIds resolves College/Program → Major ids
 // since Section only stores major_id, not college_id directly.
 const collegeToMajorIds = computed(() => {
-    if (!form.value.college_id) return null;
+    // GenEd Faculty has no majors/sections of its own — treat it like "no
+    // College selected" here so it doesn't wipe out the Section list.
+    if (!form.value.college_id || form.value.college_id === GENED_COLLEGE_VALUE) return null;
     const college = props.filterOptions.colleges.find((c) => c.id === form.value.college_id);
     return college ? new Set(college.majors.map((m) => m.id)) : new Set();
 });
@@ -101,10 +148,54 @@ watch(sectionOptions, (options) => {
     if (form.value.section_id && ! options.some((o) => o.value === form.value.section_id)) {
         form.value.section_id = '';
     }
+    const validIds = new Set(options.map((o) => o.value));
+    sectionIds.value = sectionIds.value.filter((id) => validIds.has(id));
 });
 const sectionTypeOptions = [{ label: 'All Types', value: '' }, { label: 'Regular', value: 'Regular' }, { label: 'Irregular', value: 'Irregular' }];
-const facultyOptions = computed(() => [{ label: 'All Faculty', value: '' }, ...props.filterOptions.faculty.map((f) => ({ label: f.name, value: f.id }))]);
-const roomOptions = computed(() => [{ label: 'All Rooms', value: '' }, ...props.filterOptions.rooms.map((r) => ({ label: r.room_name, value: r.id }))]);
+const facultyOptions = computed(() => {
+    // "General Education Faculty" picked: show only GenEd/Minor faculty
+    // (college_id null). A real College picked: show ONLY that College's
+    // own faculty — GenEd is no longer auto-mixed in, since it's now its
+    // own explicit choice above. No College picked: everyone.
+    const filtered = props.filterOptions.faculty.filter((f) => {
+        if (form.value.college_id === GENED_COLLEGE_VALUE) return f.college_id === null;
+        if (form.value.college_id) return f.college_id === form.value.college_id;
+        return true;
+    });
+    return [{ label: 'All Faculty', value: '' }, ...filtered.map((f) => ({ label: f.name, value: f.id }))];
+});
+
+// If a previously selected/picked Faculty no longer belongs to the
+// currently-selected College, drop it — mirrors the Section watcher below.
+watch(facultyOptions, (options) => {
+    const validIds = new Set(options.map((o) => o.value));
+    if (form.value.faculty_id && !validIds.has(form.value.faculty_id)) {
+        form.value.faculty_id = '';
+
+    }
+    facultyIds.value = facultyIds.value.filter((id) => validIds.has(id));
+});
+const roomOptions = computed(() => {
+    // Same self-narrowing pattern as Faculty: rooms with no college_id
+    // (gym, shared lecture halls — see Room::college()) are open to
+    ///every College and always stay listed; otherwise only the
+    // selected College/Program's own rooms show up, so "Schedule by
+    // Room" for CCS doesn't list Criminology's rooms.
+    const filtered = props.filterOptions.rooms.filter((r) => {
+        if (!form.value.college_id || form.value.college_id === GENED_COLLEGE_VALUE) return true;
+        return r.college_id === null || r.college_id === form.value.college_id;
+    });
+    return [{ label: 'All Rooms', value: '' }, ...filtered.map((r) => ({ label: r.room_name, value: r.id }))];
+});
+
+// If a previously picked Room no longer belongs to the currently-selected
+// College, drop it — mirrors the Section/Faculty watchers above.
+watch(roomOptions, (options) => {
+    const validIds = new Set(options.map((o) => o.value));
+    if (form.value.room_id && !validIds.has(form.value.room_id)) {
+        form.value.room_id = '';
+    }
+});
 
 const reportTypeOptions = computed(() => {
     const groups = [];
@@ -119,16 +210,216 @@ const reportTypeOptions = computed(() => {
 
 // Which selectors are relevant to the currently chosen report
 const needsFaculty = computed(() => ['schedule_by_faculty', 'faculty_teaching_load'].includes(reportType.value));
+// If "General Education Faculty" is selected and the report type is then
+// switched away from Schedule by Faculty (where collegeOptions drops that
+// entry), clear it back to "All Programs" rather than leave a College
+// filter pointing at a value that no longer exists in the dropdown.
+watch(collegeOptions, (options) => {
+    if (form.value.college_id && !options.some((o) => o.value === form.value.college_id)) {
+        form.value.college_id = '';
+    }
+});
+const facultyIsMultiple = computed(() => reportType.value === 'schedule_by_faculty');
+const facultyMultiOptions = computed(() => facultyOptions.value.filter((o) => o.value !== ''));
+
+watch(facultyIsMultiple, (isMultiple) => {
+    if (!isMultiple) facultyIds.value = [];
+});
 const needsRoom = computed(() => ['schedule_by_room', 'room_utilization', 'room_conflicts'].includes(reportType.value));
+// Grid (weekly-timetable-style) view, for the two report types whose rows
+// actually carry Day/Start/End — Schedule by Room and Schedule by Faculty.
+// Room Utilization/Conflicts and Faculty Teaching Load are plain summary
+// tables (no per-slot Day/Time), so the toggle only shows for the two
+// schedule reports themselves.
+// Grid only makes sense scoped to ONE Room or ONE Faculty member at a
+// time — mixing several into one grid would silently overlap/misattribute
+// cells (e.g. Room A's 1–5pm class and Room B's own 1–5pm class would
+// land in the identical grid cell with no way to tell them apart). So
+// Grid is only offered once a specific single pick is made:
+// - Schedule by Faculty always uses the multi-select (facultyIds) — Grid
+//   requires exactly one faculty checked, not "All Faculty" and not
+//   several at once.
+// - Schedule by Room uses the plain single Select (form.room_id) — Grid
+//   requires a specific Room chosen, not the "All Rooms" default.
+const gridEnabled = computed(() => {
+    if (reportType.value === 'schedule_by_faculty') return facultyIds.value.length === 1;
+    if (reportType.value === 'schedule_by_room') return !!form.value.room_id;
+    return false;
+});
+const viewMode = ref('table');
+watch(gridEnabled, (enabled) => {
+    if (!enabled) viewMode.value = 'table';
+});
+
+// Same 30-min-row + fixed-lunch-break grid math as
+// Components/Scheduling/RoomGrid.vue (read-only mirror — no drag/drop,
+// no writes), driven by the schedulingWindow prop for whichever School
+// Year the selected Academic Year belongs to.
+const GRID_DAY_LABELS = { Mon: 'Mon', Tue: 'Tue', Wed: 'Wed', Thu: 'Thu', Fri: 'Fri', Sat: 'Sat', Sun: 'Sun' };
+const gridAllDays = computed(() => (props.schedulingWindow.available_days?.length ? props.schedulingWindow.available_days : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']));
+
+const toMinutes24 = (hhmm) => {
+    const [h, m] = (hhmm || '00:00').split(':').map(Number);
+    return h * 60 + (m || 0);
+};
+const toHHMM = (minutes) => {
+    const h = Math.floor(minutes / 60) % 24;
+    const m = minutes % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+const formatHourLabel = (hhmm) => {
+    const [h, m] = (hhmm || '00:00').split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+};
+// "5:00 PM" -> 1020 (minutes since midnight) — report rows carry the
+// already-12h-formatted string from the backend, not a raw sortable
+// "H:i" value, so this parses it back into the same minute space
+// toMinutes24()/hourRows use.
+const timeToMinutes12h = (label) => {
+    const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec((label || '').trim());
+    if (!match) return null;
+    let hours = parseInt(match[1], 10) % 12;
+    if (match[3].toUpperCase() === 'PM') hours += 12;
+    return hours * 60 + parseInt(match[2], 10);
+};
+
+const gridIntervalMinutes = computed(() => props.schedulingWindow.interval_minutes || 30);
+
+const gridIsLunchRow = (hour) => {
+    const lunchStart = toMinutes24(props.schedulingWindow.lunch_start || '12:00');
+    const lunchEnd = toMinutes24(props.schedulingWindow.lunch_end || '13:00');
+    const slotStart = toMinutes24(hour);
+    const slotEnd = slotStart + gridIntervalMinutes.value;
+    return slotStart < lunchEnd && slotEnd > lunchStart;
+};
+const gridFormatSlotRange = (hhmm) => `${formatHourLabel(hhmm)} – ${formatHourLabel(toHHMM(toMinutes24(hhmm) + gridIntervalMinutes.value))}`;
+
+const gridHourRows = computed(() => {
+    const start = toMinutes24(props.schedulingWindow.start_time || '07:00');
+    const end = toMinutes24(props.schedulingWindow.end_time || '17:00');
+    const step = gridIntervalMinutes.value;
+    const rows = [];
+    for (let t = start; t < end; t += step) rows.push(toHHMM(t));
+    return rows.length ? rows : ['07:00', '07:30', '08:00'];
+});
+
+const gridLunchRowIndices = computed(() => gridHourRows.value.reduce((acc, hour, idx) => (gridIsLunchRow(hour) ? [...acc, idx] : acc), []));
+const gridIsFirstLunchRow = (rowIndex) => gridLunchRowIndices.value[0] === rowIndex;
+const gridLunchSpan = computed(() => gridLunchRowIndices.value.length || 1);
+const gridLunchRangeLabel = computed(() => `${formatHourLabel(props.schedulingWindow.lunch_start || '12:00')} – ${formatHourLabel(props.schedulingWindow.lunch_end || '13:00')}`);
+
+// Only the days that actually appear in this report's rows, in
+// calendar order — a room/faculty with no Saturday classes doesn't
+// need an empty Saturday column.
+const gridDays = computed(() => {
+    const present = new Set();
+    (props.report?.rows ?? []).forEach((row) => (row.Day || '').split(',').map((d) => d.trim()).filter(Boolean).forEach((d) => present.add(d)));
+    return gridAllDays.value.filter((d) => present.has(d));
+});
+
+// One block per (day, row) this report's rows actually occupy —
+// startIndex/span computed the same way RoomGrid.vue computes them for
+// its own draggable blocks, just read-only here.
+const gridBlocks = computed(() => {
+    const rows = props.report?.rows ?? [];
+    const gridStart = toMinutes24(gridHourRows.value[0] || '07:00');
+    const step = gridIntervalMinutes.value;
+    const blocks = [];
+
+    rows.forEach((row) => {
+        const startMin = timeToMinutes12h(row.Start);
+        const endMin = timeToMinutes12h(row.End);
+        if (startMin === null || endMin === null) return;
+
+        const startIndex = Math.max(0, Math.round((startMin - gridStart) / step));
+        const span = Math.max(1, Math.round((endMin - startMin) / step));
+
+        (row.Day || '').split(',').map((d) => d.trim()).filter(Boolean).forEach((day) => {
+            if (!gridDays.value.includes(day)) return;
+            blocks.push({ ...row, day, startIndex, span });
+        });
+    });
+
+    return blocks;
+});
+
+const gridBlockAt = (day, rowIndex) => gridBlocks.value.find((b) => b.day === day && b.startIndex === rowIndex);
+const gridIsCovered = (day, rowIndex) => gridBlocks.value.some((b) => b.day === day && rowIndex > b.startIndex && rowIndex < b.startIndex + b.span);
+
+// Grid cell label: Room report shows Subject/Section/Faculty; Faculty
+// report shows Subject/Section/Room — whichever the row doesn't already
+// name in its own column heading.
+function gridCellLabel(row) {
+    if (!row) return null;
+    if (reportType.value === 'schedule_by_room') {
+        return { line1: row.Subject, line2: row.Section, line3: row.Faculty };
+    }
+    return { line1: row.Subject, line2: row.Section, line3: row.Room };
+}
 const needsSection = computed(() => ['schedule_by_section', 'section_subjects'].includes(reportType.value));
+// Major / Year Level / Section Type only matter for reports scoped to a
+// Section (by Program, year, or regular/irregular) — Room- and
+// Faculty-centric reports don't need them: e.g. "Schedule by Room" only
+// needs Term + College/Program (to narrow the Room list) + the Room
+// itself, not Year Level or Section Type on top of that. No report type
+// selected yet still shows the full set, so the form isn't empty before
+// a choice is made.
+const ROOM_OR_FACULTY_REPORT_TYPES = ['schedule_by_room', 'room_utilization', 'room_conflicts', 'schedule_by_faculty', 'faculty_teaching_load'];
+const showProgramScopedFilters = computed(() => !reportType.value || !ROOM_OR_FACULTY_REPORT_TYPES.includes(reportType.value));
+
+// Clear Major/Year Level/Section Type when they become hidden for the
+// newly-picked report type, so a stale filter from an earlier report
+// doesn't silently narrow results the person can no longer see or edit.
+watch(showProgramScopedFilters, (visible) => {
+    if (!visible) {
+        form.value.major_id = '';
+        form.value.year_level = '';
+        if (!forcesIrregular.value) form.value.section_type = '';
+    }
+});
+// Only Schedule by Section gets the multi-pick behavior; section_subjects
+// keeps the existing single-section select as-is.
+const sectionIsMultiple = computed(() => reportType.value === 'schedule_by_section');
+
+// Same self-filtering as sectionOptions, but as a plain array (no "All
+// Sections" placeholder entry) for the MultiSelect.
+const sectionMultiOptions = computed(() => sectionOptions.value.filter((o) => o.value !== ''));
+
+watch(sectionIsMultiple, (isMultiple) => {
+    if (!isMultiple) sectionIds.value = [];
+});
 const forcesIrregular = computed(() => ['irregular_sections', 'irregular_merge_report'].includes(reportType.value));
 
+// Builds the querystring payload, swapping in section_id[] (the multi-pick
+// list) instead of the plain section_id whenever Schedule by Section's
+// multi-select mode is active.
+function buildQuery() {
+    const query = { ...form.value, term: selectedTerm.value, report_type: reportType.value };
+    // GENED_COLLEGE_VALUE only exists to filter the Faculty picker on the
+    // client — it isn't a real College/Program id, so never send it to the
+    // backend (which would just match nothing and return an empty report).
+    if (query.college_id === GENED_COLLEGE_VALUE) {
+        query.college_id = '';
+    }
+    if (sectionIsMultiple.value) {
+        query.section_id = sectionIds.value;
+    }
+    if (facultyIsMultiple.value) {
+        query.faculty_id = facultyIds.value;
+    }
+    return query;
+}
+
 function generate() {
-    router.get(route('reports'), { ...form.value, term: selectedTerm.value, report_type: reportType.value }, { preserveState: true, preserveScroll: true });
+    router.get(route('reports'), buildQuery(), { preserveState: true, preserveScroll: true });
 }
 
 function resetFilters() {
     form.value = { academic_year: '', semester: '', college_id: '', major_id: '', year_level: '', section_id: '', section_type: '', faculty_id: '', room_id: '' };
+    sectionIds.value = [];
+    facultyIds.value = [];
     selectedTerm.value = 'all';
     reportType.value = '';
     // Explicitly send term=all (not an empty query) so this always
@@ -145,8 +436,7 @@ function printReport() {
     // screen — rather than window.print()-ing the SPA page itself,
     // which used to print the app's own chrome/columns instead of a
     // proper school-letterhead document.
-    const query = { ...form.value, term: selectedTerm.value, report_type: reportType.value };
-    window.open(route('reports.print', query), '_blank');
+    window.open(route('reports.print', buildQuery()), '_blank');
 }
 
 function exportCsv() {
@@ -175,6 +465,11 @@ function statusSeverity(value) {
         Conflict: 'danger',
         Independent: 'info',
         Draft: 'secondary',
+        // Scheduling Conflicts report: Hours Mismatch rows that were
+        // already confirmed via "Save Anyway" (hours_confirmed) show
+        // as Acknowledged instead of the default Unresolved red flag.
+        Unresolved: 'danger',
+        Acknowledged: 'warn',
     };
     return map[value] || null;
 }
@@ -265,36 +560,66 @@ const summaryCards = computed(() => [
                         <Select v-model="form.semester" :options="semesterOptions" optionLabel="label" optionValue="value" placeholder="All Semesters" showClear class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div>
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Report Type</label>
+                        <Select v-model="reportType" :options="reportTypeOptions" optionLabel="label" optionValue="value" optionGroupLabel="label" optionGroupChildren="items" placeholder="Select Report" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                    </div>
+                    <div>
                         <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">College / Program</label>
                         <Select v-model="form.college_id" :options="collegeOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
-                    <div>
+                    <div v-if="showProgramScopedFilters">
                         <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Major</label>
                         <Select v-model="form.major_id" :options="majorOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
-                    <div>
+                    <div v-if="showProgramScopedFilters">
                         <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Year Level</label>
                         <Select v-model="form.year_level" :options="yearLevelOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
-                    <div>
+                    <div v-if="showProgramScopedFilters">
                         <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Section Type</label>
                         <Select v-model="form.section_type" :disabled="forcesIrregular" :options="sectionTypeOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsSection">
-                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Section</label>
-                        <Select v-model="form.section_id" :options="sectionOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                            Section
+                            <span v-if="sectionIsMultiple" class="font-normal normal-case" :class="isDark ? 'text-slate-500' : 'text-slate-400'">— pick any combination; each prints as its own section</span>
+                        </label>
+                        <MultiSelect
+                            v-if="sectionIsMultiple"
+                            v-model="sectionIds"
+                            :options="sectionMultiOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            display="chip"
+                            placeholder="All Sections"
+                            class="neu-inset w-full mt-1 !rounded-xl !border-none"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                        />
+                        <Select v-else v-model="form.section_id" :options="sectionOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsFaculty">
-                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Faculty</label>
-                        <Select v-model="form.faculty_id" :options="facultyOptions" optionLabel="label" optionValue="value" filter class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
+                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                            Faculty
+                            <span v-if="facultyIsMultiple" class="font-normal normal-case" :class="isDark ? 'text-slate-500' : 'text-slate-400'">— pick any combination; each prints as its own faculty</span>
+                        </label>
+                        <MultiSelect
+                            v-if="facultyIsMultiple"
+                            v-model="facultyIds"
+                            :options="facultyMultiOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            filter
+                            display="chip"
+                            placeholder="All Faculty"
+                            class="neu-inset w-full mt-1 !rounded-xl !border-none"
+                            :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                        />
+                        <Select v-else v-model="form.faculty_id" :options="facultyOptions" optionLabel="label" optionValue="value" filter class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                     <div v-if="needsRoom">
                         <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Room</label>
                         <Select v-model="form.room_id" :options="roomOptions" optionLabel="label" optionValue="value" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="text-xs font-semibold" :class="isDark ? 'text-slate-400' : 'text-slate-500'">Report Type</label>
-                        <Select v-model="reportType" :options="reportTypeOptions" optionLabel="label" optionValue="value" optionGroupLabel="label" optionGroupChildren="items" placeholder="Select Report" class="neu-inset w-full mt-1 !rounded-xl !border-none" :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }" />
                     </div>
                 </div>
                 <div class="mt-5 flex gap-2">
@@ -333,6 +658,10 @@ const summaryCards = computed(() => [
                         <p class="text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'" v-if="activeFiltersLabel">{{ activeFiltersLabel }}</p>
                     </div>
                     <div class="flex gap-2">
+                        <div v-if="gridEnabled" class="neu-inset flex rounded-xl p-0.5">
+                            <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'table' ? 'bg-emerald-500 text-white' : (isDark ? 'text-slate-400' : 'text-slate-500')" @click="viewMode = 'table'">Table</button>
+                            <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'grid' ? 'bg-emerald-500 text-white' : (isDark ? 'text-slate-400' : 'text-slate-500')" @click="viewMode = 'grid'">Grid</button>
+                        </div>
                         <Button label="Print" icon="pi pi-print" severity="secondary" outlined class="report-btn report-btn--print" @click="printReport" />
                         <Button label="Export Excel" icon="pi pi-file-excel" severity="secondary" outlined class="report-btn report-btn--export" @click="exportCsv" :disabled="!report.rows.length" />
                     </div>
@@ -348,7 +677,7 @@ const summaryCards = computed(() => [
                 <p v-if="!report.rows.length" class="py-10 text-center italic" :class="isDark ? 'text-slate-500' : 'text-slate-400'">{{ report.empty_message }}</p>
 
                 <DataTable
-                    v-else
+                    v-else-if="viewMode === 'table'"
                     :value="report.rows"
                     class="neu-inset neu-table mt-4 rounded-xl overflow-hidden"
                     :class="isDark ? 'neu-table-dark' : ''"
@@ -364,6 +693,78 @@ const summaryCards = computed(() => [
                         </template>
                     </Column>
                 </DataTable>
+
+                <!-- Grid (weekly-timetable) view — same 30-min-row,
+                     rowspan-block, merged-lunch-row layout as
+                     Components/Scheduling/RoomGrid.vue's own timetable,
+                     just read-only (no drag/drop, no writes) and built
+                     from this report's rows instead of one Room's live
+                     schedule. -->
+                <div v-else class="mt-4 overflow-x-auto rounded-xl border border-slate-300">
+                    <div
+                        class="grid text-[13px]"
+                        :style="{
+                            gridTemplateColumns: `92px repeat(${gridDays.length}, minmax(140px, 1fr))`,
+                            gridTemplateRows: `36px repeat(${gridHourRows.length}, 26px)`,
+                        }"
+                    >
+                        <!-- Header row -->
+                        <div class="border-b border-r border-slate-300 bg-slate-100"></div>
+                        <div v-for="day in gridDays" :key="`h-${day}`" class="flex items-center justify-center border-b border-r border-slate-300 bg-slate-100 font-bold text-slate-700">
+                            {{ GRID_DAY_LABELS[day] || day }}
+                        </div>
+
+                        <!-- Time labels -->
+                        <template v-for="(hour, rowIndex) in gridHourRows" :key="`t-${hour}`">
+                            <div
+                                v-if="!gridIsLunchRow(hour) || gridIsFirstLunchRow(rowIndex)"
+                                class="flex items-center justify-end whitespace-nowrap border-b border-r border-slate-300 pr-1.5 text-[9px] leading-none"
+                                :class="gridIsLunchRow(hour) ? 'font-bold text-amber-700' : (hour.endsWith(':00') ? 'font-semibold text-slate-700' : 'font-medium text-slate-500')"
+                                :style="{ gridColumn: 1, gridRow: gridIsLunchRow(hour) ? `${rowIndex + 2} / span ${gridLunchSpan}` : rowIndex + 2 }"
+                            >
+                                {{ gridIsLunchRow(hour) ? gridLunchRangeLabel : gridFormatSlotRange(hour) }}
+                            </div>
+                        </template>
+
+                        <!-- Cells + blocks -->
+                        <template v-for="(day, dIndex) in gridDays" :key="`col-${day}`">
+                            <template v-for="(hour, rowIndex) in gridHourRows" :key="`cell-${day}-${hour}`">
+                                <div
+                                    v-if="!gridIsCovered(day, rowIndex) && (!gridIsLunchRow(hour) || gridIsFirstLunchRow(rowIndex))"
+                                    class="relative border-b border-r border-slate-300"
+                                    :class="gridIsLunchRow(hour) ? 'bg-amber-100' : ''"
+                                    :style="{
+                                        gridColumn: dIndex + 2,
+                                        gridRow: gridIsLunchRow(hour)
+                                            ? `${rowIndex + 2} / span ${gridLunchSpan}`
+                                            : (gridBlockAt(day, rowIndex) ? `${rowIndex + 2} / span ${gridBlockAt(day, rowIndex).span}` : rowIndex + 2),
+                                    }"
+                                >
+                                    <div
+                                        v-if="gridBlockAt(day, rowIndex)"
+                                        class="absolute inset-0.5 overflow-hidden rounded-md px-2 py-1 text-[11px] leading-tight"
+                                        :class="isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'"
+                                    >
+                                        <p class="truncate font-semibold" :class="isDark ? 'text-emerald-300' : 'text-emerald-700'">{{ gridCellLabel(gridBlockAt(day, rowIndex)).line1 }}</p>
+                                        <p class="truncate" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ gridCellLabel(gridBlockAt(day, rowIndex)).line2 }}</p>
+                                        <p class="truncate text-[10px]" :class="isDark ? 'text-slate-500' : 'text-slate-400'">{{ gridCellLabel(gridBlockAt(day, rowIndex)).line3 }}</p>
+                                    </div>
+                                </div>
+                            </template>
+                        </template>
+
+                        <!-- Merged LUNCH banner -->
+                        <template v-for="(hour, rowIndex) in gridHourRows" :key="`lunch-${hour}`">
+                            <div
+                                v-if="gridIsLunchRow(hour) && gridIsFirstLunchRow(rowIndex)"
+                                class="pointer-events-none flex select-none items-center justify-center text-xs font-bold tracking-wider text-amber-800"
+                                :style="{ gridColumn: `2 / span ${gridDays.length}`, gridRow: `${rowIndex + 2} / span ${gridLunchSpan}` }"
+                            >
+                                LUNCH
+                            </div>
+                        </template>
+                    </div>
+                </div>
             </div>
 
             <div v-else class="neu-card mt-6 rounded-2xl p-6 transition-colors duration-300">
