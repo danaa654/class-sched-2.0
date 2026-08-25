@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import InputText from 'primevue/inputtext';
 import Password from 'primevue/password';
@@ -57,6 +57,66 @@ const submitLogin = () => {
         onFinish: () => loginForm.reset('password'),
     });
 };
+
+// LIVE RATE-LIMIT COUNTDOWN — the backend's "Too many login attempts.
+// Please try again in :seconds seconds." message (see LoginRequest::
+// ensureIsNotRateLimited()) is a static string frozen at the moment
+// of the failed request; it never counted down on its own and the
+// only way to see an updated number was to resubmit/refresh. This
+// parses the seconds out of that message once, then ticks a local
+// timer down every second and clears the error (re-enabling the
+// form) the moment it reaches zero, without another request.
+const throttleSecondsRemaining = ref(null);
+let throttleInterval = null;
+
+const parseThrottleSeconds = (message) => {
+    const match = message?.match(/(\d+)\s+seconds?/);
+    return match ? parseInt(match[1], 10) : null;
+};
+
+const clearThrottleCountdown = () => {
+    if (throttleInterval) {
+        clearInterval(throttleInterval);
+        throttleInterval = null;
+    }
+    throttleSecondsRemaining.value = null;
+};
+
+const startThrottleCountdown = (seconds) => {
+    clearThrottleCountdown();
+    throttleSecondsRemaining.value = seconds;
+    throttleInterval = setInterval(() => {
+        if (throttleSecondsRemaining.value <= 1) {
+            clearThrottleCountdown();
+            loginForm.clearErrors('email');
+        } else {
+            throttleSecondsRemaining.value -= 1;
+        }
+    }, 1000);
+};
+
+watch(
+    () => loginForm.errors.email,
+    (message) => {
+        const seconds = parseThrottleSeconds(message);
+        if (seconds) {
+            startThrottleCountdown(seconds);
+        } else {
+            clearThrottleCountdown();
+        }
+    }
+);
+
+onBeforeUnmount(clearThrottleCountdown);
+
+// What the error banner actually shows: while the countdown is
+// running, the live ticking count; otherwise, whatever the backend
+// last sent (invalid credentials, validation errors, etc.).
+const loginEmailError = computed(() =>
+    throttleSecondsRemaining.value !== null
+        ? `Too many login attempts. Please try again in ${throttleSecondsRemaining.value} second${throttleSecondsRemaining.value === 1 ? '' : 's'}.`
+        : loginForm.errors.email
+);
 
 const forgotForm = useForm({
     email: '',
@@ -118,12 +178,12 @@ const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null,
 
                         <form class="mt-6 flex flex-col gap-5" @submit.prevent="submitLogin">
                             <Message
-                                v-if="loginForm.errors.email"
+                                v-if="loginEmailError"
                                 severity="error"
                                 :closable="false"
                                 :class="isDark ? '!border-red-400/30 !bg-red-400/10 !text-red-200' : '!border-red-300 !bg-red-50 !text-red-700'"
                             >
-                                {{ loginForm.errors.email }}
+                                {{ loginEmailError }}
                             </Message>
 
                             <div class="flex flex-col gap-2">
@@ -175,10 +235,11 @@ const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null,
 
                             <Button
                                 type="submit"
-                                label="Login"
+                                :label="throttleSecondsRemaining !== null ? `Try again in ${throttleSecondsRemaining}s` : 'Login'"
                                 class="!w-full !border-[#2563EB]/60 !bg-[#2563EB] shadow-[0_8px_24px_rgba(37,99,235,0.45)]"
                                 size="large"
                                 :loading="loginForm.processing"
+                                :disabled="throttleSecondsRemaining !== null"
                             />
                         </form>
                     </div>

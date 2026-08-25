@@ -378,20 +378,26 @@ class FacultyController extends Controller
     }
 
     /**
-     * Determine the next sequential Faculty ID, e.g. FAC-2026-0001.
+     * Determine the next sequential Faculty ID, e.g. FAC-0019.
      *
-     * This is only a suggestion pre-filled into the Add Faculty form —
-     * the registrar/admin can still edit it freely before saving, and
-     * uniqueness is always re-checked server-side on store.
+     * This is only a suggestion pre-filled into the Add Faculty /
+     * Request New Faculty forms — the registrar/admin can still edit
+     * it freely before saving, and uniqueness is always re-checked
+     * server-side on store. Matches the existing FAC-NNNN roster
+     * numbering (see the seeded faculty_id values) rather than the
+     * FAC-{year}-NNNN format previously suggested here, which never
+     * matched what was actually on the roster.
      */
     private function nextFacultyId(): string
     {
-        $year = now()->year;
-        $prefix = "FAC-{$year}-";
+        $prefix = 'FAC-';
 
         $lastId = Faculty::withTrashed()
             ->where('faculty_id', 'like', "{$prefix}%")
-            ->orderByDesc('faculty_id')
+            // Numeric-aware sort, not lexical — lexical would rank
+            // "FAC-100" before "FAC-99". CAST(... AS UNSIGNED) pulls
+            // just the digits after the prefix.
+            ->orderByRaw('CAST(SUBSTRING(faculty_id, ?) AS UNSIGNED) DESC', [strlen($prefix) + 1])
             ->value('faculty_id');
 
         $nextNumber = $lastId

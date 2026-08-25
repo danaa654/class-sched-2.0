@@ -126,4 +126,51 @@ class DepartmentController extends Controller
 
         return redirect()->route('academic-structure')->with('success', 'Department restored successfully.');
     }
+
+    /**
+     * Permanently delete an already-soft-deleted department — the "clean
+     * it up for good" action for rows already sitting in the Deleted
+     * state. Same gate as the rest of Academic Structure. Only reachable
+     * for a row that's already trashed; a still-active department must
+     * go through destroy() first.
+     *
+     * Re-runs the same attachment check as destroy(): something could
+     * have been re-pointed at this department's id after it was soft
+     * deleted, and a permanent delete can't be undone the way the soft
+     * delete could.
+     */
+    public function forceDelete(Request $request, int $department): RedirectResponse
+    {
+        $this->authorize('manage-academic-structure');
+
+        $record = Department::onlyTrashed()->findOrFail($department);
+
+        $blockers = [];
+
+        $majorCount = Major::query()->where('department_id', $record->id)->count();
+        if ($majorCount > 0) {
+            $blockers[] = $majorCount === 1 ? '1 major' : "{$majorCount} majors";
+        }
+
+        $roomCount = Room::query()->where('department_id', $record->id)->count();
+        if ($roomCount > 0) {
+            $blockers[] = $roomCount === 1 ? '1 room' : "{$roomCount} rooms";
+        }
+
+        $userCount = User::query()->where('department_id', $record->id)->count();
+        if ($userCount > 0) {
+            $blockers[] = $userCount === 1 ? '1 user' : "{$userCount} users";
+        }
+
+        if (! empty($blockers)) {
+            throw ValidationException::withMessages([
+                'code' => "This department can't be permanently deleted — it still has ".implode(', ', $blockers).' attached to it. Remove or reassign those first.',
+            ]);
+        }
+
+        $name = $record->name;
+        $record->forceDelete();
+
+        return redirect()->route('academic-structure')->with('success', "{$name} was permanently deleted.");
+    }
 }

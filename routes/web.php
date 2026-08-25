@@ -88,14 +88,17 @@ Route::middleware('auth')->group(function () {
     Route::put('/colleges/{college}', [CollegeController::class, 'update'])->name('colleges.update');
     Route::delete('/colleges/{college}', [CollegeController::class, 'destroy'])->name('colleges.destroy');
     Route::put('/colleges/{college}/restore', [CollegeController::class, 'restore'])->name('colleges.restore');
+    Route::delete('/colleges/{college}/force', [CollegeController::class, 'forceDelete'])->name('colleges.force-delete');
     Route::post('/departments', [DepartmentController::class, 'store'])->name('departments.store');
     Route::put('/departments/{department}', [DepartmentController::class, 'update'])->name('departments.update');
     Route::delete('/departments/{department}', [DepartmentController::class, 'destroy'])->name('departments.destroy');
     Route::put('/departments/{department}/restore', [DepartmentController::class, 'restore'])->name('departments.restore');
+    Route::delete('/departments/{department}/force', [DepartmentController::class, 'forceDelete'])->name('departments.force-delete');
     Route::post('/majors', [MajorController::class, 'store'])->name('majors.store');
     Route::put('/majors/{major}', [MajorController::class, 'update'])->name('majors.update');
     Route::delete('/majors/{major}', [MajorController::class, 'destroy'])->name('majors.destroy');
     Route::put('/majors/{major}/restore', [MajorController::class, 'restore'])->name('majors.restore');
+    Route::delete('/majors/{major}/force', [MajorController::class, 'forceDelete'])->name('majors.force-delete');
     Route::get('/subjects', [SubjectController::class, 'index'])->name('subjects');
     Route::post('/subjects', [SubjectController::class, 'store'])->name('subjects.store');
     Route::put('/subjects/{subject}', [SubjectController::class, 'update'])->name('subjects.update');

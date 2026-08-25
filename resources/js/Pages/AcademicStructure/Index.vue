@@ -211,6 +211,39 @@ const onRestoreCollege = (college) => {
     });
 };
 
+// PERMANENT DELETE — only ever shown for a row already in the Deleted
+// state (see the row Actions column below). CollegeController::forceDelete()
+// re-checks the same attachment guard as the soft delete, since something
+// could have been reassigned to this college's id since it was archived.
+const onForceDeleteCollege = (college) => {
+    Swal.fire({
+        title: 'Permanently delete this college?',
+        html: `<p><strong>${college.name}</strong> will be permanently removed. This cannot be undone.</p>
+               <p style="margin-top:8px;">If it still has departments, faculty, subjects, rooms, or users attached, this will be blocked until those are removed or reassigned.</p>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete permanently',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('colleges.force-delete', college.id), {
+                preserveScroll: true,
+                preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't permanently delete this college",
+                        text: errors.code ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#DC2626',
+                        confirmButtonText: 'Got it',
+                    });
+                },
+            });
+        }
+    });
+};
+
 /* ------------------------------------------------------------------ */
 /* Departments tab                                                     */
 /* ------------------------------------------------------------------ */
@@ -361,6 +394,38 @@ const onRestoreDepartment = (department) => {
     router.put(route('departments.restore', department.id), {}, {
         preserveScroll: true,
         preserveState: true,
+    });
+};
+
+// PERMANENT DELETE — only ever shown for a row already in the Deleted
+// state (see the row Actions column below). DepartmentController::forceDelete()
+// re-checks the same attachment guard as the soft delete.
+const onForceDeleteDepartment = (department) => {
+    Swal.fire({
+        title: 'Permanently delete this department?',
+        html: `<p><strong>${department.name}</strong> will be permanently removed. This cannot be undone.</p>
+               <p style="margin-top:8px;">If it still has majors, rooms, or users attached, this will be blocked until those are removed or reassigned.</p>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete permanently',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('departments.force-delete', department.id), {
+                preserveScroll: true,
+                preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't permanently delete this department",
+                        text: errors.code ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#DC2626',
+                        confirmButtonText: 'Got it',
+                    });
+                },
+            });
+        }
     });
 };
 
@@ -549,6 +614,38 @@ const onRestoreMajor = (major) => {
         preserveState: true,
     });
 };
+
+// PERMANENT DELETE — only ever shown for a row already in the Deleted
+// state (see the row Actions column below). MajorController::forceDelete()
+// re-checks the same attachment guard as the soft delete.
+const onForceDeleteMajor = (major) => {
+    Swal.fire({
+        title: 'Permanently delete this major?',
+        html: `<p><strong>${major.name}</strong> will be permanently removed. This cannot be undone.</p>
+               <p style="margin-top:8px;">If it still has sections, curriculums, or subjects attached, this will be blocked until those are removed or reassigned.</p>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#DC2626',
+        cancelButtonColor: '#64748B',
+        confirmButtonText: 'Yes, delete permanently',
+    }).then((result) => {
+        if (result.isConfirmed) {
+            router.delete(route('majors.force-delete', major.id), {
+                preserveScroll: true,
+                preserveState: true,
+                onError: (errors) => {
+                    Swal.fire({
+                        title: "Can't permanently delete this major",
+                        text: errors.code ?? 'Please try again.',
+                        icon: 'error',
+                        confirmButtonColor: '#DC2626',
+                        confirmButtonText: 'Got it',
+                    });
+                },
+            });
+        }
+    });
+};
 </script>
 
 <template>
@@ -675,7 +772,7 @@ const onRestoreMajor = (major) => {
                                             />
                                         </template>
                                     </Column>
-                                    <Column header="Actions" style="width: 9rem">
+                                    <Column header="Actions" style="width: 13rem">
                                         <template #body="{ data }">
                                             <div class="flex gap-1">
                                                 <template v-if="!data.deleted_at">
@@ -698,16 +795,26 @@ const onRestoreMajor = (major) => {
                                                         @click="onDeleteCollege(data)"
                                                     />
                                                 </template>
-                                                <Button
-                                                    v-else
-                                                    icon="pi pi-refresh"
-                                                    text
-                                                    rounded
-                                                    severity="success"
-                                                    size="small"
-                                                    label="Restore"
-                                                    @click="onRestoreCollege(data)"
-                                                />
+                                                <template v-else>
+                                                    <Button
+                                                        icon="pi pi-refresh"
+                                                        text
+                                                        rounded
+                                                        severity="success"
+                                                        size="small"
+                                                        label="Restore"
+                                                        @click="onRestoreCollege(data)"
+                                                    />
+                                                    <Button
+                                                        icon="pi pi-trash"
+                                                        text
+                                                        rounded
+                                                        severity="danger"
+                                                        size="small"
+                                                        label="Delete Permanently"
+                                                        @click="onForceDeleteCollege(data)"
+                                                    />
+                                                </template>
                                             </div>
                                         </template>
                                     </Column>
@@ -805,7 +912,7 @@ const onRestoreMajor = (major) => {
                                             />
                                         </template>
                                     </Column>
-                                    <Column header="Actions" style="width: 9rem">
+                                    <Column header="Actions" style="width: 13rem">
                                         <template #body="{ data }">
                                             <div class="flex gap-1">
                                                 <template v-if="!data.deleted_at">
@@ -828,16 +935,26 @@ const onRestoreMajor = (major) => {
                                                         @click="onDeleteDepartment(data)"
                                                     />
                                                 </template>
-                                                <Button
-                                                    v-else
-                                                    icon="pi pi-refresh"
-                                                    text
-                                                    rounded
-                                                    severity="success"
-                                                    size="small"
-                                                    label="Restore"
-                                                    @click="onRestoreDepartment(data)"
-                                                />
+                                                <template v-else>
+                                                    <Button
+                                                        icon="pi pi-refresh"
+                                                        text
+                                                        rounded
+                                                        severity="success"
+                                                        size="small"
+                                                        label="Restore"
+                                                        @click="onRestoreDepartment(data)"
+                                                    />
+                                                    <Button
+                                                        icon="pi pi-trash"
+                                                        text
+                                                        rounded
+                                                        severity="danger"
+                                                        size="small"
+                                                        label="Delete Permanently"
+                                                        @click="onForceDeleteDepartment(data)"
+                                                    />
+                                                </template>
                                             </div>
                                         </template>
                                     </Column>
@@ -936,7 +1053,7 @@ const onRestoreMajor = (major) => {
                                             />
                                         </template>
                                     </Column>
-                                    <Column header="Actions" style="width: 9rem">
+                                    <Column header="Actions" style="width: 13rem">
                                         <template #body="{ data }">
                                             <div class="flex gap-1">
                                                 <template v-if="!data.deleted_at">
@@ -959,16 +1076,26 @@ const onRestoreMajor = (major) => {
                                                         @click="onDeleteMajor(data)"
                                                     />
                                                 </template>
-                                                <Button
-                                                    v-else
-                                                    icon="pi pi-refresh"
-                                                    text
-                                                    rounded
-                                                    severity="success"
-                                                    size="small"
-                                                    label="Restore"
-                                                    @click="onRestoreMajor(data)"
-                                                />
+                                                <template v-else>
+                                                    <Button
+                                                        icon="pi pi-refresh"
+                                                        text
+                                                        rounded
+                                                        severity="success"
+                                                        size="small"
+                                                        label="Restore"
+                                                        @click="onRestoreMajor(data)"
+                                                    />
+                                                    <Button
+                                                        icon="pi pi-trash"
+                                                        text
+                                                        rounded
+                                                        severity="danger"
+                                                        size="small"
+                                                        label="Delete Permanently"
+                                                        @click="onForceDeleteMajor(data)"
+                                                    />
+                                                </template>
                                             </div>
                                         </template>
                                     </Column>

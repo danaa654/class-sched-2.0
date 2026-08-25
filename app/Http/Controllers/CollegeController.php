@@ -11,6 +11,7 @@ use App\Models\Room;
 use App\Models\Subject;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 class CollegeController extends Controller
@@ -102,5 +103,62 @@ class CollegeController extends Controller
         $record->restore();
 
         return redirect()->route('academic-structure')->with('success', 'College restored successfully.');
+    }
+
+    /**
+     * Permanently delete an already-soft-deleted college — the "clean it
+     * up for good" action for rows already sitting in the Deleted state.
+     * Administrator/Registrar only (same gate as the rest of Academic
+     * Structure). Only reachable for a row that's already trashed; a
+     * still-active college must go through destroy() first.
+     *
+     * Re-runs the same attachment check as destroy(): something could
+     * have been re-pointed at this college's id after it was soft
+     * deleted (e.g. a Department restored and reassigned here), and a
+     * permanent delete can't be undone the way the soft delete could.
+     */
+    public function forceDelete(Request $request, int $college): RedirectResponse
+    {
+        $this->authorize('manage-academic-structure');
+
+        $record = College::onlyTrashed()->findOrFail($college);
+
+        $blockers = [];
+
+        $departmentCount = Department::query()->where('college_id', $record->id)->count();
+        if ($departmentCount > 0) {
+            $blockers[] = $departmentCount === 1 ? '1 department' : "{$departmentCount} departments";
+        }
+
+        $facultyCount = Faculty::query()->where('college_id', $record->id)->count();
+        if ($facultyCount > 0) {
+            $blockers[] = $facultyCount === 1 ? '1 faculty member' : "{$facultyCount} faculty members";
+        }
+
+        $subjectCount = Subject::query()->where('college_id', $record->id)->count();
+        if ($subjectCount > 0) {
+            $blockers[] = $subjectCount === 1 ? '1 subject' : "{$subjectCount} subjects";
+        }
+
+        $roomCount = Room::query()->where('college_id', $record->id)->count();
+        if ($roomCount > 0) {
+            $blockers[] = $roomCount === 1 ? '1 room' : "{$roomCount} rooms";
+        }
+
+        $userCount = User::query()->where('college_id', $record->id)->count();
+        if ($userCount > 0) {
+            $blockers[] = $userCount === 1 ? '1 user' : "{$userCount} users";
+        }
+
+        if (! empty($blockers)) {
+            throw ValidationException::withMessages([
+                'code' => "This college can't be permanently deleted — it still has ".implode(', ', $blockers).' attached to it. Remove or reassign those first.',
+            ]);
+        }
+
+        $name = $record->name;
+        $record->forceDelete();
+
+        return redirect()->route('academic-structure')->with('success', "{$name} was permanently deleted.");
     }
 }

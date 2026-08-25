@@ -633,7 +633,7 @@ const summaryCards = computed(() => [
                             :bullets="[
                                 'Choose a Term (or Academic Year + Semester) and a Report Type, then click \'Generate Report\'.',
                                 'Some report types reveal extra filters — e.g. Faculty or Room — once selected.',
-                                'Use Print or Export Excel to save a generated report; reports themselves are not saved in the system.',
+                                'Use Print or Export CSV to save a generated report; reports themselves are not saved in the system.',
                             ]"
                         />
                     </h1>
@@ -792,7 +792,7 @@ const summaryCards = computed(() => [
                             @click="openBulkSendModal"
                         />
                         <Button label="Print" icon="pi pi-print" severity="secondary" outlined class="report-btn report-btn--print" @click="printReport" />
-                        <Button label="Export Excel" icon="pi pi-file-excel" severity="secondary" outlined class="report-btn report-btn--export" @click="exportCsv" :disabled="!report.rows.length" />
+                        <Button label="Export CSV" icon="pi pi-file-export" severity="secondary" outlined class="report-btn report-btn--export" @click="exportCsv" :disabled="!report.rows.length" />
                     </div>
                 </div>
 
@@ -961,7 +961,7 @@ const summaryCards = computed(() => [
 :global(.p-select-overlay.dark-scope .p-select-filter) { background: rgba(255, 255, 255, 0.06) !important; color: #F8FAFC !important; border-color: rgba(255, 255, 255, 0.15) !important; }
 :global(.p-select-overlay.dark-scope .p-select-empty-message) { color: #94A3B8 !important; }
 
-/* Print / Export Excel: on hover, tint the outline + text to a
+/* Print / Export CSV: on hover, tint the outline + text to a
    semantic color (green = print, blue = export) with a matching soft
    glow, instead of the generic gray outline hover. */
 .report-btn--print:hover:not(:disabled) {

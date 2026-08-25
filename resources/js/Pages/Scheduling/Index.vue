@@ -91,7 +91,11 @@ const quickActions = [
     { label: 'Generate All Schedules', icon: 'pi-bolt', href: 'scheduling.section-subjects', accent: true },
     { label: 'Validate Schedules', icon: 'pi-check-square', href: 'scheduling.section-subjects' },
     { label: 'Detect Conflicts', icon: 'pi-search', href: 'scheduling.section-subjects' },
-    { label: 'Export Master Schedule', icon: 'pi-download', href: null, disabled: true },
+    // Reuses the existing Master Schedule report (Reports > Scheduling)
+    // rather than a separate export — passing report_type in the query
+    // makes ReportsController generate it immediately on load, so this
+    // lands straight on the ready-to-print/export table.
+    { label: 'Export Master Schedule', icon: 'pi-download', href: 'reports', params: { report_type: 'master_schedule' } },
 ];
 </script>
 
@@ -270,7 +274,7 @@ const quickActions = [
                         :is="action.disabled ? 'span' : Link"
                         v-for="action in quickActions"
                         :key="action.label"
-                        :href="action.href ? route(action.href) : undefined"
+                        :href="action.href ? route(action.href, action.params) : undefined"
                         v-tooltip.top="action.disabled ? 'Coming soon' : undefined"
                         class="neu-card flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition-colors duration-300"
                         :class="[
@@ -291,8 +295,8 @@ const quickActions = [
                     </component>
                 </div>
                 <p class="mt-3 text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
-                    Generating, validating, and resolving schedules happens on the Section Subjects page — these
-                    shortcuts take you straight there.
+                    Generating, validating, and resolving schedules happens on the Section Subjects page, and the
+                    printable/exportable Master Schedule lives on Reports — these shortcuts take you straight there.
                 </p>
             </div>
 

@@ -394,11 +394,14 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         optionLabel="label"
                         optionValue="value"
                         filter
+                        appendTo="self"
                         filterPlaceholder="Search subject code or title"
                         placeholder="Select a subject"
                         :invalid="!!form.errors.subject_id"
                         class="w-full"
-                        :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
+                        :pt="{
+                            overlay: { class: isDark ? 'dark-scope' : '', style: { width: '100%', maxWidth: '100%' } },
+                        }"
                     />
                     <small v-if="form.errors.subject_id" class="text-red-500">
                         {{ form.errors.subject_id }}

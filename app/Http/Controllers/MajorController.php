@@ -136,4 +136,51 @@ class MajorController extends Controller
 
         return redirect()->route('academic-structure')->with('success', 'Major restored successfully.');
     }
+
+    /**
+     * Permanently delete an already-soft-deleted major — the "clean it
+     * up for good" action for rows already sitting in the Deleted state.
+     * Same gate as the rest of Academic Structure. Only reachable for a
+     * row that's already trashed; a still-active major must go through
+     * destroy() first.
+     *
+     * Re-runs the same attachment check as destroy(): something could
+     * have been re-pointed at this major's id after it was soft deleted,
+     * and a permanent delete can't be undone the way the soft delete
+     * could.
+     */
+    public function forceDelete(Request $request, int $major): RedirectResponse
+    {
+        $this->authorize('manage-academic-structure');
+
+        $record = Major::onlyTrashed()->findOrFail($major);
+
+        $blockers = [];
+
+        $sectionCount = Section::query()->where('major_id', $record->id)->count();
+        if ($sectionCount > 0) {
+            $blockers[] = $sectionCount === 1 ? '1 section' : "{$sectionCount} sections";
+        }
+
+        $curriculumCount = Curriculum::query()->where('major_id', $record->id)->count();
+        if ($curriculumCount > 0) {
+            $blockers[] = $curriculumCount === 1 ? '1 curriculum' : "{$curriculumCount} curriculums";
+        }
+
+        $subjectCount = Subject::query()->where('major_id', $record->id)->count();
+        if ($subjectCount > 0) {
+            $blockers[] = $subjectCount === 1 ? '1 subject' : "{$subjectCount} subjects";
+        }
+
+        if (! empty($blockers)) {
+            throw ValidationException::withMessages([
+                'code' => "This major can't be permanently deleted — it still has ".implode(', ', $blockers).' attached to it. Remove or reassign those first.',
+            ]);
+        }
+
+        $name = $record->name;
+        $record->forceDelete();
+
+        return redirect()->route('academic-structure')->with('success', "{$name} was permanently deleted.");
+    }
 }
