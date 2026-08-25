@@ -135,7 +135,7 @@ class ReportsService
      */
     public function generate(string $reportType, array $filters): array
     {
-        return match ($reportType) {
+        $result = match ($reportType) {
             'master_schedule' => $this->masterSchedule($filters),
             'schedule_by_section' => $this->scheduleBySection($filters),
             'schedule_by_faculty' => $this->scheduleByFaculty($filters),
@@ -153,6 +153,17 @@ class ReportsService
             'irregular_merge_report' => $this->irregularMergeReport($filters),
             default => ['title' => 'Unknown Report', 'columns' => [], 'rows' => [], 'note' => 'This report type does not exist.'],
         };
+
+        // Exposed at the top level (not just inside facultyMeta, which
+        // only gets set when exactly one faculty is selected) so the
+        // frontend can still resolve which AcademicTerm to bulk-send
+        // against when zero or multiple faculty are selected on the
+        // Schedule by Faculty report.
+        if ($reportType === 'schedule_by_faculty') {
+            $result['termId'] = $this->resolveAcademicTerm($filters)?->id;
+        }
+
+        return $result;
     }
 
     // ------------------------------------------------------------

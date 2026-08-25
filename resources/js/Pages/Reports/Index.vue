@@ -12,6 +12,7 @@ import Tag from 'primevue/tag';
 import Toast from 'primevue/toast';
 import InfoPopover from '@/Components/InfoPopover.vue';
 import SendScheduleModal from './Partials/SendScheduleModal.vue';
+import BulkSendScheduleModal from './Partials/BulkSendScheduleModal.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -72,6 +73,52 @@ const sendScheduleTerm = computed(() => {
 function openSendScheduleModal() {
     if (!sendScheduleFaculty.value || !sendScheduleTerm.value) return;
     showSendScheduleModal.value = true;
+}
+
+// "Send All" — bulk-sends to whatever's currently filtered/selected on
+// this report instead of one faculty at a time. Reuses facultyIds (the
+// multi-select already driving the table) and report.termId (exposed
+// by ReportsService::generate() regardless of how many faculty are
+// selected, unlike facultyMeta which only exists for exactly one).
+const showBulkSendModal = ref(false);
+
+const bulkSendTerm = computed(() => {
+    const termId = props.report?.termId;
+    if (!termId) return null;
+    return {
+        id: termId,
+        label: `${form.value.academic_year} · ${form.value.semester}`,
+    };
+});
+
+const bulkSendScopeLabel = computed(() => {
+    if (facultyIds.value.length > 0) {
+        if (facultyIds.value.length === 1) {
+            const match = props.filterOptions.faculty.find((f) => f.id === facultyIds.value[0]);
+            return match?.name || '1 selected faculty';
+        }
+        return `${facultyIds.value.length} selected faculty`;
+    }
+    if (form.value.college_id) {
+        const college = props.filterOptions.colleges.find((c) => c.id === form.value.college_id);
+        return college ? `All finalized faculty in ${college.name}` : 'All Active Faculty';
+    }
+    return 'All Active Faculty (entire school)';
+});
+
+// Only shown when the single-faculty flow doesn't apply — i.e. zero or
+// several faculty selected, matching how facultyMeta/sendScheduleFaculty
+// only populates for exactly one.
+const showBulkSendButton = computed(() => reportType.value === 'schedule_by_faculty' && !sendScheduleFaculty.value);
+
+function openBulkSendModal() {
+    if (!bulkSendTerm.value) return;
+    showBulkSendModal.value = true;
+}
+
+function onBulkSent() {
+    showBulkSendModal.value = false;
+    router.reload({ only: ['report'] });
 }
 
 function onScheduleSent() {
@@ -735,6 +782,15 @@ const summaryCards = computed(() => [
                             class="report-btn report-btn--send"
                             @click="openSendScheduleModal"
                         />
+                        <Button
+                            v-if="showBulkSendButton"
+                            label="Send All"
+                            icon="pi pi-send"
+                            severity="success"
+                            class="report-btn report-btn--send"
+                            :disabled="!bulkSendTerm"
+                            @click="openBulkSendModal"
+                        />
                         <Button label="Print" icon="pi pi-print" severity="secondary" outlined class="report-btn report-btn--print" @click="printReport" />
                         <Button label="Export Excel" icon="pi pi-file-excel" severity="secondary" outlined class="report-btn report-btn--export" @click="exportCsv" :disabled="!report.rows.length" />
                     </div>
@@ -852,6 +908,15 @@ const summaryCards = computed(() => [
             :is-finalized="!!report?.facultyMeta?.is_finalized"
             @close="showSendScheduleModal = false"
             @sent="onScheduleSent"
+        />
+
+        <BulkSendScheduleModal
+            :show="showBulkSendModal"
+            :faculty-ids="facultyIds"
+            :academic-term="bulkSendTerm"
+            :scope-label="bulkSendScopeLabel"
+            @close="showBulkSendModal = false"
+            @sent="onBulkSent"
         />
 
         <Toast />

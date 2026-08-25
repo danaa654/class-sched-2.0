@@ -60,7 +60,17 @@ class FacultyScheduleEmailController extends Controller
 
         $term = AcademicTerm::findOrFail($request->integer('academic_term_id'));
 
-        $result = $this->service->bulkSend($term, $request->user());
+        // faculty_ids is optional: omitted/empty means "every Active
+        // faculty" (the original spec 15/16 behavior); present means
+        // scope the send to whatever the Reports page currently has
+        // filtered/selected (e.g. one college, or a specific
+        // multi-select of faculty).
+        $facultyIds = $request->input('faculty_ids');
+        $facultyIds = is_array($facultyIds) && count($facultyIds) > 0
+            ? array_map('intval', $facultyIds)
+            : null;
+
+        $result = $this->service->bulkSend($term, $request->user(), $facultyIds);
 
         return back()->with('success', "{$result['queued']} emails queued.")->with('bulkSendResult', $result);
     }

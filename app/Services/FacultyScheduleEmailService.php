@@ -175,16 +175,23 @@ class FacultyScheduleEmailService
     }
 
     /**
-     * Bulk-send finalized schedules to every faculty with a valid email
-     * for the term (spec section 15/16). Returns the counts the
-     * confirmation modal displays, and queues one job per eligible
-     * faculty member.
+     * Bulk-send finalized schedules to faculty with a valid email for
+     * the term (spec section 15/16). By default targets every Active
+     * faculty member; pass $facultyIds to scope it to whatever the
+     * Reports page currently has filtered/selected (e.g. one college,
+     * or a specific multi-select of faculty) instead of the whole
+     * school. Returns the counts the confirmation modal displays, and
+     * queues one job per eligible faculty member.
      *
+     * @param  array<int>|null  $facultyIds
      * @return array{total: int, with_email: int, missing_email: int, queued: int}
      */
-    public function bulkSend(AcademicTerm $term, User $sender): array
+    public function bulkSend(AcademicTerm $term, User $sender, ?array $facultyIds = null): array
     {
-        $faculty = Faculty::query()->where('status', 'Active')->get();
+        $faculty = Faculty::query()
+            ->where('status', 'Active')
+            ->when($facultyIds, fn ($q) => $q->whereIn('id', $facultyIds))
+            ->get();
 
         $missingEmail = 0;
         $queued = 0;
