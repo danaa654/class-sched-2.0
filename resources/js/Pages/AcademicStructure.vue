@@ -217,7 +217,6 @@ const teachers = [];
                                             No teachers found.
                                         </div>
                                     </template>
-                                    <Column field="employeeId" header="Employee ID" />
                                     <Column field="name" header="Teacher" />
                                     <Column field="department" header="Department" />
                                     <Column field="specialization" header="Specialization" />

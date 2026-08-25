@@ -5,7 +5,6 @@ import { useToast } from 'primevue/usetoast';
 import Swal from 'sweetalert2';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Card from 'primevue/card';
-import Toolbar from 'primevue/toolbar';
 import InputText from 'primevue/inputtext';
 import InputNumber from 'primevue/inputnumber';
 import Textarea from 'primevue/textarea';
@@ -1321,9 +1320,20 @@ const onUnlockSection = (section) => {
                 :pt="{ body: { class: '!bg-transparent' } }"
             >
                 <template #content>
-                    <!-- Top Toolbar -->
-                    <Toolbar class="!bg-transparent !border-0 !px-0 !pt-0 !pb-4 flex-wrap gap-3 neu-form">
-                        <template #start>
+                    <!-- Top Toolbar. Built as a plain flex row (not
+                         PrimeVue's Toolbar #start/#end slots) because
+                         Toolbar's default justify-content: space-between
+                         combined with flex-wrap meant that once the
+                         filters (search + 4 selects) wrapped onto a
+                         second line, "Add Section" became the lone item
+                         on that line — and space-between collapses a
+                         single wrapped item to the left instead of
+                         keeping it right-aligned. Splitting filters and
+                         actions into two explicit flex groups, with the
+                         actions group pinned via lg:ml-auto, keeps "Add
+                         Section" on the right at every width. -->
+                    <div class="flex flex-col gap-3 pb-4 lg:flex-row lg:items-center lg:justify-between neu-form">
+                        <div class="flex flex-wrap items-center gap-3">
                             <span class="relative w-full sm:w-80">
                                 <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
                                 <InputText
@@ -1384,22 +1394,20 @@ const onUnlockSection = (section) => {
                                     </span>
                                 </template>
                             </Select>
-                        </template>
-                        <template #end>
-                            <div class="flex items-center gap-2">
-                                <Button
-                                    icon="pi pi-refresh"
-                                    severity="secondary"
-                                    text
-                                    class="neu-icon-well !rounded-full"
-                                    :loading="loading"
-                                    @click="onRefresh"
-                                    aria-label="Refresh"
-                                />
-                                <Button label="Add Section" icon="pi pi-plus" severity="success" @click="openAdd" />
-                            </div>
-                        </template>
-                    </Toolbar>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0 lg:ml-auto">
+                            <Button
+                                icon="pi pi-refresh"
+                                severity="secondary"
+                                text
+                                class="neu-icon-well !rounded-full"
+                                :loading="loading"
+                                @click="onRefresh"
+                                aria-label="Refresh"
+                            />
+                            <Button label="Add Section" icon="pi pi-plus" severity="success" @click="openAdd" />
+                        </div>
+                    </div>
 
                     <!-- Active Filter Indicator -->
                     <div v-if="hasActiveFilters" class="flex flex-wrap items-center gap-2 pb-4 -mt-2">

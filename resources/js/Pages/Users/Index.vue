@@ -36,7 +36,6 @@ const props = defineProps({
     users: { type: Array, default: () => [] },
     colleges: { type: Array, default: () => [] },
     departments: { type: Array, default: () => [] },
-    nextEmployeeId: { type: String, default: '' },
     passwordPolicy: { type: Object, default: () => ({ minLength: 8, requireUppercase: false, requireNumber: false, requireSymbol: false }) },
 });
 
@@ -105,7 +104,6 @@ const addUserVisible = ref(false);
 const departmentOptions = computed(() => departmentOptionsFor(form.college_id));
 
 const form = useForm({
-    employee_id: '',
     role: null,
     first_name: '',
     middle_name: '',
@@ -166,7 +164,6 @@ watch(
 const openAddUser = () => {
     form.reset();
     form.clearErrors();
-    form.employee_id = props.nextEmployeeId;
     addUserVisible.value = true;
 };
 
@@ -201,7 +198,6 @@ const editUserVisible = ref(false);
 const editingUserId = ref(null);
 
 const editForm = useForm({
-    employee_id: '',
     role: null,
     first_name: '',
     middle_name: '',
@@ -226,7 +222,6 @@ const openEditUser = (user) => {
     editingUserId.value = user.id;
     editForm.reset();
     editForm.clearErrors();
-    editForm.employee_id = user.employeeId;
     editForm.role = user.role;
     editForm.first_name = user.firstName ?? '';
     editForm.middle_name = user.middleName ?? '';
@@ -462,7 +457,7 @@ const onUpdateAccount = () => {
                                             <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'"></i>
                                             <InputText
                                                 v-model="search"
-                                                placeholder="Search by employee ID, name or email"
+                                                placeholder="Search by name or email"
                                                 class="neu-inset w-full !rounded-xl !border-none !pl-9"
                                                 :class="isDark ? '!text-white placeholder:!text-slate-500' : ''"
                                             />
@@ -480,7 +475,7 @@ const onUpdateAccount = () => {
                                     :class="isDark ? 'neu-table-dark' : ''"
                                     stripedRows
                                     responsiveLayout="scroll"
-                                    :globalFilterFields="['employeeId', 'fullName', 'email']"
+                                    :globalFilterFields="['fullName', 'email']"
                                     :filters="{ global: { value: search, matchMode: 'contains' } }"
                                 >
                                     <template #empty>
@@ -490,7 +485,6 @@ const onUpdateAccount = () => {
                                         </div>
                                     </template>
 
-                                    <Column field="employeeId" header="Employee ID" />
                                     <Column field="fullName" header="Full Name" />
                                     <Column field="email" header="Email" />
                                     <Column field="role" header="Role" />
@@ -689,20 +683,8 @@ const onUpdateAccount = () => {
             </template>
 
             <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onCreateUser">
-                <!-- Employee ID / Role -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    <FloatLabel variant="on">
-                        <InputText
-                            id="employeeId"
-                            v-model="form.employee_id"
-                            v-uppercase
-                            class="w-full"
-                            autocomplete="off"
-                            :invalid="!!form.errors.employee_id"
-                        />
-                        <label for="employeeId">Employee ID *</label>
-                    </FloatLabel>
-
+                <!-- Role -->
+                <div class="grid grid-cols-1 gap-5">
                     <FloatLabel variant="on">
                         <Select
                             id="role"
@@ -717,10 +699,6 @@ const onUpdateAccount = () => {
                     </FloatLabel>
                 </div>
                 <small v-if="form.errors.role" class="text-red-500">{{ form.errors.role }}</small>
-                <small v-if="form.errors.employee_id" class="text-red-500 block">{{ form.errors.employee_id }}</small>
-                <p v-if="!form.errors.employee_id" class="text-xs text-slate-400 mt-1">
-                    Suggested next ID — feel free to change it.
-                </p>
 
                 <Divider class="!my-5" />
 
@@ -927,20 +905,8 @@ const onUpdateAccount = () => {
             </template>
 
             <form class="pt-2 neu-form" autocomplete="off" @submit.prevent="onUpdateUser">
-                <!-- Employee ID / Role -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    <FloatLabel variant="on">
-                        <InputText
-                            id="editEmployeeId"
-                            v-model="editForm.employee_id"
-                            v-uppercase
-                            class="w-full"
-                            autocomplete="off"
-                            :invalid="!!editForm.errors.employee_id"
-                        />
-                        <label for="editEmployeeId">Employee ID *</label>
-                    </FloatLabel>
-
+                <!-- Role -->
+                <div class="grid grid-cols-1 gap-5">
                     <FloatLabel variant="on">
                         <Select
                             id="editRole"
@@ -955,7 +921,6 @@ const onUpdateAccount = () => {
                     </FloatLabel>
                 </div>
                 <small v-if="editForm.errors.role" class="text-red-500">{{ editForm.errors.role }}</small>
-                <small v-if="editForm.errors.employee_id" class="text-red-500 block">{{ editForm.errors.employee_id }}</small>
 
                 <Divider class="!my-5" />
 

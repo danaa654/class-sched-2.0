@@ -58,7 +58,6 @@ class UsersController extends Controller
             'users' => $users,
             'colleges' => College::orderBy('name')->get(['id', 'name']),
             'departments' => Department::orderBy('name')->get(['id', 'name', 'college_id']),
-            'nextEmployeeId' => $this->nextEmployeeId(),
             // Live checklist under the New Password field in the
             // Manage Account tab below — same source PasswordPolicyService
             // feeds to Settings' Manage Account tab for every other role.
@@ -77,7 +76,6 @@ class UsersController extends Controller
 
         $user = User::create([
             'name' => trim("{$validated['first_name']} {$validated['last_name']}"),
-            'employee_id' => $validated['employee_id'],
             'first_name' => $validated['first_name'],
             'middle_name' => $validated['middle_name'] ?? null,
             'last_name' => $validated['last_name'],
@@ -114,7 +112,6 @@ class UsersController extends Controller
 
         $user->fill([
             'name' => trim("{$validated['first_name']} {$validated['last_name']}"),
-            'employee_id' => $validated['employee_id'],
             'first_name' => $validated['first_name'],
             'middle_name' => $validated['middle_name'] ?? null,
             'last_name' => $validated['last_name'],
@@ -307,10 +304,6 @@ class UsersController extends Controller
     private function rules(Request $request, ?User $user = null): array
     {
         return [
-            'employee_id' => [
-                'required', 'string', 'max:50',
-                Rule::unique('users', 'employee_id')->ignore($user?->id),
-            ],
             'role' => ['required', Rule::in(RoleSeeder::ROLES)],
             'first_name' => ['required', 'string', 'max:255'],
             'middle_name' => ['nullable', 'string', 'max:255'],
@@ -379,7 +372,6 @@ class UsersController extends Controller
 
         return [
             'id' => $user->id,
-            'employeeId' => $user->employee_id,
             'fullName' => $user->full_name,
             'firstName' => $user->first_name,
             'middleName' => $user->middle_name,
@@ -394,24 +386,5 @@ class UsersController extends Controller
             'department' => $departmentLabel,
             'status' => $user->status,
         ];
-    }
-
-    /**
-     * Determine the next sequential Employee ID, e.g. EMP-2026-0001.
-     */
-    private function nextEmployeeId(): string
-    {
-        $year = now()->year;
-        $prefix = "EMP-{$year}-";
-
-        $lastNumber = User::where('employee_id', 'like', "{$prefix}%")
-            ->orderByDesc('employee_id')
-            ->value('employee_id');
-
-        $nextNumber = $lastNumber
-            ? ((int) substr($lastNumber, strlen($prefix))) + 1
-            : 1;
-
-        return $prefix.str_pad((string) $nextNumber, 4, '0', STR_PAD_LEFT);
     }
 }

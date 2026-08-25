@@ -1,5 +1,13 @@
 @import 'tailwindcss';
 
+/* Without this, Tailwind v4's `dark:` variant defaults to the OS-level
+   `prefers-color-scheme` media query instead of following the `.dark`
+   class that useTheme.js toggles on <html>. That mismatch is why text
+   using `dark:*` utilities (e.g. the Notifications page heading) could
+   render as if dark mode were active even while the in-app toggle was
+   set to light — whenever the OS/browser itself was in dark mode. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 @source '../**/*.blade.php';

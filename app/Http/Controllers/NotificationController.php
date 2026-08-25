@@ -109,6 +109,31 @@ class NotificationController extends Controller
     }
 
     /**
+     * Delete a single notification. Only already-read notifications
+     * can be deleted — an unread one still represents something the
+     * recipient hasn't seen yet, so it stays until they've read (or
+     * bulk-marked) it, matching the same "read before it can go away"
+     * rule Mark All Read already implies. Same ownership check as
+     * markRead()/redirect(): a recipient mismatch reads as 404 rather
+     * than 403, so it doesn't leak whether the id exists for someone
+     * else.
+     */
+    public function destroy(Request $request, Notification $notification): JsonResponse
+    {
+        abort_unless($notification->recipient_user_id === $request->user()->id, 404);
+
+        if (! $notification->is_read) {
+            return response()->json([
+                'message' => 'Only already-read notifications can be deleted.',
+            ], 422);
+        }
+
+        $notification->delete();
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
      * Convenience GET entry point (e.g. from an email or a bookmark)
      * that marks the notification read and redirects straight to its
      * Section's schedule (spec Section 14) — generated from the

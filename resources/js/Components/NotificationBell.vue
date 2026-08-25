@@ -74,6 +74,14 @@ async function openNotification(notification) {
     }
 }
 
+// Mirrors the full Notifications page: only an already-read notification
+// can be deleted (see NotificationController::destroy()) — an unread one
+// is still something the recipient hasn't seen yet.
+async function deleteNotification(notification) {
+    await axios.delete(route('notifications.destroy', notification.id));
+    notifications.value = notifications.value.filter((n) => n.id !== notification.id);
+}
+
 const iconFor = (type) => ({
     SCHEDULE_FINALIZED: '🔒',
     SCHEDULE_UNLOCKED: '🔓',
@@ -168,32 +176,41 @@ onUnmounted(() => {
                     <i class="pi pi-bell-slash text-2xl text-slate-500"></i>
                     <span class="text-sm text-slate-400">No notifications yet.</span>
                 </div>
-                <button
+                <div
                     v-for="notification in notifications"
                     :key="notification.id"
-                    type="button"
-                    class="neu-item mb-1.5 flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors last:mb-0"
+                    class="neu-item group relative mb-1.5 flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors last:mb-0"
                     :class="!notification.is_read ? 'neu-item--unread' : ''"
-                    @click="openNotification(notification)"
                 >
-                    <span class="neu-icon-chip flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px]">
-                        {{ iconFor(notification.type) }}
-                    </span>
-                    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span class="flex items-center gap-1.5 text-sm font-semibold text-white">
-                            <span class="truncate">{{ notification.title }}</span>
-                            <span
-                                v-if="notification.priority && notification.priority !== 'IMPORTANT'"
-                                class="h-1.5 w-1.5 shrink-0 rounded-full"
-                                :class="priorityColor(notification.priority)"
-                                :title="notification.priority"
-                            ></span>
+                    <button type="button" class="flex min-w-0 flex-1 items-start gap-3 text-left" @click="openNotification(notification)">
+                        <span class="neu-icon-chip flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px]">
+                            {{ iconFor(notification.type) }}
                         </span>
-                        <span class="whitespace-pre-line text-xs leading-snug text-slate-300">{{ notification.message }}</span>
-                        <span class="text-[11px] text-slate-500">{{ timeAgo(notification.created_at) }}</span>
-                    </span>
-                    <span v-if="!notification.is_read" class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-400"></span>
-                </button>
+                        <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span class="flex items-center gap-1.5 pr-5 text-sm font-semibold text-white">
+                                <span class="truncate">{{ notification.title }}</span>
+                                <span
+                                    v-if="notification.priority && notification.priority !== 'IMPORTANT'"
+                                    class="h-1.5 w-1.5 shrink-0 rounded-full"
+                                    :class="priorityColor(notification.priority)"
+                                    :title="notification.priority"
+                                ></span>
+                            </span>
+                            <span class="whitespace-pre-line text-xs leading-snug text-slate-300">{{ notification.message }}</span>
+                            <span class="text-[11px] text-slate-500">{{ timeAgo(notification.created_at) }}</span>
+                        </span>
+                    </button>
+                    <span v-if="!notification.is_read" class="absolute right-3 top-3.5 h-2 w-2 shrink-0 rounded-full bg-blue-400"></span>
+                    <button
+                        v-if="notification.is_read"
+                        type="button"
+                        class="absolute right-2 top-2 rounded-full p-1.5 text-slate-500 opacity-0 transition-opacity hover:bg-white/10 hover:text-red-400 group-hover:opacity-100"
+                        aria-label="Delete notification"
+                        @click.stop="deleteNotification(notification)"
+                    >
+                        <i class="pi pi-trash text-xs"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="neu-divider"></div>

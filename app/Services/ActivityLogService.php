@@ -64,6 +64,13 @@ class ActivityLogService
     // UsersController::updateMustChangePassword().
     public const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
 
+    // The user actually completed a password change themselves (via
+    // Settings/Manage Account -> Change Password) — distinct from
+    // PASSWORD_CHANGE_REQUIRED above, which only records an
+    // Administrator flagging that a change is needed, not the change
+    // itself. See ChangePasswordController::update().
+    public const PASSWORD_CHANGED = 'PASSWORD_CHANGED';
+
     /**
      * Every action code above, for the Activity Log tab's filter
      * dropdown — kept in one place so it can never drift out of sync
@@ -90,6 +97,7 @@ class ActivityLogService
             self::SESSION_FORCE_LOGOUT,
             self::PASSWORD_RESET_REQUESTED,
             self::PASSWORD_CHANGE_REQUIRED,
+            self::PASSWORD_CHANGED,
         ];
     }
 

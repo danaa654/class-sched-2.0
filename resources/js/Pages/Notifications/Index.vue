@@ -3,8 +3,11 @@ import { Head, router, Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import axios from 'axios';
 import AppLayout from '@/Layouts/AppLayout.vue';
-import Card from 'primevue/card';
 import Button from 'primevue/button';
+import { useTheme } from '@/composables/useTheme';
+
+const { theme } = useTheme();
+const isDark = computed(() => theme.value === 'dark');
 
 const props = defineProps({
     notifications: { type: Object, required: true },
@@ -43,6 +46,16 @@ async function markAllRead() {
     await axios.patch(route('notifications.mark-all-read'));
     router.reload({ only: ['notifications'] });
 }
+
+// Only already-read notifications can be deleted (see
+// NotificationController::destroy()) — an unread one is still
+// something the recipient hasn't seen yet.
+async function deleteNotification(notification) {
+    if (! confirm('Delete this notification? This cannot be undone.')) return;
+
+    await axios.delete(route('notifications.destroy', notification.id));
+    router.reload({ only: ['notifications'] });
+}
 </script>
 
 <template>
@@ -72,29 +85,50 @@ async function markAllRead() {
                 />
             </div>
 
-            <Card>
-                <template #content>
-                    <div v-if="items.length === 0" class="py-10 text-center text-sm text-slate-400">
+            <div class="neu-card rounded-2xl p-4 transition-colors duration-300">
+                    <div v-if="items.length === 0" class="py-10 text-center text-sm" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
                         No notifications to show.
                     </div>
-                    <button
+                    <div
                         v-for="notification in items"
                         :key="notification.id"
-                        type="button"
-                        class="flex w-full flex-col gap-1 border-b border-slate-100 py-3 text-left last:border-b-0 dark:border-slate-800"
-                        :class="!notification.is_read ? 'bg-blue-50/60 dark:bg-blue-500/10 -mx-4 px-4' : ''"
+                        role="button"
+                        tabindex="0"
+                        class="group relative flex w-full flex-col gap-1 border-b py-3 text-left last:border-b-0 cursor-pointer"
+                        :class="[
+                            isDark ? 'border-white/10' : 'border-slate-100',
+                            !notification.is_read ? (isDark ? 'bg-blue-500/10 -mx-4 px-4' : 'bg-blue-50/60 -mx-4 px-4') : '',
+                        ]"
                         @click="openNotification(notification)"
+                        @keydown.enter="openNotification(notification)"
                     >
-                        <span class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-white">
+                        <span class="flex items-center gap-2 pr-8 text-sm font-semibold" :class="isDark ? 'text-white' : 'text-slate-800'">
                             <span>{{ iconFor(notification.type) }}</span>
                             <span>{{ notification.title }}</span>
                             <span v-if="!notification.is_read" class="ml-auto h-2 w-2 shrink-0 rounded-full bg-blue-500"></span>
                         </span>
-                        <span class="whitespace-pre-line text-sm text-slate-600 dark:text-slate-300">{{ notification.message }}</span>
-                        <span class="text-xs text-slate-400">{{ new Date(notification.created_at).toLocaleString() }}</span>
-                    </button>
-                </template>
-            </Card>
+                        <span class="whitespace-pre-line pr-8 text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-600'">{{ notification.message }}</span>
+                        <span class="text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'">{{ new Date(notification.created_at).toLocaleString() }}</span>
+
+                        <!-- Delete is only offered for already-read
+                             notifications (see NotificationController::destroy())
+                             — an unread one is still something the
+                             recipient hasn't seen yet, so it can't be
+                             cleared out from under them. Uses
+                             @click.stop since this button sits inside
+                             the row's own click handler. -->
+                        <button
+                            v-if="notification.is_read"
+                            type="button"
+                            class="absolute right-1 top-3 rounded-full p-1.5 opacity-0 transition-opacity group-hover:opacity-100"
+                            :class="isDark ? 'text-slate-500 hover:bg-white/10 hover:text-red-400' : 'text-slate-400 hover:bg-slate-100 hover:text-red-600'"
+                            aria-label="Delete notification"
+                            @click.stop="deleteNotification(notification)"
+                        >
+                            <i class="pi pi-trash text-xs"></i>
+                        </button>
+                    </div>
+            </div>
 
             <div v-if="notifications.links?.length > 3" class="mt-4 flex flex-wrap justify-center gap-1">
                 <Link
@@ -104,7 +138,7 @@ async function markAllRead() {
                     v-html="link.label"
                     class="rounded px-3 py-1 text-xs"
                     :class="[
-                        link.active ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10',
+                        link.active ? 'bg-blue-600 text-white' : (isDark ? 'text-slate-400 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-100'),
                         !link.url ? 'pointer-events-none opacity-40' : '',
                     ]"
                     preserve-scroll
