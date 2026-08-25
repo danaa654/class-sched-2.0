@@ -81,6 +81,17 @@ class Faculty extends Model
     }
 
     /**
+     * Delivery history for the Faculty Schedule Email System (Reports
+     * -> Faculty Schedule -> Send via Email). See FacultyScheduleEmail.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<FacultyScheduleEmail>
+     */
+    public function scheduleEmails(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(FacultyScheduleEmail::class);
+    }
+
+    /**
      * The college this faculty member belongs to.
      *
      * @return BelongsTo<College, Faculty>

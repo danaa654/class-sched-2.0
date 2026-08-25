@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AcademicTerm;
 use App\Models\College;
 use App\Models\Curriculum;
 use App\Models\Faculty;
@@ -9,6 +10,7 @@ use App\Models\Room;
 use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\SectionSubject;
+use App\Models\Semester;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -57,6 +59,7 @@ class ReportsService
 
     public function __construct(
         private readonly ScheduleConflictService $conflicts,
+        private readonly FacultyScheduleEmailService $facultyScheduleEmail,
     ) {}
 
     /**
@@ -327,6 +330,32 @@ class ReportsService
         });
 
         $result = $this->table('Schedule by Faculty', $rows);
+
+        // Single, explicitly-picked faculty: hand the Vue page enough to
+        // drive the "Send via Email" button (Faculty Schedule Email
+        // System) without polluting report.columns — this rides alongside
+        // the generic {columns, rows} table rather than inside it, since
+        // table() derives columns from array_keys of the first row.
+        $singleFacultyId = is_array($facultyIds)
+            ? (count($facultyIds) === 1 ? $facultyIds[0] : null)
+            : $facultyIds;
+
+        if ($singleFacultyId) {
+            $faculty = Faculty::query()->find($singleFacultyId);
+            $term = $this->resolveAcademicTerm($filters);
+
+            if ($faculty) {
+                $result['facultyMeta'] = [
+                    'id' => $faculty->id,
+                    'faculty_id' => $faculty->faculty_id,
+                    'full_name' => $faculty->full_name,
+                    'email' => $faculty->email,
+                    'college' => $faculty->college?->name,
+                    'academic_term_id' => $term?->id,
+                    'is_finalized' => $term ? $this->facultyScheduleEmail->isFinalized($faculty, $term) : false,
+                ];
+            }
+        }
 
         // Multiple, explicitly-picked faculty: also hand the print view a
         // per-faculty breakdown, ordered to match selection order, so it
@@ -869,6 +898,50 @@ class ReportsService
         }
 
         return $this->formatTime12h($start).'–'.$this->formatTime12h($end);
+    }
+
+    /**
+     * Semester dropdown labels (filterOptions() above) don't match the
+     * actual Semester.name values in the database — the filter shows
+     * "First Semester"/"Second Semester" while Semester::NAMES stores
+     * "1st Semester"/"2nd Semester". Normalizes the filter's label to
+     * the real stored name before looking it up, so resolveAcademicTerm()
+     * below doesn't silently fail to match.
+     */
+    private const SEMESTER_FILTER_TO_NAME = [
+        'First Semester' => '1st Semester',
+        'Second Semester' => '2nd Semester',
+        'Summer' => 'Summer',
+    ];
+
+    /**
+     * Resolves the {academic_year, semester} filter strings this page
+     * already works with into the actual AcademicTerm row the Faculty
+     * Schedule Email System is keyed on. Returns null if either filter
+     * is empty/unmatched (e.g. "All Terms").
+     */
+    private function resolveAcademicTerm(array $filters): ?AcademicTerm
+    {
+        $yearName = $filters['academic_year'] ?? null;
+        $semesterName = $filters['semester'] ?? null;
+
+        if (! $yearName || ! $semesterName) {
+            return null;
+        }
+
+        $semesterName = self::SEMESTER_FILTER_TO_NAME[$semesterName] ?? $semesterName;
+
+        $schoolYear = SchoolYear::query()->where('name', $yearName)->first();
+        $semester = Semester::query()->where('name', $semesterName)->first();
+
+        if (! $schoolYear || ! $semester) {
+            return null;
+        }
+
+        return AcademicTerm::query()
+            ->where('school_year_id', $schoolYear->id)
+            ->where('semester_id', $semester->id)
+            ->first();
     }
 
     private function table(string $title, Collection $rows, ?string $emptyMessage = null, ?array $summary = null): array

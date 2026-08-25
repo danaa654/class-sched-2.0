@@ -4,6 +4,7 @@ use App\Http\Controllers\AcademicCalendarController;
 use App\Http\Controllers\AcademicStructureController;
 use App\Http\Controllers\AcademicTermController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\ChangePasswordController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\CollegeController;
@@ -12,6 +13,7 @@ use App\Http\Controllers\CurriculumSubjectController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\FacultyController;
+use App\Http\Controllers\FacultyScheduleEmailController;
 use App\Http\Controllers\FacultyLoadRequestController;
 use App\Http\Controllers\FacultyRequestController;
 use App\Http\Controllers\MajorController;
@@ -249,6 +251,15 @@ Route::middleware('auth')->group(function () {
     // the SPA page itself. See ReportsController::print().
     Route::get('/reports/print', [ReportsController::class, 'print'])->name('reports.print');
 
+    // FACULTY SCHEDULE EMAIL SYSTEM — "Send via Email" on the Schedule
+    // by Faculty report (see FacultyScheduleEmailController /
+    // FacultyScheduleEmailService). Sits alongside the read-only
+    // ReportsController routes above.
+    Route::post('/reports/faculty-schedule/send', [FacultyScheduleEmailController::class, 'send'])->name('reports.faculty-schedule.send');
+    Route::post('/reports/faculty-schedule/bulk-send', [FacultyScheduleEmailController::class, 'bulkSend'])->name('reports.faculty-schedule.bulk-send');
+    Route::post('/reports/faculty-schedule/{facultyScheduleEmail}/resend', [FacultyScheduleEmailController::class, 'resend'])->name('reports.faculty-schedule.resend');
+    Route::get('/reports/faculty-schedule/{faculty}/history', [FacultyScheduleEmailController::class, 'history'])->name('reports.faculty-schedule.history');
+
     // SETTINGS — system-wide configuration only (see SettingsController
     // and App\Services\SettingsService). GET renders the page; each PUT
     // saves one tab's group of settings; the POST is a non-destructive
@@ -267,6 +278,14 @@ Route::middleware('auth')->group(function () {
     // (called from SettingsController::index()) and ::destroy() below
     // for the force-logout action.
     Route::delete('/settings/active-sessions/{session}', [ActiveSessionController::class, 'destroy'])->name('settings.active-sessions.destroy');
+
+    // SECURITY / PASSWORD POLICY — the forced change-password screen
+    // EnsurePasswordIsCurrent redirects to. Must live inside this auth
+    // group (the user is already authenticated) and its route names
+    // must match EnsurePasswordIsCurrent::EXEMPT_ROUTES exactly, or the
+    // middleware will redirect this very page back to itself in a loop.
+    Route::get('/password/change', [ChangePasswordController::class, 'create'])->name('password.change');
+    Route::put('/password/change', [ChangePasswordController::class, 'update'])->name('password.change.update');
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });

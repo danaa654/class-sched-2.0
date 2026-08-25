@@ -25,6 +25,13 @@ use Symfony\Component\HttpFoundation\Response;
  * same session, not be locked out entirely. The change-password
  * route itself (and logout) must stay excluded below, or the forced
  * redirect would loop against itself.
+ *
+ * PasswordPolicyService is injected via the CONSTRUCTOR, not as a
+ * handle() parameter. Laravel only resolves extra handle() parameters
+ * for route middleware invoked with a ":arg" suffix (e.g. 'auth:web')
+ * — global/group middleware (registered as a plain class string in
+ * bootstrap/app.php) is always called as handle($request, $next), so
+ * a third typed parameter there throws ArgumentCountError.
  */
 class EnsurePasswordIsCurrent
 {
@@ -41,7 +48,9 @@ class EnsurePasswordIsCurrent
         'logout',
     ];
 
-    public function handle(Request $request, Closure $next, PasswordPolicyService $policy): Response
+    public function __construct(private readonly PasswordPolicyService $policy) {}
+
+    public function handle(Request $request, Closure $next): Response
     {
         $user = Auth::guard('web')->user();
 
@@ -54,7 +63,7 @@ class EnsurePasswordIsCurrent
         }
 
         $mustChange = $user->must_change_password
-            || $policy->isExpired($user->password_changed_at);
+            || $this->policy->isExpired($user->password_changed_at);
 
         if ($mustChange && ! $request->expectsJson()) {
             return redirect()->route('password.change');

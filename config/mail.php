@@ -49,6 +49,23 @@ return [
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 
+        // Second, separate mailer used ONLY for Faculty Schedule emails
+        // (see SendFacultyScheduleEmailJob), so those actually reach a
+        // real inbox while every other email in the app (password
+        // reset, etc.) keeps going through the "smtp" mailer above
+        // (Mailtrap sandbox) untouched. Uses its own GMAIL_* env keys
+        // rather than MAIL_*, so switching this on never accidentally
+        // reroutes the default mailer too.
+        'gmail' => [
+            'transport' => 'smtp',
+            'host' => 'smtp.gmail.com',
+            'port' => 587,
+            'encryption' => 'tls',
+            'username' => env('GMAIL_USERNAME'),
+            'password' => env('GMAIL_APP_PASSWORD'),
+            'timeout' => null,
+        ],
+
         'ses' => [
             'transport' => 'ses',
         ],

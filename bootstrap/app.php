@@ -14,6 +14,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             \App\Http\Middleware\HandleInertiaRequests::class,
             \App\Http\Middleware\EnsureAccountIsActive::class,
+            // SECURITY / PASSWORD POLICY — forces a password change when
+            // an Administrator has flagged the account
+            // (must_change_password) or the password has expired
+            // (security.password_expiry_days). Redirects to
+            // 'password.change' (see routes/web.php and
+            // ChangePasswordController), which is itself exempted inside
+            // the middleware so it never redirects against itself.
+            \App\Http\Middleware\EnsurePasswordIsCurrent::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

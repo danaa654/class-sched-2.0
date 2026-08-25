@@ -1,6 +1,7 @@
 <script setup>
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, usePage } from '@inertiajs/vue3';
 import { ref, computed, watch } from 'vue';
+import { useToast } from 'primevue/usetoast';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
@@ -8,11 +9,75 @@ import Button from 'primevue/button';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Tag from 'primevue/tag';
+import Toast from 'primevue/toast';
 import InfoPopover from '@/Components/InfoPopover.vue';
+import SendScheduleModal from './Partials/SendScheduleModal.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
 const isDark = computed(() => theme.value === 'dark');
+
+const toast = useToast();
+const page = usePage();
+
+// Show a toast whenever the backend flashes a success/error message —
+// e.g. FacultyScheduleEmailController's back()->with('success', ...)
+// after "Send Schedule". Without this the modal just closes with no
+// feedback that anything actually happened.
+watch(
+    () => page.props.flash?.success,
+    (message) => {
+        if (message) {
+            toast.add({ severity: 'success', summary: 'Success', detail: message, life: 4000 });
+        }
+    },
+);
+watch(
+    () => page.props.flash?.error,
+    (message) => {
+        if (message) {
+            toast.add({ severity: 'error', summary: 'Error', detail: message, life: 4000 });
+        }
+    },
+);
+
+// FACULTY SCHEDULE EMAIL SYSTEM — "Send via Email" on the single-faculty
+// Schedule by Faculty report. report.facultyMeta (set by
+// ReportsService::scheduleByFaculty() only when exactly one faculty is
+// selected) carries everything the modal needs; it rides alongside the
+// generic {columns, rows} table rather than inside a row, so it never
+// shows up as a spurious column.
+const showSendScheduleModal = ref(false);
+
+const sendScheduleFaculty = computed(() => {
+    const meta = props.report?.facultyMeta;
+    if (!meta) return null;
+    return {
+        id: meta.id,
+        full_name: meta.full_name,
+        faculty_id: meta.faculty_id,
+        email: meta.email,
+    };
+});
+
+const sendScheduleTerm = computed(() => {
+    const meta = props.report?.facultyMeta;
+    if (!meta || !meta.academic_term_id) return null;
+    return {
+        id: meta.academic_term_id,
+        label: `${form.value.academic_year} · ${form.value.semester}`,
+    };
+});
+
+function openSendScheduleModal() {
+    if (!sendScheduleFaculty.value || !sendScheduleTerm.value) return;
+    showSendScheduleModal.value = true;
+}
+
+function onScheduleSent() {
+    showSendScheduleModal.value = false;
+    router.reload({ only: ['report'] });
+}
 
 const props = defineProps({
     filterOptions: { type: Object, required: true },
@@ -662,6 +727,14 @@ const summaryCards = computed(() => [
                             <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'table' ? 'bg-emerald-500 text-white' : (isDark ? 'text-slate-400' : 'text-slate-500')" @click="viewMode = 'table'">Table</button>
                             <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'grid' ? 'bg-emerald-500 text-white' : (isDark ? 'text-slate-400' : 'text-slate-500')" @click="viewMode = 'grid'">Grid</button>
                         </div>
+                        <Button
+                            v-if="sendScheduleFaculty"
+                            label="Send via Email"
+                            icon="pi pi-send"
+                            severity="success"
+                            class="report-btn report-btn--send"
+                            @click="openSendScheduleModal"
+                        />
                         <Button label="Print" icon="pi pi-print" severity="secondary" outlined class="report-btn report-btn--print" @click="printReport" />
                         <Button label="Export Excel" icon="pi pi-file-excel" severity="secondary" outlined class="report-btn report-btn--export" @click="exportCsv" :disabled="!report.rows.length" />
                     </div>
@@ -771,6 +844,17 @@ const summaryCards = computed(() => [
                 <p class="py-10 text-center italic" :class="isDark ? 'text-slate-500' : 'text-slate-400'">Select filters and a Report Type above, then click "Generate Report".</p>
             </div>
         </div>
+
+        <SendScheduleModal
+            :show="showSendScheduleModal"
+            :faculty="sendScheduleFaculty"
+            :academic-term="sendScheduleTerm"
+            :is-finalized="!!report?.facultyMeta?.is_finalized"
+            @close="showSendScheduleModal = false"
+            @sent="onScheduleSent"
+        />
+
+        <Toast />
     </AppLayout>
 </template>
 
@@ -826,6 +910,9 @@ const summaryCards = computed(() => [
     color: #2563EB !important;
     background: rgba(37, 99, 235, 0.08) !important;
     box-shadow: 0 0 12px 1px rgba(37, 99, 235, 0.35) !important;
+}
+.report-btn--send:hover:not(:disabled) {
+    box-shadow: 0 0 12px 1px rgba(34, 197, 94, 0.35) !important;
 }
 
 .dark-scope :deep(.report-btn--print:hover:not(:disabled)) {
