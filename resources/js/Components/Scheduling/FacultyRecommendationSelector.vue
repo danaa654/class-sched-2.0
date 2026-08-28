@@ -27,6 +27,16 @@ const props = defineProps({
     // per subject drives Faculty/Room/Time together instead of each
     // selector having its own independent toggle.
     showDetails: { type: Boolean, default: false },
+    // A cheap signature (e.g. "Sat|13:00-17:00") the parent recomputes
+    // from result.time. This selector's own conflictError is a purely
+    // local ref that only ever gets set/cleared by ITS OWN select()
+    // calls — it has no way to know the Registrar just fixed the
+    // conflict by editing Day/Time in the sibling TimeRecommendationSelector.
+    // Watching this signature lets a stale "Faculty Conflict: ... on
+    // Sat 13:00-17:00" message clear itself once the time actually
+    // changes, instead of sitting there forever describing a slot
+    // that's no longer selected.
+    timeSignature: { type: [String, Number], default: null },
 });
 
 const emit = defineEmits(['updated']);
@@ -58,6 +68,15 @@ watch(
         query.value = val?.name ?? '';
     },
     { deep: true }
+);
+
+// Clear a stale conflict message once the Day/Time this row is
+// scheduled for actually changes — see the timeSignature prop comment.
+watch(
+    () => props.timeSignature,
+    () => {
+        conflictError.value = '';
+    }
 );
 
 const scoreColor = (score) => {
@@ -191,6 +210,7 @@ const select = async (event) => {
             class="w-full faculty-recommendation-selector"
             inputClass="w-full text-sm"
             panelClass="!max-w-none"
+            appendTo="body"
             :delay="250"
             forceSelection
             dropdown

@@ -1886,6 +1886,41 @@ const saveSchedule = async () => {
 /* ------------------------------------------------------------------ */
 
 const autoGenerating = ref(false);
+
+// ⚡ Simulated progress for the Auto Generate Schedule button.
+// The backend runs auto-scheduling as a single request/response — it does
+// not report real incremental progress — so this is a COSMETIC approximation
+// only, purely to give the user visual feedback that something is happening.
+// It never blocks, delays, or alters the actual fetch/response below; it
+// just drives the number shown in the button label while the real request
+// is in flight, and always resolves to 100% the instant the real response
+// arrives (success or failure).
+const autoGenerateProgress = ref(0);
+let autoGenerateProgressTimer = null;
+
+const startAutoGenerateProgress = () => {
+    autoGenerateProgress.value = 0;
+    clearInterval(autoGenerateProgressTimer);
+    autoGenerateProgressTimer = setInterval(() => {
+        // Ease toward 90% and stall there — the real completion (fetch
+        // resolving) is what pushes it to 100%, never this timer.
+        const remaining = 90 - autoGenerateProgress.value;
+        if (remaining <= 0) return;
+        autoGenerateProgress.value = Math.min(90, autoGenerateProgress.value + Math.max(1, Math.round(remaining * 0.15)));
+    }, 200);
+};
+
+const finishAutoGenerateProgress = () => {
+    clearInterval(autoGenerateProgressTimer);
+    autoGenerateProgressTimer = null;
+    autoGenerateProgress.value = 100;
+    // Let the user see 100% briefly instead of the label snapping away.
+    setTimeout(() => { autoGenerateProgress.value = 0; }, 400);
+};
+
+const autoGenerateButtonLabel = computed(() =>
+    autoGenerating.value ? `⚡ Generating… ${autoGenerateProgress.value}%` : '⚡ Auto Generate Schedule'
+);
 const autoClearing = ref(false);
 const clearingSchedule = ref(false);
 const autoSummaryVisible = ref(false);
@@ -2046,6 +2081,7 @@ const runAutoGenerate = async () => {
     if (rows.value.length === 0) return;
 
     autoGenerating.value = true;
+    startAutoGenerateProgress();
 
     try {
         const response = await fetch(route('scheduling.section-subjects.auto-generate', props.section.id), {
@@ -2094,12 +2130,14 @@ const runAutoGenerate = async () => {
     } catch (e) {
         toast.add({ severity: 'error', summary: 'Error', detail: e.message ?? 'Could not auto-generate the schedule.', life: 6000 });
     } finally {
+        finishAutoGenerateProgress();
         autoGenerating.value = false;
     }
 };
 
 const regenerateAutoSchedule = async () => {
     autoGenerating.value = true;
+    startAutoGenerateProgress();
 
     try {
         const response = await fetch(route('scheduling.section-subjects.auto-generate.regenerate', props.section.id), {
@@ -2134,6 +2172,7 @@ const regenerateAutoSchedule = async () => {
     } catch (e) {
         toast.add({ severity: 'error', summary: 'Error', detail: e.message ?? 'Could not regenerate the schedule.', life: 6000 });
     } finally {
+        finishAutoGenerateProgress();
         autoGenerating.value = false;
     }
 };
@@ -2394,6 +2433,12 @@ const onTimeOverride = (result, { time, overall_score }) => {
 // Conflict" tag so a blocking row is obvious at a glance, not just
 // buried in the amber Manual Override note under Time.
 const resultHasHardConflict = (result) => Boolean(result?.time?.hard_conflict);
+
+// Cheap Day/Time signature passed to Faculty/Room selectors so each
+// can clear its own stale conflictError the moment the Registrar
+// edits Time to work around the exact conflict it was complaining
+// about (see FacultyRecommendationSelector.vue's timeSignature prop).
+const timeSignatureFor = (time) => `${(time?.days ?? []).join(',')}|${time?.start_time ?? ''}-${time?.end_time ?? ''}`;
 
 // One line per conflicting resource (Faculty/Room/Section), naming
 // exactly which existing Subject/Section already holds that slot —
@@ -2775,7 +2820,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         @click="clearWholeSchedule"
                     />
                     <Button
-                        label="⚡ Auto Generate Schedule"
+                        :label="autoGenerateButtonLabel"
                         icon="pi pi-bolt"
                         severity="help"
                         :loading="autoGenerating"
@@ -4074,6 +4119,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 :section-id="section.id"
                                                 :section-subject-id="result.section_subject_id"
                                                 :model-value="result.faculty"
+                                                :time-signature="timeSignatureFor(result.time)"
                                                 @updated="onFacultyOverride(result, $event)"
                                             />
                                         </div>
@@ -4084,6 +4130,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                 :section-id="section.id"
                                                 :section-subject-id="result.section_subject_id"
                                                 :model-value="result.room"
+                                                :time-signature="timeSignatureFor(result.time)"
                                                 @updated="onRoomOverride(result, $event)"
                                             />
                                         </div>

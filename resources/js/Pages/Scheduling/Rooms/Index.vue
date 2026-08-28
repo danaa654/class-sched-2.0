@@ -152,6 +152,28 @@ watch(search, () => {
     }, 350);
 });
 
+// Program filter options depend on the selected College filter — only
+// that College's programs are offered, mirroring the same cascading
+// behavior already used in the Add/Edit Room modal's departmentOptions.
+const departmentFilterOptions = computed(() => {
+    if (!collegeFilter.value) {
+        return props.departments;
+    }
+
+    return props.departments.filter((department) => department.college_id === collegeFilter.value);
+});
+
+// Switching (or clearing) the College filter invalidates a previously
+// selected Program filter that doesn't belong to the new College.
+watch(collegeFilter, () => {
+    if (
+        departmentFilter.value &&
+        !departmentFilterOptions.value.some((department) => department.id === departmentFilter.value)
+    ) {
+        departmentFilter.value = null;
+    }
+});
+
 watch([building, floor, roomTypeFilter, collegeFilter, departmentFilter, statusFilter, availabilityFilter], () => {
     reloadRooms({ room_page: 1 });
 });
@@ -612,7 +634,7 @@ const closeSchedule = () => {
                         />
                         <Select
                             v-model="departmentFilter"
-                            :options="departments"
+                            :options="departmentFilterOptions"
                             optionLabel="name"
                             optionValue="id"
                             placeholder="Program"

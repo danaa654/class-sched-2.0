@@ -427,6 +427,51 @@ const needsRoomPlacement = (row) => {
 const unscheduledSubjects = computed(() => props.rows.filter(needsRoomPlacement));
 
 /* ------------------------------------------------------------------ */
+/* GHOST OVERLAY ("x-ray") — Prompt: eye icon showing this section's   */
+/* own already-scheduled subjects on top of whichever room's grid is   */
+/* currently open, even sessions booked in a DIFFERENT room, so the    */
+/* Registrar can see at a glance which Day/Time slots the SECTION is   */
+/* already committed to before manually dropping another subject onto */
+/* what looks like a free room slot but would double-book the section. */
+/* Built entirely from props.rows (already loaded for this section) —  */
+/* no extra request needed, since every row already carries its own    */
+/* days/start_time/end_time/room.                                      */
+/* ------------------------------------------------------------------ */
+const showSectionGhost = ref(false);
+
+const sectionGhostBlocks = computed(() => {
+    if (!showSectionGhost.value || !selectedRoom.value) return [];
+
+    const raw = [];
+    props.rows.forEach((row) => {
+        if (needsRoomPlacement(row)) return; // not scheduled yet — nothing to x-ray
+        if (row.room_id === selectedRoom.value.id) return; // already drawn as a real block below — no need to ghost it too
+
+        const startMin = toMinutes(row.start_time);
+        const endMin = toMinutes(row.end_time);
+        const gridStart = toMinutes(hourRows.value[0]);
+        const step = intervalMinutes.value;
+        const startIndex = Math.max(0, Math.round((startMin - gridStart) / step));
+        const span = Math.max(1, Math.round((endMin - startMin) / step));
+
+        (row.days || []).forEach((day) => {
+            if (!days.value.includes(day)) return;
+            raw.push({
+                day,
+                startIndex,
+                span,
+                subject_code: row.subject?.subject_code,
+                room_name: row.room?.room_name,
+            });
+        });
+    });
+    return raw;
+});
+
+const ghostBlockAt = (day, rowIndex) => sectionGhostBlocks.value.find((b) => b.day === day && b.startIndex === rowIndex);
+const isGhostCovered = (day, rowIndex) => sectionGhostBlocks.value.some((b) => b.day === day && rowIndex > b.startIndex && rowIndex < b.startIndex + b.span);
+
+/* ------------------------------------------------------------------ */
 /* Drag & Drop — writes go through the same updateSchedule() endpoint  */
 /* the Subjects tab uses. No optimistic local mutation of the grid;    */
 /* we re-fetch the room's schedule on success so it always reflects    */
@@ -1783,7 +1828,21 @@ const removeAssignment = async () => {
                         </h3>
                         <p class="text-xs text-slate-400">{{ selectedRoom.room_type }} · Capacity {{ selectedRoom.capacity }}</p>
                     </div>
-                    <ProgressSpinner v-if="gridLoading" style="width: 22px; height: 22px" strokeWidth="6" />
+                    <div class="flex items-center gap-2">
+                        <button
+                            type="button"
+                            class="flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors"
+                            :class="showSectionGhost
+                                ? 'border-violet-300 bg-violet-50 text-violet-700'
+                                : 'border-slate-200 text-slate-500 hover:border-violet-300 hover:text-violet-600'"
+                            :title="`${showSectionGhost ? 'Hide' : 'Show'} ${section.section_code}'s full weekly schedule overlaid here, so you can see when it's already busy in other rooms.`"
+                            @click="showSectionGhost = !showSectionGhost"
+                        >
+                            <i :class="showSectionGhost ? 'pi pi-eye-slash' : 'pi pi-eye'"></i>
+                            {{ section.section_code }}'s schedule
+                        </button>
+                        <ProgressSpinner v-if="gridLoading" style="width: 22px; height: 22px" strokeWidth="6" />
+                    </div>
                 </div>
 
                 <div class="overflow-x-auto border border-slate-300 rounded-xl">
@@ -1822,14 +1881,16 @@ const removeAssignment = async () => {
                         <template v-for="(day, dIndex) in days" :key="`col-${day}`">
                             <template v-for="(hour, rowIndex) in hourRows" :key="`cell-${day}-${hour}`">
                                 <div
-                                    v-if="!isCovered(day, rowIndex) && (!isLunchRow(hour) || isFirstLunchRow(rowIndex))"
+                                    v-if="!isCovered(day, rowIndex) && !isGhostCovered(day, rowIndex) && (!isLunchRow(hour) || isFirstLunchRow(rowIndex))"
                                     class="border-r border-b border-slate-300 relative"
                                     :class="isLunchRow(hour) ? 'bg-amber-100' : ''"
                                     :style="{
                                         gridColumn: dIndex + 2,
                                         gridRow: isLunchRow(hour)
                                             ? `${rowIndex + 2} / span ${lunchSpan}`
-                                            : (blockAt(day, rowIndex) ? `${rowIndex + 2} / span ${blockAt(day, rowIndex).span}` : rowIndex + 2),
+                                            : (blockAt(day, rowIndex)
+                                                ? `${rowIndex + 2} / span ${blockAt(day, rowIndex).span}`
+                                                : (ghostBlockAt(day, rowIndex) ? `${rowIndex + 2} / span ${ghostBlockAt(day, rowIndex).span}` : rowIndex + 2)),
                                     }"
                                     @dragover="isLunchRow(hour) ? null : onDragOverCell($event)"
                                     @drop="isLunchRow(hour) ? null : onDrop(day, rowIndex)"
@@ -1878,6 +1939,22 @@ const removeAssignment = async () => {
                                         <div v-else-if="blockAt(day, rowIndex).is_finalized" class="text-[9px] italic opacity-75 truncate">Finalized — locked</div>
                                         <div v-else-if="!blockAt(day, rowIndex).can_edit" class="text-[9px] italic opacity-75 truncate">Outside your scheduling scope</div>
                                     </div>
+                                    <!-- Ghost overlay ("x-ray") — this section is already busy at
+                                         this Day/Time in a DIFFERENT room. Decorative only:
+                                         pointer-events-none so dragover/drop on the cell underneath
+                                         still work exactly as if this weren't here, letting the
+                                         Registrar still drop a subject into this slot (and get the
+                                         normal Faculty/Section conflict error) rather than being
+                                         silently blocked by the overlay. -->
+                                    <div
+                                        v-else-if="ghostBlockAt(day, rowIndex)"
+                                        class="absolute inset-0.5 rounded-md px-2 py-1 overflow-hidden text-[11px] leading-tight pointer-events-none border-2 border-dashed border-violet-300 bg-[repeating-linear-gradient(45deg,rgba(139,92,246,0.08),rgba(139,92,246,0.08)_6px,rgba(139,92,246,0.14)_6px,rgba(139,92,246,0.14)_12px)] text-violet-700"
+                                        :title="`${section.section_code} already has ${ghostBlockAt(day, rowIndex).subject_code} scheduled here (${ghostBlockAt(day, rowIndex).room_name ?? 'another room'}).`"
+                                    >
+                                        <i class="pi pi-eye absolute top-1 right-1 text-[9px] opacity-70"></i>
+                                        <div class="font-semibold truncate">{{ ghostBlockAt(day, rowIndex).subject_code }}</div>
+                                        <div class="truncate text-[10px] opacity-80">{{ ghostBlockAt(day, rowIndex).room_name ?? 'Another room' }}</div>
+                                    </div>
                                 </div>
                             </template>
                         </template>
@@ -1898,6 +1975,7 @@ const removeAssignment = async () => {
                 <p class="text-[11px] text-slate-400 mt-2">
                     Drag a subject from "Unscheduled Subjects" onto a slot to place it, or drag an existing block to move it. Click a block to edit its Faculty, Hours/Week, Meetings/Week, or Days.
                     Schedules belonging to any section within your authorized scheduling scope can be moved from here, even if it isn't the currently selected section — schedules outside your scope stay locked, and a finalized section's schedule (amber, padlock) stays locked for everyone until an Admin/Registrar unlocks it. The Lunch Break slot is fixed and can't be scheduled into.
+                    <span v-if="showSectionGhost" class="block mt-1"><i class="pi pi-eye mr-1 text-violet-500"></i>Striped violet slots show where {{ section.section_code }} is already scheduled in another room — dropping a subject there will still conflict for the section even though this room is free.</span>
                 </p>
             </div>
         </div>

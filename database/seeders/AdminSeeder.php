@@ -20,10 +20,10 @@ class AdminSeeder extends Seeder
         $this->call(RoleSeeder::class);
 
         $admin = User::firstOrCreate(
-            ['email' => 'admin@classly.local'],
+            ['email' => 'admin@classly.pap'],
             [
                 'name' => 'Administrator',
-                'password' => Hash::make('admin@classly.local'),
+                'password' => Hash::make('admin@classly.pap12'),
                 'email_verified_at' => now(),
             ]
         );

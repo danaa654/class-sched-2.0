@@ -36,6 +36,10 @@ const props = defineProps({
     // Controlled by the parent (Show.vue) — one "Show details" toggle
     // per subject drives Faculty/Room/Time together.
     showDetails: { type: Boolean, default: false },
+    // A cheap signature (e.g. "Sat|13:00-17:00") the parent recomputes
+    // from result.time. See FacultyRecommendationSelector.vue's prop
+    // of the same name — same stale-conflict-message problem, same fix.
+    timeSignature: { type: [String, Number], default: null },
 });
 
 const emit = defineEmits(['updated']);
@@ -66,6 +70,15 @@ watch(
         query.value = val?.name ?? '';
     },
     { deep: true }
+);
+
+// Clear a stale conflict message once the Day/Time this row is
+// scheduled for actually changes — see the timeSignature prop comment.
+watch(
+    () => props.timeSignature,
+    () => {
+        conflictError.value = '';
+    }
 );
 
 const scoreColor = (score) => {
@@ -229,6 +242,7 @@ const select = async (event) => {
             class="w-full room-recommendation-selector"
             inputClass="w-full text-sm"
             panelClass="!max-w-none"
+            appendTo="body"
             :delay="250"
             forceSelection
             dropdown

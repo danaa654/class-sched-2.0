@@ -306,7 +306,19 @@ class ReportsService
             // keeps this report's counts consistent with the Workload
             // tab instead of double-listing/double-counting the class.
             ->whereNull('merged_into_section_subject_id')
-            ->with('mergedPlacements.section:id,section_code');
+            ->with('mergedPlacements.section:id,section_code')
+            // The College/Program filter on this report means "faculty
+            // whose own home college/department is this one" — NOT
+            // "sections belonging to this college". Without this, a CCS
+            // filter still pulled in GenEd/Minor faculty (e.g. NSTP,
+            // Understanding the Self) who personally belong to a
+            // different college but happen to teach a CCS section.
+            // sectionSubjectsQuery() already scopes to CCS *sections*
+            // via sectionsQuery()'s college_id clause; this adds the
+            // faculty-side constraint on top of that.
+            ->when($filters['college_id'] ?? null, function ($q, $collegeId) {
+                $q->whereHas('faculty', fn ($fq) => $fq->where('college_id', $collegeId));
+            });
 
         $facultyIds = $filters['faculty_id'] ?? null;
 

@@ -29,7 +29,7 @@ const features = [
     },
     {
         icon: 'pi pi-users',
-        title: 'Teachers',
+        title: 'Faculties',
         description: 'Assign instructors with real-time availability and load checking.',
         details: [
             'See live faculty availability while assigning classes',
@@ -135,7 +135,7 @@ const highlightedDot = 16;
                             Your Friendly Class Scheduler
                         </p>
                         <p class="mt-6 max-w-xl text-lg" :class="isDark ? 'text-slate-300' : 'text-slate-600'">
-                            A centralized platform for managing class schedules, teachers, rooms, and academic
+                            A centralized platform for managing class schedules, faculties, rooms, and academic
                             planning.
                         </p>
 
