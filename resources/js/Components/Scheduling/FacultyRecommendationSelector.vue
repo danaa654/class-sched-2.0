@@ -12,12 +12,46 @@
  * Everything below happens instantly — no dialog close, no page
  * reload. The parent (Show.vue) only needs to render this component
  * per row and listen for @updated to keep autoSummary in sync.
+ *
+ * ── WHY THIS IS A PLAIN COMBOBOX, NOT PrimeVue's AutoComplete ──────
+ * An earlier version used PrimeVue's AutoComplete with its built-in
+ * `dropdown` overlay, and tried to stop that overlay from popping
+ * open on its own (onMounted, a parent Dialog's focus-trap, and
+ * forceSelection's internal validation search all independently
+ * triggered it) by forcing the overlay's CSS to `display: none`
+ * whenever a `panelOpen` flag was false. That flag was real, but the
+ * fix was not: AutoComplete opens its overlay *reactively* the
+ * instant its internal `suggestions` list goes from empty to
+ * non-empty, completely independent of whatever `panelOpen` said —
+ * the CSS override just papered over a component that still believed
+ * it was "open" and could still race the paint. RoomRecommendationSelector.vue
+ * hit the visible version of this bug first (several Room panels open
+ * at once after Auto Generate, nobody clicking anything); this file
+ * carried the exact same risk and gets the exact same fix here, kept
+ * visually and architecturally identical to Room on purpose so the
+ * two dropdowns behave and look the same to the Registrar.
+ *
+ * This replaces AutoComplete with a small, fully self-owned combobox
+ * — an <input> plus an absolutely-positioned list directly below it
+ * — built from two clearly separate pieces of state instead of one
+ * fragile one:
+ *
+ *   - `suggestions` / `recommendedIds` — the CALCULATED
+ *     recommendation data, populated by loadRecommended()/search().
+ *     Auto Generate/Regenerate never call either function, and
+ *     nothing about loading this data can make anything visible.
+ *   - `isOpen` — the dropdown's own open/closed state. Set true in
+ *     exactly one place (openDropdown(), wired to this input's
+ *     @click), and set false in exactly three places: selecting an
+ *     option, Escape, and a genuine click outside this component
+ *     (onClickOutside(), the same document-click pattern already
+ *     used by NotificationBell.vue). Nothing else — not a watcher on
+ *     props.modelValue, not a mount hook, not `suggestions` changing
+ *     — ever touches `isOpen`.
  */
-import { ref, computed, watch, onMounted } from 'vue';
-import AutoComplete from 'primevue/autocomplete';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import Tag from 'primevue/tag';
 import ProgressBar from 'primevue/progressbar';
-import Button from 'primevue/button';
 
 const props = defineProps({
     sectionId: { type: [Number, String], required: true },
@@ -49,6 +83,7 @@ const csrfToken = () => {
 const optionsUrl = () => route('scheduling.section-subjects.faculty-options', [props.sectionId, props.sectionSubjectId]);
 const overrideUrl = () => route('scheduling.section-subjects.faculty-override', [props.sectionId, props.sectionSubjectId]);
 
+const root = ref(null);
 const current = ref({ ...props.modelValue });
 const query = ref(props.modelValue?.name ?? '');
 const suggestions = ref([]);
@@ -60,6 +95,13 @@ const recommendedIds = ref(new Set());
 // the pick, instead of only logging it to the console while silently
 // reverting the dropdown.
 const conflictError = ref('');
+
+// DROPDOWN VISIBILITY — see the file header. Set true ONLY inside
+// openDropdown() (this input's @click), set false ONLY by select(),
+// Escape, or a real outside click. Never by data loading, never by a
+// prop/watch reacting to a freshly-generated modelValue.
+const isOpen = ref(false);
+let searchDebounceTimer = null;
 
 watch(
     () => props.modelValue,
@@ -109,7 +151,13 @@ const currentBadge = computed(() => current.value?.badge
 
 const isManualOverride = computed(() => current.value?.manual_override === true || current.value?.tier === 'manual_override');
 
-/** Loads the recommended pool (no search text) — called on mount and whenever the search box is cleared. */
+/**
+ * Loads the recommended pool (no search text) — called ONLY from
+ * openDropdown() below (a real @click on this input) or when the
+ * Registrar types (search()). Never on mount, never from a
+ * prop/watch reacting to a freshly-generated modelValue, never from
+ * focus alone.
+ */
 const loadRecommended = async () => {
     loadingOptions.value = true;
     try {
@@ -129,22 +177,20 @@ const recommendedBadge = (f) => {
     return f.selected_by_college_match ? 'College Match' : 'Qualified Faculty';
 };
 
-onMounted(loadRecommended);
-
 /** Global search across ALL faculty, regardless of College — the recommended pool is still shown first. */
-const search = async (event) => {
-    const text = event.query?.trim() ?? '';
+const search = async (text) => {
+    const trimmed = (text ?? '').trim();
     loadingOptions.value = true;
     try {
         const url = new URL(optionsUrl(), window.location.origin);
-        if (text.length > 0) url.searchParams.set('search', text);
+        if (trimmed.length > 0) url.searchParams.set('search', trimmed);
         const response = await fetch(url, { headers: { Accept: 'application/json' } });
         const data = await response.json();
 
         recommendedIds.value = new Set((data.recommended ?? []).map((f) => f.id));
 
         const recommended = (data.recommended ?? [])
-            .filter((f) => text.length === 0 || f.name.toLowerCase().includes(text.toLowerCase()))
+            .filter((f) => trimmed.length === 0 || f.name.toLowerCase().includes(trimmed.toLowerCase()))
             .map((f) => ({ ...f, badge: recommendedBadge(f), recommended: true }));
 
         const others = (data.search_results ?? []).map((f) => ({ ...f, recommended: false }));
@@ -155,10 +201,48 @@ const search = async (event) => {
     }
 };
 
-/** "Use This" — applies the Registrar's pick immediately, no modal close required. */
-const select = async (event) => {
-    const picked = event.value;
-    if (!picked?.id || picked.id === current.value?.id) return;
+/**
+ * Opens THIS row's Faculty dropdown. The only place in this file
+ * allowed to set isOpen = true — wired to a plain @click on the input
+ * below, nothing else (not @focus, so a parent Dialog's focus-trap
+ * can never trigger this even if focusOnShow ever changes upstream).
+ */
+const openDropdown = () => {
+    if (isOpen.value) return;
+    isOpen.value = true;
+    conflictError.value = '';
+    loadRecommended();
+};
+
+const closeDropdown = () => {
+    isOpen.value = false;
+    query.value = current.value?.name ?? '';
+};
+
+const onType = () => {
+    if (!isOpen.value) isOpen.value = true;
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => search(query.value), 250);
+};
+
+const onClickOutside = (event) => {
+    if (isOpen.value && root.value && !root.value.contains(event.target)) {
+        closeDropdown();
+    }
+};
+
+onMounted(() => document.addEventListener('mousedown', onClickOutside));
+onUnmounted(() => {
+    document.removeEventListener('mousedown', onClickOutside);
+    clearTimeout(searchDebounceTimer);
+});
+
+/** "Use This" — applies the Registrar's pick immediately, closes the dropdown, no modal close required. */
+const select = async (option) => {
+    if (!option?.id || option.id === current.value?.id) {
+        closeDropdown();
+        return;
+    }
 
     applying.value = true;
     conflictError.value = '';
@@ -170,17 +254,17 @@ const select = async (event) => {
                 'Content-Type': 'application/json',
                 'X-XSRF-TOKEN': csrfToken(),
             },
-            body: JSON.stringify({ faculty_id: picked.id }),
+            body: JSON.stringify({ faculty_id: option.id }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.message ?? 'Could not apply this faculty selection.');
 
         current.value = data.faculty;
         query.value = data.faculty.name;
+        isOpen.value = false;
 
         emit('updated', { faculty: data.faculty, overall_score: data.overall_score });
     } catch (e) {
-        // Revert the visible text back to the last confirmed faculty on failure.
         query.value = current.value?.name ?? '';
         conflictError.value = e.message || 'Could not apply this faculty selection.';
         // eslint-disable-next-line no-console
@@ -192,7 +276,7 @@ const select = async (event) => {
 </script>
 
 <template>
-    <div>
+    <div ref="root" class="relative">
         <div class="flex items-center justify-between mb-1">
             <span class="text-xs font-medium text-slate-500 uppercase">Faculty</span>
             <span class="text-xs font-semibold" :style="{ color: scoreColor(current.score ?? 0) }">
@@ -200,26 +284,41 @@ const select = async (event) => {
             </span>
         </div>
 
-        <AutoComplete
-            v-model="query"
-            v-uppercase
-            :suggestions="suggestions"
-            :loading="loadingOptions || applying"
-            optionLabel="name"
-            placeholder="Search faculty…"
-            class="w-full faculty-recommendation-selector"
-            inputClass="w-full text-sm"
-            panelClass="!max-w-none"
-            appendTo="body"
-            :delay="250"
-            forceSelection
-            dropdown
-            @complete="search"
-            @dropdown-click="loadRecommended"
-            @item-select="select"
-        >
-            <template #option="{ option }">
-                <div class="flex flex-col gap-0.5 py-1 w-full">
+        <div class="relative">
+            <input
+                v-model="query"
+                v-uppercase
+                type="text"
+                placeholder="Search faculty…"
+                class="w-full text-sm border rounded-md pl-2.5 pr-7 py-1.5 border-slate-200 focus:outline-none focus:border-primary-400 faculty-recommendation-input"
+                autocomplete="off"
+                @click="openDropdown"
+                @input="onType"
+                @keydown.escape="closeDropdown"
+            />
+            <i
+                class="pi pi-chevron-down text-slate-400 text-xs absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                :class="{ 'pi-spin pi-spinner': loadingOptions || applying }"
+            ></i>
+
+            <div
+                v-if="isOpen"
+                class="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-72 overflow-y-auto faculty-recommendation-panel"
+            >
+                <div v-if="loadingOptions" class="text-xs text-slate-500 px-3 py-3 text-center">
+                    <i class="pi pi-spin pi-spinner mr-1"></i>Loading faculty…
+                </div>
+                <div v-else-if="!suggestions.length" class="text-xs text-slate-500 px-3 py-3 text-center">
+                    No faculty found.
+                </div>
+                <div
+                    v-for="option in suggestions"
+                    v-else
+                    :key="option.id"
+                    class="flex flex-col gap-0.5 py-1.5 px-3 w-full cursor-pointer hover:bg-slate-50"
+                    :class="{ 'bg-slate-50': option.id === current.id }"
+                    @mousedown.prevent="select(option)"
+                >
                     <div class="flex items-center justify-between gap-2">
                         <span class="text-sm font-medium text-slate-800">{{ option.name }}</span>
                         <span class="text-xs font-semibold" :style="{ color: scoreColor(option.score) }">{{ option.score }}%</span>
@@ -237,11 +336,8 @@ const select = async (event) => {
                         <span class="text-xs text-slate-500">Load: {{ option.current_load }}/{{ option.max_teaching_units }}</span>
                     </div>
                 </div>
-            </template>
-            <template #empty>
-                <span class="text-xs text-slate-500 px-2">No faculty found.</span>
-            </template>
-        </AutoComplete>
+            </div>
+        </div>
 
         <!-- Conflict error — set when the backend rejects this pick
              (e.g. a Faculty Conflict with another Section already
@@ -286,7 +382,7 @@ const select = async (event) => {
 </template>
 
 <style scoped>
-.faculty-recommendation-selector :deep(.p-autocomplete-input) {
+.faculty-recommendation-input {
     font-size: 0.85rem;
 }
 </style>

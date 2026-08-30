@@ -26,6 +26,7 @@ use App\Services\RecommendationService;
 use App\Services\RoomUtilizationService;
 use App\Services\NotificationService;
 use App\Services\ScheduleConflictService;
+use App\Support\AccessScope;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -597,6 +598,26 @@ class SectionSubjectController extends Controller implements HasMiddleware
         UpdateSectionSubjectScheduleRequest $request,
         SectionSubject $subject
     ): JsonResponse {
+        // CATEGORY SCOPE (Assistant Dean = GenEd/Minor only, spec §8) —
+        // the shared write path behind BOTH updateSchedule() (Subjects
+        // tab inline editor) and moveRoomGridAssignment() (Room Grid
+        // drag/drop), so this is the one place that has to catch every
+        // way a schedule assignment gets written, regardless of which
+        // tab it came from. Section-level scope is already enforced
+        // upstream (the controller-wide manageScheduling middleware
+        // for updateSchedule(), moveScheduleAssignment's own Gate call
+        // for moveRoomGridAssignment()) — neither of those checks the
+        // SUBJECT's category, only the SECTION, which is why an
+        // Assistant Dean could previously drag/drop or manually assign
+        // a Major subject despite Auto Generate already excluding
+        // Major subjects for them (AutoScheduleService::unscheduledRows()).
+        // This closes that gap at the one shared write path rather
+        // than duplicating the check in both callers.
+        $subject->loadMissing('subject');
+        if (AccessScope::isAssistantDean($request->user()) && $subject->subject && ! $subject->subject->isSharedResource()) {
+            abort(403, "{$subject->subject->subject_code} is a Major subject — outside your Assistant Dean scheduling scope (GenEd/Minor only). The Dean/OIC manages this subject's schedule.");
+        }
+
         $validated = $request->validated();
 
         // Merge the incoming (possibly partial) edit onto the row's
@@ -1623,6 +1644,26 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 // SectionPolicy::moveScheduleAssignment().
                 $canEdit = $user ? Gate::forUser($user)->allows('moveScheduleAssignment', $assignment->section) : false;
 
+                // CATEGORY SCOPE — SectionPolicy::canAccess() grants an
+                // Assistant Dean section-level reach identical to
+                // Admin/Registrar's (they need to see/schedule GenEd/
+                // Minor subjects across every College), but their WRITE
+                // authority never extends to Major subjects — that's
+                // the Dean/OIC's territory (spec §8, AccessScope's
+                // ASSISTANT_DEAN_ROLE docblock). A Major subject's block
+                // is therefore never draggable/editable for them, even
+                // inside their own "current" section. This is the
+                // manual-drag counterpart to Auto Generate's
+                // unscheduledRows() category filter — same rule,
+                // enforced on both the automated and manual write paths.
+                $outOfCategory = AccessScope::isAssistantDean($user)
+                    && $assignment->subject
+                    && ! $assignment->subject->isSharedResource();
+
+                if ($outOfCategory) {
+                    $canEdit = false;
+                }
+
                 return [
                     'section_subject_id' => $assignment->id,
                     'subject_code' => $assignment->subject?->subject_code,
@@ -1641,6 +1682,14 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // Section's blocks are never draggable no matter how
                     // wide the user's scheduling scope is.
                     'can_edit' => $canEdit && ! $assignment->section?->is_finalized,
+                    // True only for an Assistant Dean looking at a Major
+                    // subject's block — lets the Room Grid render a 5th
+                    // visual state distinct from "locked" (out-of-college)
+                    // and "finalized", so they can tell "this is the
+                    // Dean's subject" apart from "this isn't my college"
+                    // or "this is done." See RoomGrid.vue's
+                    // blockAuthState().
+                    'is_out_of_category' => $outOfCategory,
                     // SECTION-LEVEL SCHEDULE FINALIZATION — lets the Room
                     // Grid render a distinct 4th visual state (locked
                     // padlock, amber) for a finalized Section's blocks,
@@ -2064,7 +2113,8 @@ class SectionSubjectController extends Controller implements HasMiddleware
         try {
             $summary = $this->autoScheduleService->generate(
                 $section,
-                $request->filled('expected_schedule_version') ? (int) $request->input('expected_schedule_version') : null
+                $request->filled('expected_schedule_version') ? (int) $request->input('expected_schedule_version') : null,
+                $request->user()
             );
         } catch (ScheduleVersionConflictException $conflict) {
             return response()->json([
@@ -2114,7 +2164,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
      */
     public function regenerateSchedule(Request $request, Section $section): JsonResponse
     {
-        $summary = $this->autoScheduleService->regenerate($section);
+        $summary = $this->autoScheduleService->regenerate($section, $request->user());
 
         // SCHEDULING NOTIFICATION SYSTEM (audit spec Section 5) — same
         // reasoning as autoGenerate() above. A regenerate that
@@ -2328,6 +2378,26 @@ class SectionSubjectController extends Controller implements HasMiddleware
                 $capacity = $rowData['capacity'] ?? $subject->capacity;
 
                 $rowErrors = [];
+
+                // CATEGORY SCOPE (Assistant Dean = GenEd/Minor only) —
+                // same rule as performScheduleAssignmentUpdate() above,
+                // enforced here too since Save Schedule is a separate
+                // write path (doesn't route through that shared
+                // method) that can otherwise persist a Major subject's
+                // Faculty/Room/Time for an Assistant Dean — e.g. rows
+                // they edited inline on the Subjects tab before
+                // clicking Save, or an Auto Generate result they
+                // accepted as-is. Unlike the single-cell endpoint this
+                // can't abort(403) the whole request (a batch mixes
+                // in-scope and out-of-scope rows), so it's reported as
+                // a per-row error and simply not saved instead.
+                if (AccessScope::isAssistantDean($request->user()) && $subject->subject && ! $subject->subject->isSharedResource()) {
+                    $rowErrors['category'] = "{$subject->subject->subject_code} is a Major subject — outside your Assistant Dean scheduling scope (GenEd/Minor only). The Dean/OIC manages this subject's schedule.";
+                    $errors[$subject->id] = $rowErrors;
+                    $skippedIds[] = $subject->id;
+
+                    continue;
+                }
 
                 // Room Capacity Warning — not a hard block, but the
                 // Registrar must explicitly confirm this row before it's

@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Subject;
+use App\Models\User;
+use App\Support\AccessScope;
 use App\Exceptions\ScheduleConflictAbort;
 use App\Exceptions\ScheduleVersionConflictException;
 use Illuminate\Support\Facades\DB;
@@ -70,9 +72,19 @@ class AutoScheduleService
      * + write, so this is a belt-and-suspenders check at the start of
      * the run, not a substitute for it.
      *
+     * SCOPE ENFORCEMENT (Assistant Dean = GenEd/Minor only) — $user is
+     * the acting user. When they're an Assistant Dean, Major subjects
+     * are never included in $targets at all (see unscheduledRows()) —
+     * not attempted, not written, not counted toward 'total'/
+     * 'scheduled'. They're reported separately under
+     * 'skipped_out_of_scope' so the review panel can say "left for
+     * the Dean" instead of silently doing nothing. Every other role
+     * is unaffected — unscheduledRows() returns every unscheduled row
+     * for them, exactly as before.
+     *
      * @throws ScheduleVersionConflictException
      */
-    public function generate(Section $section, ?int $expectedVersion = null): array
+    public function generate(Section $section, ?int $expectedVersion = null, ?User $user = null): array
     {
         $section->loadMissing('major.department');
 
@@ -100,11 +112,14 @@ class AutoScheduleService
         // ScheduleVersionConflictException if the first run already
         // bumped the version — exactly the "please refresh" outcome
         // the frontend already handles today.
-        return DB::transaction(function () use ($section, $expectedVersion) {
+        return DB::transaction(function () use ($section, $expectedVersion, $user) {
             $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
             $this->conflictService->checkSectionVersion($lockedSection, $expectedVersion);
 
-            $targets = $this->unscheduledRows($section);
+            $targets = $this->unscheduledRows($section, $user);
+            $skippedOutOfScope = AccessScope::isAssistantDean($user)
+                ? $this->outOfScopeRows($section)
+                : collect();
 
             if ($targets->isEmpty()) {
                 return [
@@ -112,7 +127,13 @@ class AutoScheduleService
                     'scheduled' => 0,
                     'results' => [],
                     'unresolved' => [],
-                    'message' => 'Every subject in this section already has a schedule assigned.',
+                    'skipped_out_of_scope' => $this->summarizeSkipped($skippedOutOfScope),
+                    'message' => $skippedOutOfScope->isEmpty()
+                        ? 'Every subject in this section already has a schedule assigned.'
+                        : 'No GenEd/Minor subjects need scheduling. '
+                            .$skippedOutOfScope->count().' Major '
+                            .($skippedOutOfScope->count() === 1 ? 'subject is' : 'subjects are')
+                            .' left for the Dean/OIC to schedule.',
                 ];
             }
 
@@ -146,6 +167,12 @@ class AutoScheduleService
                     .' merged into existing Regular section classes.';
             }
 
+            if ($skippedOutOfScope->isNotEmpty()) {
+                $message .= ' '.$skippedOutOfScope->count().' Major '
+                    .($skippedOutOfScope->count() === 1 ? 'subject was' : 'subjects were')
+                    .' left for the Dean/OIC (outside your GenEd/Minor scheduling scope).';
+            }
+
             // Advance the Section's schedule_version exactly once for
             // this run, but only when it actually wrote something — a run
             // that placed nothing (every candidate lost its race, or
@@ -165,6 +192,7 @@ class AutoScheduleService
                 'merged' => $mergedCount,
                 'results' => $results,
                 'unresolved' => $unresolved,
+                'skipped_out_of_scope' => $this->summarizeSkipped($skippedOutOfScope),
                 'message' => $message,
             ];
         });
@@ -177,14 +205,22 @@ class AutoScheduleService
      * (is_auto_generated is cleared the moment a row is hand-edited
      * via the normal Save Schedule flow — see SectionSubjectController).
      */
-    public function clear(Section $section): int
+    public function clear(Section $section, ?User $user = null): int
     {
-        return DB::transaction(function () use ($section) {
+        return DB::transaction(function () use ($section, $user) {
             $lockedSection = $this->conflictService->lockResources(null, null, $section->id);
 
-            $cleared = $section->sectionSubjects()
-                ->where('is_auto_generated', true)
-                ->update([
+            $query = $section->sectionSubjects()->where('is_auto_generated', true);
+
+            // Assistant Dean's "Regenerate" must never wipe out a
+            // Major subject's auto-generated schedule — that row is
+            // outside their scope to touch even to clear it, same as
+            // it's outside their scope to write in the first place.
+            if (AccessScope::isAssistantDean($user)) {
+                $query->whereHas('subject', fn ($q) => $q->whereIn('category', ['General Education', 'Minor']));
+            }
+
+            $cleared = $query->update([
                     'faculty_id' => null,
                     'room_id' => null,
                     'days' => null,
@@ -211,19 +247,50 @@ class AutoScheduleService
      * never manually-assigned ones), then runs generate() again from
      * a clean slate.
      */
-    public function regenerate(Section $section): array
+    public function regenerate(Section $section, ?User $user = null): array
     {
-        $this->clear($section);
+        $this->clear($section, $user);
 
-        return $this->generate($section);
+        return $this->generate($section, null, $user);
     }
 
     /**
      * Only subjects with a completely empty schedule slot are ever
      * touched — this is the "don't overwrite manual assignments"
      * rule enforced at the query level, not just by convention.
+     *
+     * SCOPE ENFORCEMENT — when $user is an Assistant Dean, Major
+     * subjects are excluded here entirely (reuses Subject's own
+     * 'General Education'/'Minor' category list — see
+     * AccessScope::isSharedCategory() / Subject::scopeManageableBy())
+     * so they're never handed to generateOne() at all. Every other
+     * role's query is unchanged.
      */
-    private function unscheduledRows(Section $section)
+    private function unscheduledRows(Section $section, ?User $user = null)
+    {
+        $query = $section->sectionSubjects()
+            ->whereNull('faculty_id')
+            ->whereNull('room_id')
+            ->whereNull('days')
+            ->whereNull('start_time')
+            ->whereNull('end_time')
+            ->with('subject');
+
+        if (AccessScope::isAssistantDean($user)) {
+            $query->whereHas('subject', fn ($q) => $q->whereIn('category', ['General Education', 'Minor']));
+        }
+
+        return $query->get()
+            ->filter(fn (SectionSubject $row) => $row->subject !== null)
+            ->values();
+    }
+
+    /**
+     * The Major-subject unscheduled rows an Assistant Dean's run
+     * deliberately left alone — used only to build the
+     * 'skipped_out_of_scope' summary/message, never scheduled.
+     */
+    private function outOfScopeRows(Section $section)
     {
         return $section->sectionSubjects()
             ->whereNull('faculty_id')
@@ -232,9 +299,25 @@ class AutoScheduleService
             ->whereNull('start_time')
             ->whereNull('end_time')
             ->with('subject')
+            ->whereHas('subject', fn ($q) => $q->where('category', 'Major'))
             ->get()
             ->filter(fn (SectionSubject $row) => $row->subject !== null)
             ->values();
+    }
+
+    /**
+     * Small frontend-friendly summary of skipped Major subjects —
+     * count plus subject codes, so the review panel can list them
+     * ("BSIT 301, BSIT 305 left for the Dean") instead of just a number.
+     *
+     * @param  \Illuminate\Support\Collection<int, SectionSubject>  $skipped
+     */
+    private function summarizeSkipped($skipped): array
+    {
+        return [
+            'count' => $skipped->count(),
+            'subject_codes' => $skipped->pluck('subject.subject_code')->filter()->values()->all(),
+        ];
     }
 
     /**

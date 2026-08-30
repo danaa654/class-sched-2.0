@@ -13,6 +13,7 @@
  * and RBAC are enforced exactly once, server-side, in one place.
  */
 import { ref, computed, onMounted, watch } from 'vue';
+import { usePage } from '@inertiajs/vue3';
 import InputText from 'primevue/inputtext';
 import InputNumber from 'primevue/inputnumber';
 import Select from 'primevue/select';
@@ -386,9 +387,17 @@ const blockHasConflict = (block) => !!block && conflictedBlockIds.value.has(bloc
 // - "locked": the schedule's Section is OUTSIDE the user's authorized
 //   scheduling scope — visible (Room Grid stays room-centric), never
 //   draggable/editable.
+// - "out_of_category": the block IS within the user's authorized
+//   Section scope, but is a Major subject and the user is an
+//   Assistant Dean (GenEd/Minor only, spec §8) — visible, never
+//   draggable/editable. Distinct from "locked" so an Assistant Dean
+//   can tell "this isn't my subject type" apart from "this isn't my
+//   college" — see can_edit/is_out_of_category from roomSchedule()
+//   in SectionSubjectController.
 const blockAuthState = (block) => {
     if (!block) return 'locked';
     if (block.is_finalized) return 'finalized';
+    if (block.is_out_of_category) return 'out_of_category';
     if (block.is_current_section) return 'current';
     return block.can_edit ? 'authorized' : 'locked';
 };
@@ -399,6 +408,7 @@ const blockClass = (block) => {
     if (state === 'current') return 'bg-blue-50 border border-blue-200 text-blue-700 cursor-grab hover:border-blue-400';
     if (state === 'authorized') return 'bg-emerald-50 border border-emerald-300 border-dashed text-emerald-700 cursor-grab hover:border-emerald-500';
     if (state === 'finalized') return 'bg-amber-50 border border-amber-300 text-amber-800 cursor-not-allowed';
+    if (state === 'out_of_category') return 'bg-slate-50 border border-slate-300 border-dotted text-slate-500 cursor-not-allowed';
     return 'bg-slate-100 border border-slate-300 text-slate-500 cursor-not-allowed';
 };
 
@@ -410,6 +420,7 @@ const blockTitle = (block) => {
     if (state === 'current') return 'Click to edit · Drag to move';
     if (state === 'authorized') return `Belongs to ${block.section_code} — within your authorized scheduling scope. Drag to move.`;
     if (state === 'finalized') return `${block.section_code}'s schedule is finalized — an Admin/Registrar must unlock it before this can be edited.`;
+    if (state === 'out_of_category') return `${block.subject_code} is a Major subject — outside your Assistant Dean scheduling scope (GenEd/Minor only). The Dean/OIC manages this.`;
     return 'This schedule is outside your scheduling scope.';
 };
 
@@ -425,6 +436,22 @@ const needsRoomPlacement = (row) => {
 };
 
 const unscheduledSubjects = computed(() => props.rows.filter(needsRoomPlacement));
+
+// CATEGORY SCOPE (Assistant Dean = GenEd/Minor only, spec §8) — reuses
+// the same 'auth.user.roles' Inertia already shares globally (see
+// HandleInertiaRequests), rather than threading a new prop through
+// Show.vue just for this. Major-subject rows stay VISIBLE in the
+// "Unscheduled Subjects" sidebar for an Assistant Dean — hiding them
+// would make it look like the section has fewer subjects than it
+// really does — but greyed out and non-draggable, matching the same
+// "visible, not hidden" treatment already given to out-of-category
+// placed blocks (blockAuthState()'s 'out_of_category' state below).
+// The backend enforces this independently regardless of what the UI
+// allows — see performScheduleAssignmentUpdate() in
+// SectionSubjectController.
+const page = usePage();
+const isAssistantDean = computed(() => (page.props.auth?.roles ?? []).includes('Assistant Dean'));
+const isRowOutOfCategory = (row) => isAssistantDean.value && row.subject?.category === 'Major';
 
 /* ------------------------------------------------------------------ */
 /* GHOST OVERLAY ("x-ray") — Prompt: eye icon showing this section's   */
@@ -462,6 +489,7 @@ const sectionGhostBlocks = computed(() => {
                 span,
                 subject_code: row.subject?.subject_code,
                 room_name: row.room?.room_name,
+                faculty_name: row.faculty?.full_name ?? row.faculty_name ?? null,
             });
         });
     });
@@ -896,6 +924,31 @@ const onDrop = async (day, rowIndex) => {
         draggingRow.value = null;
         if (!row) return;
 
+        // CATEGORY SCOPE (Assistant Dean = GenEd/Minor only) — the
+        // sidebar's :draggable="!isRowOutOfCategory(row)" already
+        // stops this in the common case, but HTML5 drag state can
+        // outlive a stale render (row list refreshed mid-drag, a
+        // browser that doesn't honor draggable=false consistently,
+        // etc.), so the drop itself re-checks rather than trusting
+        // the drag source. This is what stops a Major subject from
+        // ever reaching the Schedule Subject modal for an Assistant
+        // Dean — previously it opened the modal and only failed on
+        // Save Schedule, which is confusing (looks like it worked,
+        // then errors after filling out the form). The backend still
+        // rejects it independently either way — see
+        // performScheduleAssignmentUpdate() in
+        // SectionSubjectController — this is purely to fail fast and
+        // clearly in the UI instead of relying on that.
+        if (isRowOutOfCategory(row)) {
+            toast.add({
+                severity: 'warn',
+                summary: 'Outside your scope',
+                detail: `${row.subject?.subject_code ?? 'This subject'} is a Major subject — outside your Assistant Dean scheduling scope (GenEd/Minor only). The Dean/OIC manages this subject's schedule.`,
+                life: 5000,
+            });
+            return;
+        }
+
         // INTELLIGENT IRREGULAR SECTION SCHEDULING, drag-and-drop entry
         // point — mirrors the "Merge Recommendation" flow already
         // available from the Subjects tab (IrregularSectionMergeService
@@ -1124,6 +1177,29 @@ const facultyBadgeSeverity = (badge) => {
         default:
             return 'secondary';
     }
+};
+
+// Remaining Teaching Load — same current_load/max_teaching_units figures
+// FacultyWorkloadService already sends on every Faculty option (see
+// activeFaculty in SectionSubjectController), just surfaced here so the
+// Registrar can see at a glance how much room a Faculty member has left
+// before picking them, instead of only finding out after Save Schedule's
+// workload guard rejects an over-capacity pick.
+const remainingUnitsLabel = (option) => {
+    const max = option.max_teaching_units;
+    const load = option.current_load ?? 0;
+    if (max == null) return '';
+    const remaining = max - load;
+    return `${remaining} unit${remaining === 1 ? '' : 's'} left (${load}/${max})`;
+};
+
+const remainingUnitsClass = (option) => {
+    const max = option.max_teaching_units;
+    if (max == null) return 'text-slate-400';
+    const remaining = max - (option.current_load ?? 0);
+    if (remaining <= 0) return 'text-red-500 font-medium';
+    if (remaining <= 3) return 'text-amber-600';
+    return 'text-slate-400';
 };
 
 const loadFacultyRecommendations = async (sectionSubjectId) => {
@@ -1954,6 +2030,7 @@ const removeAssignment = async () => {
                                         <i class="pi pi-eye absolute top-1 right-1 text-[9px] opacity-70"></i>
                                         <div class="font-semibold truncate">{{ ghostBlockAt(day, rowIndex).subject_code }}</div>
                                         <div class="truncate text-[10px] opacity-80">{{ ghostBlockAt(day, rowIndex).room_name ?? 'Another room' }}</div>
+                                        <div v-if="ghostBlockAt(day, rowIndex).faculty_name" class="truncate text-[10px] opacity-70">{{ ghostBlockAt(day, rowIndex).faculty_name }}</div>
                                     </div>
                                 </div>
                             </template>
@@ -1994,11 +2071,14 @@ const removeAssignment = async () => {
                 <li
                     v-for="row in unscheduledSubjects"
                     :key="row.id"
-                    :draggable="!section.is_finalized"
-                    class="rounded-md px-2 py-1.5 text-xs border border-slate-200 cursor-grab hover:border-blue-300 hover:bg-blue-50/40"
-                    :class="subjectCategoryAccentClass(row)"
-                    :title="section.is_finalized ? 'This section is finalized and can\'t be edited.' : (!selectedRoom ? 'Select a room first' : 'Drag onto the grid')"
-                    @dragstart="section.is_finalized ? null : onDragStartNew(row)"
+                    :draggable="!section.is_finalized && !isRowOutOfCategory(row)"
+                    class="rounded-md px-2 py-1.5 text-xs border border-slate-200"
+                    :class="[
+                        isRowOutOfCategory(row) ? 'opacity-50 cursor-not-allowed grayscale' : 'cursor-grab hover:border-blue-300 hover:bg-blue-50/40',
+                        subjectCategoryAccentClass(row),
+                    ]"
+                    :title="isRowOutOfCategory(row) ? `${row.subject?.subject_code} is a Major subject — outside your Assistant Dean scheduling scope (GenEd/Minor only). The Dean/OIC schedules this.` : (section.is_finalized ? 'This section is finalized and can\'t be edited.' : (!selectedRoom ? 'Select a room first' : 'Drag onto the grid'))"
+                    @dragstart="(section.is_finalized || isRowOutOfCategory(row)) ? null : onDragStartNew(row)"
                 >
                     <div class="font-medium text-slate-700 truncate flex items-center gap-1.5">
                         <span class="inline-block h-1.5 w-1.5 rounded-full shrink-0" :class="subjectCategoryDotClass(row)"></span>
@@ -2144,7 +2224,17 @@ const removeAssignment = async () => {
                                         class="!text-[10px]"
                                     />
                                 </div>
-                                <span v-if="option.college" class="text-[10px] text-slate-400">{{ option.college }}</span>
+                                <div class="flex items-center gap-1.5">
+                                    <span v-if="option.college" class="text-[10px] text-slate-400">{{ option.college }}</span>
+                                    <span v-if="option.college && option.max_teaching_units != null" class="text-[10px] text-slate-300">·</span>
+                                    <span
+                                        v-if="option.max_teaching_units != null"
+                                        class="text-[10px]"
+                                        :class="remainingUnitsClass(option)"
+                                    >
+                                        {{ remainingUnitsLabel(option) }}
+                                    </span>
+                                </div>
                             </div>
                         </template>
                     </Select>

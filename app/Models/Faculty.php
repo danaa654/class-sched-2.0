@@ -52,7 +52,7 @@ class Faculty extends Model
      *
      * @var list<string>
      */
-    protected $appends = ['faculty_category'];
+    protected $appends = ['faculty_category', 'full_name'];
 
     /**
      * @return array<string, string>
@@ -144,21 +144,24 @@ class Faculty extends Model
     /**
      * RBAC query scope (spec Section 24 — QUERY SCOPING): restrict the
      * Faculty roster to what $user is authorized to see.
-     * Admin/Registrar: unrestricted. Assistant Dean: GenEd/Minor
-     * faculty only (college_id null). Dean/OIC: their own College's
-     * faculty only. Anyone else: no rows.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<Faculty>  $query
-     * @return \Illuminate\Database\Eloquent\Builder<Faculty>
+     * Admin/Registrar/Assistant Dean: unrestricted (full roster —
+     * Assistant Dean needs to find Minor/GenEd-qualified faculty
+     * regardless of which College they belong to). Dean/OIC: their
+     * own College's faculty only. Anyone else: no rows.
      */
     public function scopeVisibleTo($query, ?\App\Models\User $user)
     {
-        if (\App\Support\AccessScope::isUnrestricted($user)) {
+        // Assistant Dean sees the FULL roster (like Admin/Registrar) —
+        // Minor/GenEd subjects are taught by faculty who belong to any
+        // College (e.g. a CCS faculty teaching an ITE minor for CTE/
+        // BSHM/BSTM), so restricting this list to college_id-null
+        // faculty hid exactly the people Assistant Dean needs to find
+        // to assign them. What stays restricted to Assistant Dean is
+        // WHICH qualifications/subjects they may manage for a given
+        // faculty (Minor/GenEd only) — see FacultyPolicy::manageQualification()
+        // — never which faculty rows they can see.
+        if (\App\Support\AccessScope::isUnrestricted($user) || \App\Support\AccessScope::isAssistantDean($user)) {
             return $query;
-        }
-
-        if (\App\Support\AccessScope::isAssistantDean($user)) {
-            return $query->whereNull('college_id');
         }
 
         $ids = \App\Support\AccessScope::visibleCollegeIds($user);

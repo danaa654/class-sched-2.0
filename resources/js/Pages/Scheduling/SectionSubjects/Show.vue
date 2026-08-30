@@ -3985,7 +3985,21 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             </template>
         </Dialog>
 
-        <!-- ⚡ Auto Generate Schedule — review panel -->
+        <!-- ⚡ Auto Generate Schedule — review panel.
+             :focusOnShow="false" — PrimeVue Dialog auto-focuses the
+             first focusable element inside it on open by default —
+             here that's one of the Faculty/Room AutoComplete inputs.
+             That focus event alone was enough to trigger
+             RoomRecommendationSelector's/FacultyRecommendationSelector's
+             @focus="loadRecommended" (added to fix the previous
+             "panels open on mount" bug), popping that row's suggestion
+             panel open with nobody having clicked anything — the same
+             class of bug, just re-triggered through Dialog's own focus
+             trap instead of onMounted(). Stopping the Dialog from
+             moving focus into its content at all when it opens is the
+             right fix here regardless of what's inside — a review
+             panel shouldn't silently steal focus into a random input
+             the moment it appears. -->
         <Dialog
             :visible="autoSummaryVisible"
             @update:visible="onAutoSummaryVisibleChange"
@@ -3994,6 +4008,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             :style="{ width: dockedEditSectionSubjectId ? '1100px' : '760px', maxWidth: '95vw', transition: 'width 0.2s ease' }"
             :breakpoints="{ '960px': '95vw', '640px': '98vw' }"
             :draggable="false"
+            :focusOnShow="false"
             :pt="{
                 root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
                 header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },

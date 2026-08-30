@@ -16,6 +16,17 @@ class FacultyPolicy
 
     public function view(User $user, Faculty $faculty): bool
     {
+        // Viewing a faculty record's details is READ access, same lane
+        // as the roster list (scopeVisibleTo) — Assistant Dean can look
+        // up any faculty, e.g. a CCS faculty who also teaches an ITE
+        // Minor subject for another College, in order to assign them.
+        // This is intentionally broader than canAccess()/update(),
+        // which still gate WRITE access to Assistant Dean's own
+        // GenEd/Minor-faculty lane.
+        if (AccessScope::isAssistantDean($user)) {
+            return true;
+        }
+
         return $this->canAccess($user, $faculty);
     }
 
