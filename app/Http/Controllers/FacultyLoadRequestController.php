@@ -6,9 +6,11 @@ use App\Http\Requests\ReviewFacultyLoadRequestRequest;
 use App\Http\Requests\StoreFacultyLoadRequestRequest;
 use App\Models\Faculty;
 use App\Models\FacultyLoadRequest;
+use App\Services\FacultyWorkloadService;
 use App\Services\NotificationService;
 use App\Support\AccessScope;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -28,7 +30,10 @@ use Illuminate\Support\Facades\DB;
  */
 class FacultyLoadRequestController extends Controller
 {
-    public function __construct(private readonly NotificationService $notifications) {}
+    public function __construct(
+        private readonly NotificationService $notifications,
+        private readonly FacultyWorkloadService $workloadService,
+    ) {}
 
     /**
      * Submit a new load change for a Faculty member.
@@ -49,7 +54,7 @@ class FacultyLoadRequestController extends Controller
      * Approved/self-reviewed and the Faculty row is updated in the
      * same transaction, same as review() below.
      */
-    public function store(StoreFacultyLoadRequestRequest $request): RedirectResponse
+    public function store(StoreFacultyLoadRequestRequest $request): RedirectResponse|JsonResponse
     {
         $this->authorize('create', FacultyLoadRequest::class);
 
@@ -64,21 +69,92 @@ class FacultyLoadRequestController extends Controller
         $requestedUnits = $data['requested_max_teaching_units'] ?? null;
         $requestedHours = $data['requested_max_weekly_hours'] ?? null;
 
+        // JSON callers (currently: Room Grid's "Request more units" /
+        // "Add Units" shortcut — see RoomGrid.vue's openLoadRequestDialog())
+        // need these two guard-clause failures back as a normal 422
+        // {errors} body they can toast inline, not a 302 redirect they'd
+        // have to follow and then re-parse HTML out of. Anything that
+        // didn't ask for JSON (the Faculty Master page's own Inertia
+        // form — see Faculty/Index.vue's onSubmitLoadRequest()) keeps
+        // getting exactly the back()->withErrors() it always has.
         if ($requestedUnits === null && $requestedHours === null) {
-            return back()->withErrors(['requested_max_teaching_units' => 'Enter the units and/or hours you are requesting.'])->withInput();
+            $message = 'Enter the units and/or hours you are requesting.';
+
+            return $request->wantsJson()
+                ? response()->json(['errors' => ['requested_max_teaching_units' => [$message]]], 422)
+                : back()->withErrors(['requested_max_teaching_units' => $message])->withInput();
         }
 
         if ($requestedUnits !== null && $requestedUnits <= $faculty->max_teaching_units) {
-            return back()->withErrors(['requested_max_teaching_units' => 'The requested units must be higher than the faculty member\'s current maximum ('.$faculty->max_teaching_units.').'])->withInput();
+            $message = 'The requested units must be higher than the faculty member\'s current maximum ('.$faculty->max_teaching_units.').';
+
+            return $request->wantsJson()
+                ? response()->json(['errors' => ['requested_max_teaching_units' => [$message]]], 422)
+                : back()->withErrors(['requested_max_teaching_units' => $message])->withInput();
         }
 
         $actorIsReviewer = AccessScope::isUnrestricted($request->user());
         $cap = FacultyLoadRequest::effectiveCapFor($request->user());
 
-        DB::transaction(function () use ($faculty, $requestedUnits, $requestedHours, $data, $request, $actorIsReviewer, $cap) {
+        // SAFETY NET — BUG FIX: Admin/Registrar's request is auto-approved
+        // and applied to the Faculty row immediately, with no separate
+        // reviewer downstream to catch a ceiling that's still too low for
+        // what the faculty member is ACTUALLY carrying right now. This
+        // bit them via Room Grid's "Add Units" shortcut: its old default
+        // ("current max + 1") assumed max_teaching_units was still an
+        // accurate ceiling, but a faculty member can already be carrying
+        // MORE than that ceiling after an Administrator's workload
+        // override on Save (writeSchedule()'s "Proceed Anyway" — see
+        // RoomGrid.vue). "current max + 1" then undershot badly, leaving
+        // them just as visibly over-capacity afterward (e.g. shown as
+        // 15 / 12 Units on the Faculty Master page). Frontend now
+        // defaults its prefilled amount higher (see RoomGrid.vue's
+        // openLoadRequestDialog()), but this floor is enforced here too
+        // regardless of what value actually arrives, so a stale client,
+        // a hand-crafted request, or a future caller can't reintroduce
+        // the same bug. Reuses FacultyWorkloadService::currentLoad() —
+        // the exact same figure already shown as the "Y" in every
+        // "X units left (Y/Z)" display — rather than re-deriving load a
+        // second way. Deliberately scoped to the auto-approve path only:
+        // a Pending request still goes through manual review, where a
+        // human reviewer sees (and can adjust) the number before it ever
+        // touches the Faculty row, so this floor would just be second-
+        // guessing that review rather than fixing an actual bug.
+        if ($actorIsReviewer && $requestedUnits !== null) {
+            $currentLoad = $this->workloadService->currentLoad($faculty);
+
+            if ($currentLoad > $cap) {
+                // The faculty is ALREADY carrying more than the
+                // institution-wide ceiling allows (only reachable via an
+                // Administrator's explicit workload override on Save) —
+                // no valid ceiling can be applied here without breaching
+                // effectiveCapFor() itself, so this has to surface as an
+                // error rather than silently clamping to $cap and leaving
+                // the faculty exactly as over-capacity as they were
+                // before this request.
+                $message = "{$faculty->full_name}'s current teaching load ({$currentLoad}) already exceeds the institution-wide ceiling ({$cap} units). Raise the ceiling under Settings > Faculty & Workload, or reduce their assigned load, before requesting a change here.";
+
+                return $request->wantsJson()
+                    ? response()->json(['errors' => ['requested_max_teaching_units' => [$message]]], 422)
+                    : back()->withErrors(['requested_max_teaching_units' => $message])->withInput();
+            }
+        } else {
+            $currentLoad = null;
+        }
+
+        DB::transaction(function () use ($faculty, $requestedUnits, $requestedHours, $data, $request, $actorIsReviewer, $cap, $currentLoad) {
             $units = $requestedUnits !== null
                 ? min($requestedUnits, $cap)
                 : $faculty->max_teaching_units;
+
+            // See the safety-net comment above this transaction — floors
+            // the auto-approved ceiling at the faculty's actual current
+            // load (already confirmed <= $cap up there) so it can never
+            // land below what they're really carrying, regardless of
+            // what the request itself asked for.
+            if ($actorIsReviewer && $currentLoad !== null) {
+                $units = max($units, $currentLoad);
+            }
 
             $loadRequest = FacultyLoadRequest::create([
                 'faculty_id' => $faculty->id,
@@ -112,10 +188,40 @@ class FacultyLoadRequestController extends Controller
             $this->notifications->facultyLoadRequestSubmitted($loadRequest, $request->user());
         });
 
-        return redirect()->route('scheduling.faculty')
-            ->with('success', $actorIsReviewer
-                ? 'Faculty load ceiling updated.'
-                : 'Load change request submitted for review.');
+        $successMessage = $actorIsReviewer
+            ? 'Faculty load ceiling updated.'
+            : 'Load change request submitted for review.';
+
+        // Format-aware response — the Room Grid's inline "Request more
+        // units"/"Add Units" shortcut (RoomGrid.vue) calls this same
+        // endpoint via fetch() with Accept: application/json so it can
+        // update its own local Faculty data and stay on the Room Grid
+        // instead of being yanked into a full-page Inertia redirect to
+        // the Faculty Master page mid-scheduling. Every other caller
+        // (the Faculty Master page's own "Request a load increase"/
+        // "Add Load" Inertia form) never sends that header, so it falls
+        // through to the exact same redirect this action has always
+        // returned — that flow is untouched.
+        if ($request->wantsJson()) {
+            $faculty->refresh();
+
+            return response()->json([
+                'success' => true,
+                'message' => $successMessage,
+                // Lets the frontend tell "took effect immediately" apart
+                // from "still needs a reviewer" without having to infer
+                // it from the message string.
+                'auto_approved' => $actorIsReviewer,
+                // Only meaningful when auto_approved is true — a Pending
+                // request hasn't touched the Faculty row yet, so these
+                // just echo back the (unchanged) current ceiling rather
+                // than implying a change already happened.
+                'max_teaching_units' => $faculty->max_teaching_units,
+                'max_weekly_hours' => $faculty->max_weekly_hours,
+            ]);
+        }
+
+        return redirect()->route('scheduling.faculty')->with('success', $successMessage);
     }
 
     /**

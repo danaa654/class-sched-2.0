@@ -51,6 +51,12 @@ const props = defineProps({
             lunch_end: '13:00',
         }),
     },
+    // Institution-wide Teaching Load ceiling (FacultyLoadRequest::
+    // effectiveCapFor()) — caps the "Request more units"/"Add Units"
+    // dialog's number field at the same limit
+    // StoreFacultyLoadRequestRequest enforces server-side. Same prop
+    // name/shape/default as Faculty/Index.vue's own hardCapUnits.
+    hardCapUnits: { type: Number, default: 40 },
 });
 
 // Room Code was retired from the UI — the underlying rooms table still
@@ -456,6 +462,14 @@ const page = usePage();
 const isAssistantDean = computed(() => (page.props.auth?.roles ?? []).includes('Assistant Dean'));
 const isRowOutOfCategory = (row) => isAssistantDean.value && row.subject?.category === 'Major';
 
+// Same shared prop Faculty/Index.vue already reads (see its
+// canChangeMaxLoad) — Admin/Registrar have a direct write path to
+// Faculty::max_teaching_units (FacultyController@update), so for them
+// the Room Grid's inline shortcut is really "Add Units" (applies
+// immediately); everyone else has no direct write path, so it's a
+// "Request more units" ask that goes into the Pending review queue.
+const canChangeMaxLoad = computed(() => !!page.props.auth?.can?.changeFacultyMaxLoad);
+
 /* ------------------------------------------------------------------ */
 /* GHOST OVERLAY ("x-ray") — Prompt: eye icon showing this section's   */
 /* own already-scheduled subjects on top of whichever room's grid is   */
@@ -617,6 +631,64 @@ const writeSchedule = async (subjectId, payload, { successMessage, crossSection 
             return false;
         }
 
+        // WORKLOAD WARNING — Save Schedule Validation
+        // (SectionSubjectController::workloadWarningFor()). This is
+        // its own 409 shape ({workload_warning, can_override,
+        // message} — no `errors` key), so it must be handled BEFORE
+        // the generic !response.ok branch below, which only knows how
+        // to read data.errors and would otherwise treat this as a
+        // dead-end error toast with no action (the pre-existing bug
+        // this fixes — the backend has supported an Administrator
+        // override via workload_confirmed=true since this endpoint's
+        // very first version, but nothing on the frontend ever sent
+        // it).
+        if (response.status === 409 && data.workload_warning) {
+            if (data.can_override) {
+                // Administrator — same message the backend already
+                // computed, just given a real "Proceed Anyway" action
+                // instead of dead-ending.
+                const result = await Swal.fire({
+                    icon: 'warning',
+                    title: 'Conflict',
+                    text: data.message,
+                    showCancelButton: true,
+                    confirmButtonText: 'Proceed Anyway',
+                    cancelButtonText: 'Cancel',
+                    customClass: { container: 'roomgrid-swal-on-top' },
+                });
+                if (!result.isConfirmed) return false;
+
+                return writeSchedule(
+                    subjectId,
+                    { ...payload, workload_confirmed: true },
+                    { successMessage, crossSection, silent },
+                );
+            }
+
+            // Not an Administrator — no override available, same as
+            // before. But now also offer the same "Request more
+            // units" shortcut the Faculty dropdown offers, scoped to
+            // the faculty already on this row, so a Dean/OIC hitting
+            // this wall on Save (not just while picking Faculty) has
+            // the same way out instead of a permanent dead end.
+            const askForMore = await Swal.fire({
+                icon: 'error',
+                title: 'Conflict',
+                html: `<div class="text-left text-sm">${data.message}</div>`,
+                showCancelButton: true,
+                confirmButtonText: 'Request More Units',
+                cancelButtonText: 'Close',
+                customClass: { container: 'roomgrid-swal-on-top' },
+            });
+            if (askForMore.isConfirmed && data.workload_warning.faculty_id) {
+                await openLoadRequestDialog({
+                    id: data.workload_warning.faculty_id,
+                    full_name: data.workload_warning.faculty_name,
+                });
+            }
+            return false;
+        }
+
         if (!response.ok) {
             const errorKeys = data.errors ? Object.keys(data.errors) : [];
             const isConfirmable = errorKeys.length > 0 && errorKeys.every((k) => k in CONFIRMABLE_WARNING_KEYS);
@@ -699,6 +771,23 @@ const writeSchedule = async (subjectId, payload, { successMessage, crossSection 
         // schedulePolling.acceptVersion() and stay in sync with what
         // was actually just written, exactly like Save Schedule /
         // Auto Generate / every other write path already does.
+        // AUTO-RAISE CEILING — when "Proceed Anyway" on a workload
+        // warning just raised this Faculty's max_teaching_units
+        // server-side (see performScheduleAssignmentUpdate()'s
+        // updated_faculty_load), patch the same local activeFaculty
+        // entry openLoadRequestDialog() already patches in place, so
+        // this dropdown's own "X units left (Y/Z)" label reflects the
+        // new ceiling immediately — no full page reload needed, and
+        // no stale "0 units left (12/12)" surviving a save that just
+        // moved it to 15/15.
+        if (data.updated_faculty_load) {
+            const target = props.activeFaculty.find((f) => f.id === data.updated_faculty_load.id);
+            if (target) {
+                target.max_teaching_units = data.updated_faculty_load.max_teaching_units;
+                target.current_load = data.updated_faculty_load.current_load;
+            }
+        }
+
         emit('row-updated', data.sectionSubject, data.schedule_version);
         await loadRoomSchedule(selectedRoom.value);
         return true;
@@ -1203,6 +1292,191 @@ const remainingUnitsClass = (option) => {
     if (remaining <= 0) return 'text-red-500 font-medium';
     if (remaining <= 3) return 'text-amber-600';
     return 'text-slate-400';
+};
+
+// A Faculty option with 0 (or negative — shouldn't happen, but the
+// same "exceeds their ceiling" gap workloadWarningFor() would also
+// reject) units left has no legitimate way to be picked here without
+// first raising their ceiling — same threshold remainingUnitsClass()
+// already uses to turn the label red, reused here to decide whether
+// the "Request more units" shortcut should even show.
+const hasInsufficientUnits = (option) => {
+    if (option.max_teaching_units == null) return false;
+    return option.max_teaching_units - (option.current_load ?? 0) <= 0;
+};
+
+// Inline "Request more units" / "Add Units" shortcut — reachable both
+// from a Faculty dropdown option (see facultyOptions' #option
+// template below) and from writeSchedule()'s 409 workload-warning
+// handling, so a Dean/OIC gets the same way out whether they hit the
+// wall while picking Faculty or while Saving. Deliberately a fetch()
+// POST to the same scheduling.faculty-load-requests.store endpoint
+// the Faculty Master page's Inertia form already uses — not a new
+// endpoint, not a new privilege, just a faster on-ramp to the exact
+// same request/approval flow (see FacultyLoadRequestController::
+// store()'s docblock).
+const openLoadRequestDialog = async (faculty) => {
+    if (!faculty?.id) return;
+
+    // Prefer whatever this grid currently has loaded for the faculty
+    // (activeFaculty) over the possibly-stale copy the caller passed
+    // in (e.g. the workload_warning payload only carries id/name),
+    // so the "current ceiling" shown here is never out of date.
+    const liveFaculty = props.activeFaculty.find((f) => f.id === faculty.id) ?? faculty;
+    const currentMax = liveFaculty.max_teaching_units ?? 0;
+    // Actual assigned teaching load — the exact same figure already
+    // shown as the "Y" in this dropdown's own "X units left (Y/Z)"
+    // label (see remainingUnitsLabel()), sourced from
+    // FacultyWorkloadService via SectionSubjectController::show().
+    const currentLoad = liveFaculty.current_load ?? 0;
+
+    // BUG FIX — a Faculty member can already be carrying MORE than
+    // their own ceiling (current_load > max_teaching_units) after an
+    // Administrator's workload override on Save (see writeSchedule()'s
+    // can_override branch above, or a manual override elsewhere) — the
+    // exact scenario in the screenshot this fixed ("15 / 12 Units", -3
+    // left). The old default here was just "current max + 1", which
+    // silently assumed max_teaching_units was still an accurate
+    // ceiling and left them just as visibly over-capacity afterward.
+    // Floor the minimum (and default) requested amount at whichever of
+    // "current max + 1" or "actual current load" is higher, so the
+    // result can never show negative units left. Same floor
+    // FacultyLoadRequestController::store() re-enforces server-side as
+    // a safety net regardless of what this dialog actually sends.
+    //
+    // JUDGMENT CALL: when the floor is driven by current_load (i.e.
+    // this faculty was already over capacity), the default prefills to
+    // EXACTLY current_load — 0 units left, no extra buffer — rather
+    // than current_load + N. Reasoning: this path only fires to
+    // correct an already-broken state, and the number is a plain
+    // editable input the Admin/Registrar can bump up themselves in two
+    // seconds if they want headroom for what's coming next; guessing a
+    // buffer here would just be a second, less-informed judgment call
+    // stacked on top of theirs. The ordinary "current max + 1" default
+    // (faculty not over capacity) is unchanged from before.
+    const minRequestable = Math.max(currentMax + 1, currentLoad);
+
+    if (minRequestable > props.hardCapUnits) {
+        // No valid ceiling can be offered here — even the floor alone
+        // already breaches the institution-wide cap (effectiveCapFor()
+        // on the backend). Surface this plainly instead of opening a
+        // dialog whose only "valid" values the backend would reject.
+        toast.add({
+            severity: 'error',
+            summary: 'Cannot request',
+            detail: `${liveFaculty.full_name ?? 'This faculty member'}'s current teaching load (${currentLoad}) already exceeds the institution-wide ceiling (${props.hardCapUnits} units). Raise the ceiling under Settings > Faculty & Workload, or reduce their assigned load, before requesting a change here.`,
+            life: 8000,
+        });
+        return;
+    }
+
+    const defaultRequested = Math.min(minRequestable, props.hardCapUnits);
+
+    const { value: formValues } = await Swal.fire({
+        icon: 'question',
+        title: canChangeMaxLoad.value ? 'Add Units' : 'Request More Units',
+        html: `
+            <div class="text-left text-sm space-y-3">
+                <div class="text-slate-500">
+                    ${liveFaculty.full_name ?? 'This faculty member'}'s current ceiling is ${currentMax} unit(s)${currentLoad > currentMax ? `, but they're already assigned ${currentLoad} unit(s) of actual teaching load` : ''}.
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Requested Max Teaching Units</label>
+                    <input id="swal-load-units" type="number" class="swal2-input !m-0 !w-full" min="${minRequestable}" max="${props.hardCapUnits}" value="${defaultRequested}" />
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Reason</label>
+                    <textarea id="swal-load-reason" class="swal2-textarea !m-0 !w-full" rows="3" placeholder="Why does this faculty member need a higher teaching load? (min. 10 characters)"></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: canChangeMaxLoad.value ? 'Add Units' : 'Submit Request',
+        cancelButtonText: 'Cancel',
+        focusConfirm: false,
+        customClass: { container: 'roomgrid-swal-on-top' },
+        // Mirrors StoreFacultyLoadRequestRequest's own rules
+        // client-side purely as a convenience — the server re-validates
+        // everything again regardless (including the current_load floor
+        // above), this just saves an obviously doomed round trip.
+        preConfirm: () => {
+            const units = Number(document.getElementById('swal-load-units')?.value);
+            const reason = (document.getElementById('swal-load-reason')?.value ?? '').trim();
+
+            if (!units || units < minRequestable) {
+                Swal.showValidationMessage(
+                    currentLoad > currentMax
+                        ? `Requested units must be at least ${minRequestable} — below this faculty member's actual current teaching load (${currentLoad}), the units-left count would still show negative.`
+                        : `Requested units must be higher than the current maximum (${currentMax}).`,
+                );
+                return false;
+            }
+            if (units > props.hardCapUnits) {
+                Swal.showValidationMessage(`Requests above ${props.hardCapUnits} units cannot be submitted — that is the current maximum teaching load ceiling.`);
+                return false;
+            }
+            if (reason.length < 10) {
+                Swal.showValidationMessage('Please give a bit more detail — a one-word reason isn\'t enough for the reviewer to approve this.');
+                return false;
+            }
+            return { units, reason };
+        },
+    });
+
+    if (!formValues) return;
+
+    try {
+        const response = await fetch(route('scheduling.faculty-load-requests.store'), {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-XSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({
+                faculty_id: faculty.id,
+                requested_max_teaching_units: formValues.units,
+                reason: formValues.reason,
+            }),
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            const detail = data.errors
+                ? Object.values(data.errors).flat().join(' ')
+                : (data.message ?? 'Could not submit the request.');
+            toast.add({ severity: 'error', summary: 'Could not submit', detail, life: 7000 });
+            return;
+        }
+
+        if (data.auto_approved) {
+            // Update the local Faculty data the dropdown reads from,
+            // in place — activeFaculty is the same reactive prop
+            // Show.vue passed down, so every "X units left" label
+            // fed by it (including this dropdown's own, mid-open)
+            // reflects the new ceiling immediately, with no full
+            // page reload and no need to leave the Room Grid.
+            const target = props.activeFaculty.find((f) => f.id === faculty.id);
+            if (target) {
+                if (data.max_teaching_units != null) target.max_teaching_units = data.max_teaching_units;
+                if (data.max_weekly_hours != null) target.max_weekly_hours = data.max_weekly_hours;
+            }
+            toast.add({ severity: 'success', summary: 'Units added', detail: data.message ?? 'Faculty load ceiling updated.', life: 5000 });
+            return;
+        }
+
+        // Pending — still requires Admin/Registrar review, exactly
+        // like every other non-Admin/Registrar submission. Make clear
+        // this faculty still can't be picked for THIS assignment yet.
+        toast.add({
+            severity: 'warn',
+            summary: 'Pending approval',
+            detail: `${data.message ?? 'Load change request submitted for review.'} You won't be able to select this faculty for this assignment until it's approved.`,
+            life: 8000,
+        });
+    } catch (e) {
+        toast.add({ severity: 'error', summary: 'Error', detail: 'Could not submit the request.', life: 5000 });
+    }
 };
 
 const loadFacultyRecommendations = async (sectionSubjectId) => {
@@ -2367,6 +2641,21 @@ const removeAssignment = async () => {
                                     >
                                         {{ remainingUnitsLabel(option) }}
                                     </span>
+                                    <!-- No legitimate way to pick this Faculty member
+                                         as-is (0 units left) without first raising their
+                                         ceiling — offer the same request/approval flow
+                                         the Faculty Master page uses, inline, so this
+                                         doesn't dead-end the Registrar mid-scheduling.
+                                         mousedown.stop (not click.stop) so it fires
+                                         before PrimeVue's own option-select handler. -->
+                                    <button
+                                        v-if="hasInsufficientUnits(option)"
+                                        type="button"
+                                        class="text-[10px] font-medium text-blue-500 hover:text-blue-600 underline"
+                                        @mousedown.stop.prevent="openLoadRequestDialog(option)"
+                                    >
+                                        {{ canChangeMaxLoad ? 'Add Units' : 'Request more units' }}
+                                    </button>
                                 </div>
                             </div>
                         </template>

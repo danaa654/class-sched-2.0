@@ -12,6 +12,7 @@ use App\Http\Requests\UpdateSectionSubjectScheduleRequest;
 use App\Models\Curriculum;
 use App\Models\CurriculumItem;
 use App\Models\Faculty;
+use App\Models\FacultyLoadRequest;
 use App\Models\Major;
 use App\Models\Room;
 use App\Models\Section;
@@ -498,6 +499,14 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'sectionYearLevel' => self::YEAR_LEVEL_MAP[$section->year_level] ?? null,
             'sectionSemester' => $section->semester,
             'schedulingWindow' => $schedulingWindow,
+            // Institution-wide Teaching Load ceiling — same value
+            // FacultyController already sends to the Faculty Master
+            // page (FacultyLoadRequest::effectiveCapFor()) — passed
+            // through to RoomGrid.vue so its inline "Request more
+            // units"/"Add Units" shortcut can cap the number field at
+            // exactly the same limit StoreFacultyLoadRequestRequest
+            // enforces server-side, instead of guessing a value here.
+            'hardCapUnits' => FacultyLoadRequest::effectiveCapFor($request->user()),
             // Section Information tab (Tab 1) options.
             'activeMajors' => Major::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name', 'code']),
             'yearLevels' => StoreSectionRequest::YEAR_LEVELS,
@@ -865,10 +874,20 @@ class SectionSubjectController extends Controller implements HasMiddleware
         // it does. Without this, two requests can both read "this
         // room/faculty is free" before either has saved, and both
         // pass validate() — see the concurrency hardening spec.
+        // Populated inside the transaction below only when the
+        // AUTO-RAISE CEILING block actually raises max_teaching_units
+        // — passed back to the caller so the frontend can patch its
+        // own local copy of this Faculty's max_teaching_units/
+        // current_load (e.g. Room Grid's activeFaculty) in place,
+        // exactly like the "Add Units" shortcut already does, instead
+        // of showing a stale ceiling until the next full page load.
+        $raisedFacultyLoad = null;
+
         try {
             $subject = DB::transaction(function () use (
                 $subject, $facultyId, $roomId, $dayTokens, $startTime, $endTime,
                 $days, $capacity, $request, $validated, $workloadWarning, $mergeTarget,
+                &$raisedFacultyLoad,
             ) {
                 $lockedSection = $this->conflictService->lockResources($roomId, $facultyId, $subject->section_id);
 
@@ -1014,6 +1033,75 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     $this->mergeService->applyReverseMerge($subject, $mergeTarget);
                 }
 
+                // AUTO-RAISE CEILING — an Administrator's "Proceed
+                // Anyway" above intentionally only writes the
+                // schedule; workload_confirmed is a one-time "yes, I
+                // know this exceeds their cap, schedule it anyway"
+                // override, NOT a request to raise max_teaching_units
+                // (only FacultyLoadRequestController and
+                // FacultyController@update may mutate that field —
+                // see FacultyLoadRequestController's class docblock —
+                // so every change to it leaves an audit trail). Left
+                // untouched, though, the Faculty Master page kept
+                // showing the faculty over-capacity (e.g. "15 / 12
+                // Units") until someone separately remembered to open
+                // "Add Units" for them — easy to miss, and the
+                // Administrator's override already decided this
+                // faculty member should be allowed to carry the extra
+                // load. So this raises max_teaching_units to cover the
+                // load this save just produced (never lowers it, and
+                // never exceeds the same institution-wide cap
+                // FacultyLoadRequestController::store() enforces via
+                // effectiveCapFor()), and records a self-approved
+                // FacultyLoadRequest — same shape store() creates for
+                // an Admin/Registrar's own direct submission — so the
+                // change is still visible in the Faculty Load Requests
+                // audit trail, exactly as if the Administrator had
+                // used "Add Units" themselves. Locked (lockForUpdate)
+                // under this same transaction since lockResources()
+                // above already took this same Faculty row's lock —
+                // re-reading it here just gets the freshest values
+                // under a lock we're already holding, not a second one.
+                if ($workloadWarning) {
+                    $lockedFaculty = \App\Models\Faculty::whereKey($workloadWarning['faculty_id'])->lockForUpdate()->first();
+
+                    if ($lockedFaculty) {
+                        $cap = FacultyLoadRequest::effectiveCapFor($request->user());
+                        $newCeiling = min(max($lockedFaculty->max_teaching_units, (int) $workloadWarning['projected']), $cap);
+
+                        if ($newCeiling > $lockedFaculty->max_teaching_units) {
+                            $autoLoadRequest = FacultyLoadRequest::create([
+                                'faculty_id' => $lockedFaculty->id,
+                                'current_max_teaching_units' => $lockedFaculty->max_teaching_units,
+                                'requested_max_teaching_units' => $newCeiling,
+                                'current_max_weekly_hours' => $lockedFaculty->max_weekly_hours,
+                                'requested_max_weekly_hours' => $lockedFaculty->max_weekly_hours,
+                                'reason' => "Auto-raised: Administrator overrode the Teaching Load Limit warning while scheduling {$workloadWarning['subject_code']}.",
+                                'status' => 'Approved',
+                                'requested_by' => $request->user()->id,
+                                'reviewed_by' => $request->user()->id,
+                                'reviewed_at' => now(),
+                            ]);
+
+                            $lockedFaculty->update(['max_teaching_units' => $newCeiling]);
+
+                            $this->notifications->facultyLoadUpdatedDirectly($autoLoadRequest, $request->user());
+
+                            // See the $raisedFacultyLoad declaration
+                            // above this transaction — current_load is
+                            // the same figure the "X units left (Y/Z)"
+                            // label everywhere else reads as "Y", so
+                            // the frontend can patch its local Faculty
+                            // entry with numbers that match exactly.
+                            $raisedFacultyLoad = [
+                                'id' => $lockedFaculty->id,
+                                'max_teaching_units' => $newCeiling,
+                                'current_load' => (int) $workloadWarning['projected'],
+                            ];
+                        }
+                    }
+                }
+
                 // Only reached after a successful, conflict-free
                 // write — the version is never advanced on a rolled
                 // back transaction (spec Section 20).
@@ -1067,6 +1155,14 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'sectionSubject' => $subject->fresh(['subject', 'faculty', 'room']),
             'schedule_version' => $subject->section()->value('schedule_version'),
             'message' => 'Schedule updated.',
+            // Only non-null when the AUTO-RAISE CEILING block above
+            // actually raised this Faculty's max_teaching_units — lets
+            // the frontend patch its own local Faculty snapshot (Room
+            // Grid's activeFaculty, the Subjects tab's cached faculty
+            // options, etc.) in place, the same way the "Add Units"
+            // shortcut's response already does, instead of the
+            // ceiling looking stale until the next full page load.
+            'updated_faculty_load' => $raisedFacultyLoad,
         ]);
     }
 
@@ -2401,6 +2497,15 @@ class SectionSubjectController extends Controller implements HasMiddleware
         $workloadWarnings = [];
         $savedIds = [];
         $skippedIds = [];
+        // See performScheduleAssignmentUpdate()'s equivalent — one
+        // entry per distinct Faculty this batch actually raised the
+        // ceiling for (a batch can Override & Save more than one
+        // over-capacity row, possibly for the same Faculty more than
+        // once), keyed by faculty id so a later row's raise in the
+        // same batch simply overwrites an earlier one's rather than
+        // sending the frontend two conflicting patches for the same
+        // Faculty.
+        $raisedFacultyLoads = [];
         $isAdministrator = (bool) $request->user()?->hasRole('Administrator');
         $expectedVersion = $request->filled('expected_schedule_version')
             ? (int) $request->input('expected_schedule_version')
@@ -2677,6 +2782,48 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     'workload_override_by' => $isWorkloadOverride ? $request->user()?->id : null,
                 ]);
 
+                // AUTO-RAISE CEILING — same fix as updateSchedule()
+                // above, applied here too since a batch Save Schedule
+                // can Override & Save a workload warning exactly the
+                // same way the single-cell endpoint can (see the
+                // block comment above updateSchedule()'s equivalent
+                // for the full rationale).
+                if ($isWorkloadOverride) {
+                    $lockedFaculty = \App\Models\Faculty::whereKey($workloadWarning['faculty_id'])->lockForUpdate()->first();
+
+                    if ($lockedFaculty) {
+                        $cap = FacultyLoadRequest::effectiveCapFor($request->user());
+                        $newCeiling = min(max($lockedFaculty->max_teaching_units, (int) $workloadWarning['projected']), $cap);
+
+                        if ($newCeiling > $lockedFaculty->max_teaching_units) {
+                            $autoLoadRequest = FacultyLoadRequest::create([
+                                'faculty_id' => $lockedFaculty->id,
+                                'current_max_teaching_units' => $lockedFaculty->max_teaching_units,
+                                'requested_max_teaching_units' => $newCeiling,
+                                'current_max_weekly_hours' => $lockedFaculty->max_weekly_hours,
+                                'requested_max_weekly_hours' => $lockedFaculty->max_weekly_hours,
+                                'reason' => "Auto-raised: Administrator overrode the Teaching Load Limit warning while batch-scheduling {$workloadWarning['subject_code']}.",
+                                'status' => 'Approved',
+                                'requested_by' => $request->user()->id,
+                                'reviewed_by' => $request->user()->id,
+                                'reviewed_at' => now(),
+                            ]);
+
+                            $lockedFaculty->update(['max_teaching_units' => $newCeiling]);
+
+                            $this->notifications->facultyLoadUpdatedDirectly($autoLoadRequest, $request->user());
+
+                            // See $raisedFacultyLoads' declaration
+                            // above this batch loop.
+                            $raisedFacultyLoads[$lockedFaculty->id] = [
+                                'id' => $lockedFaculty->id,
+                                'max_teaching_units' => $newCeiling,
+                                'current_load' => (int) $workloadWarning['projected'],
+                            ];
+                        }
+                    }
+                }
+
                 $savedIds[] = $subject->id;
             }
 
@@ -2748,6 +2895,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
             'saved_ids' => $savedIds,
             'skipped_ids' => $skippedIds,
             'message' => $message,
+            // See performScheduleAssignmentUpdate()'s
+            // updated_faculty_load — same idea, list-shaped since a
+            // batch can raise more than one Faculty's ceiling in one
+            // Save Schedule. Empty when nothing was raised.
+            'updated_faculty_loads' => array_values($raisedFacultyLoads),
         ]);
     }
 

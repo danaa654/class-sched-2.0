@@ -68,6 +68,13 @@ const props = defineProps({
     // local hardcoded default — a hardcoded fallback previously masked
     // cases where this prop wasn't forwarded to a child component.
     schedulingWindow: { type: Object, required: true },
+    // Institution-wide Teaching Load ceiling (FacultyLoadRequest::
+    // effectiveCapFor()) — forwarded straight through to RoomGrid.vue
+    // for its inline "Request more units"/"Add Units" shortcut. Same
+    // prop name/shape Faculty/Index.vue already receives from
+    // FacultyController, so the number field's cap always agrees with
+    // what StoreFacultyLoadRequestRequest actually enforces.
+    hardCapUnits: { type: Number, default: 40 },
 });
 
 const toast = useToast();
@@ -1951,6 +1958,41 @@ const saveSchedule = async () => {
             schedulePolling.acceptVersion(data.schedule_version);
         }
 
+        // AUTO-RAISE CEILING — same fix as RoomGrid.vue's
+        // writeSchedule(): when Override & Save just raised one or
+        // more Faculty's max_teaching_units server-side (see
+        // batchUpdateSchedule()'s updated_faculty_loads), patch this
+        // page's own activeFaculty in place — the same array RoomGrid
+        // is handed via the :active-faculty prop — so every "units
+        // left" / "Current Load: X / Y Units" label fed by it
+        // (recommendation dropdowns included) reflects the new
+        // ceiling immediately, with no full page reload.
+        (data.updated_faculty_loads ?? []).forEach((updated) => {
+            const target = props.activeFaculty.find((f) => f.id === updated.id);
+            if (target) {
+                target.max_teaching_units = updated.max_teaching_units;
+                target.current_load = updated.current_load;
+            }
+
+            // The Faculty dropdown's own "RECOMMENDED" section reads
+            // current_load/max_teaching_units off this per-row cached
+            // recs list (recommendations[row.id].faculty.recommendations
+            // — see facultyGroupsFor()), NOT off activeFaculty above, so
+            // patching activeFaculty alone would leave a recommended
+            // pick's badge showing the old ceiling until its dropdown
+            // happened to refetch. Walk every row's cached recs (across
+            // every subject row on this page, not just the one just
+            // saved — the same Faculty member can be recommended for
+            // more than one row) and patch the matching entry too.
+            Object.values(recommendations).forEach((entry) => {
+                const recMatch = entry?.faculty?.recommendations?.find((r) => r.id === updated.id);
+                if (recMatch) {
+                    recMatch.max_teaching_units = updated.max_teaching_units;
+                    recMatch.current_load = updated.current_load;
+                }
+            });
+        });
+
         if (skippedIds.size > 0) {
             toast.add({
                 severity: 'warn',
@@ -3090,6 +3132,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         :rows="rows"
                         :active-faculty="activeFaculty"
                         :scheduling-window="schedulingWindow"
+                        :hard-cap-units="hardCapUnits"
                         :is-stale="schedulePolling.isStale.value"
                         :expected-schedule-version="schedulePolling.currentVersion.value"
                         @row-updated="onRoomGridRowUpdated"
