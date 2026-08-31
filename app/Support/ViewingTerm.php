@@ -32,6 +32,27 @@ class ViewingTerm
     public const SESSION_KEY = 'viewing_academic_term_id';
 
     /**
+     * Per-request memoization for AcademicTerm::active() and
+     * resolveOverride(). HandleInertiaRequests calls resolve() and
+     * isDeviatingFromActive() as two separate shared props on every
+     * single Inertia visit (i.e. every sidebar click), and each of
+     * those independently called resolveOverride() and
+     * AcademicTerm::active() — so one navigation was running the
+     * "active term" query 3x and the "session override" query 2x for
+     * no reason. Keyed by spl_object_id($request) so this stays
+     * correct even in a persistent-worker setup (Octane) where static
+     * state would otherwise leak across requests; a plain php-fpm
+     * request only ever sees one Request instance anyway, so this is
+     * effectively a request-scoped cache either way.
+     *
+     * @var array<int, AcademicTerm|null>
+     */
+    private static array $activeTermCache = [];
+
+    /** @var array<int, array{0: bool, 1: ?AcademicTerm}> */
+    private static array $overrideCache = [];
+
+    /**
      * The Academic Term this request's user should see, honoring
      * their session override if one is set and still valid, else the
      * real Active term.
@@ -40,7 +61,7 @@ class ViewingTerm
     {
         $override = self::resolveOverride($request);
 
-        return $override ?? AcademicTerm::active();
+        return $override ?? self::activeTerm($request);
     }
 
     /**
@@ -63,7 +84,7 @@ class ViewingTerm
             return false;
         }
 
-        $activeTerm = AcademicTerm::active();
+        $activeTerm = self::activeTerm($request);
 
         return $activeTerm === null || $override->id !== $activeTerm->id;
     }
@@ -75,6 +96,20 @@ class ViewingTerm
      * at a real Active term or a planning/inactive one.
      */
     public static function resolveOverride(Request $request): ?AcademicTerm
+    {
+        $key = spl_object_id($request);
+
+        if (array_key_exists($key, self::$overrideCache)) {
+            return self::$overrideCache[$key][1];
+        }
+
+        $override = self::resolveOverrideUncached($request);
+        self::$overrideCache[$key] = [true, $override];
+
+        return $override;
+    }
+
+    private static function resolveOverrideUncached(Request $request): ?AcademicTerm
     {
         $user = $request->user();
 
@@ -94,6 +129,41 @@ class ViewingTerm
         return AcademicTerm::query()
             ->where('status', '!=', 'Archived')
             ->find($id);
+    }
+
+    /**
+     * The real Active AcademicTerm, memoized per request and eager-
+     * loaded with schoolYear/semester — the same shape
+     * HandleInertiaRequests' 'activeAcademicTerm' prop needs. Public
+     * so that prop can call this directly instead of running its own
+     * separate query: before this, a single Inertia visit (i.e. one
+     * sidebar click) queried the Active term up to 3 times
+     * (activeAcademicTerm, resolve() via viewingAcademicTerm, and
+     * isDeviatingFromActive() via isViewingOverride) — now it's once.
+     *
+     * set()/clear() below intentionally do NOT touch this cache —
+     * they only ever run standalone (ViewingTermController), never in
+     * the same request as a resolve()/isDeviatingFromActive()/
+     * activeTermCached() call.
+     */
+    public static function activeTermCached(Request $request): ?AcademicTerm
+    {
+        $key = spl_object_id($request);
+
+        if (! array_key_exists($key, self::$activeTermCache)) {
+            self::$activeTermCache[$key] = AcademicTerm::query()
+                ->where('status', 'Active')
+                ->with(['schoolYear:id,name', 'semester:id,name'])
+                ->first(['id', 'school_year_id', 'semester_id', 'status']);
+        }
+
+        return self::$activeTermCache[$key];
+    }
+
+    /** Internal alias used by resolve()/isDeviatingFromActive() above. */
+    private static function activeTerm(Request $request): ?AcademicTerm
+    {
+        return self::activeTermCached($request);
     }
 
     /**

@@ -103,10 +103,14 @@ class HandleInertiaRequests extends Middleware
             // any user's Viewing Term switch below. Kept for anything
             // that specifically needs the true Active term regardless
             // of what the current user is browsing.
-            'activeAcademicTerm' => fn () => AcademicTerm::query()
-                ->where('status', 'Active')
-                ->with(['schoolYear:id,name', 'semester:id,name'])
-                ->first(['id', 'school_year_id', 'semester_id', 'status']),
+            //
+            // Uses ViewingTerm::activeTermCached(), a per-request
+            // memoized lookup, rather than firing its own separate
+            // query — this prop, 'viewingAcademicTerm', and
+            // 'isViewingOverride' used to each independently query the
+            // Active term, so one Inertia visit (i.e. every sidebar
+            // click) ran this same query up to 3 times.
+            'activeAcademicTerm' => fn () => \App\Support\ViewingTerm::activeTermCached($request),
             // The Academic Term THIS user is currently viewing —
             // their session override (Admin/Registrar only — see
             // ViewingTerm) if one is set, else the real Active term.
