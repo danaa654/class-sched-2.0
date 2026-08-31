@@ -63,6 +63,11 @@ class BatchUpdateSectionSubjectScheduleRequest extends FormRequest
             // into a Laboratory room, or vice versa).
             'rows.*.room_type_confirmed' => ['nullable', 'boolean'],
             'rows.*.room_college_confirmed' => ['nullable', 'boolean'],
+            // Same acknowledgment pattern as capacity_confirmed above,
+            // for a Faculty Mismatch (the assigned Faculty carries no
+            // Teaching Qualification for the Subject and isn't from
+            // its academic home College/GenEd pool).
+            'rows.*.faculty_mismatch_confirmed' => ['nullable', 'boolean'],
             // CONCURRENCY HARDENING — Optimistic Concurrency Control.
             // One version check for the whole batch: the Section's
             // schedule_version the frontend last loaded (or that the

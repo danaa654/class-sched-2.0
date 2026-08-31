@@ -245,6 +245,15 @@ const stateFor = (rowId) => {
             // College than this Section's own — e.g. an SHTM Lab used
             // for a BSIT class) — same persisted-confirmation pattern.
             roomCollegeConfirmed: Boolean(row?.room_college_confirmed),
+            // Faculty Mismatch — assigned Faculty carries no Teaching
+            // Qualification for the Subject and isn't from its
+            // academic home College/GenEd pool (e.g. a CCS faculty
+            // member manually placed on a BSED Minor subject). Same
+            // persisted-confirmation pattern as roomTypeConfirmed/
+            // roomCollegeConfirmed above — see the 2026_08_30_090000
+            // migration's docblock. onFacultyChange below resets this
+            // the moment the Faculty actually changes.
+            facultyMismatchConfirmed: Boolean(row?.faculty_mismatch_confirmed),
         };
     }
     return rowState[rowId];
@@ -343,6 +352,16 @@ const sectionCollegeName = computed(() => props.section.major?.department?.colle
 
 const isQualifiedFor = (faculty, subject) => {
     if (!subject) return false;
+    // An explicit Teaching Qualification always wins, regardless of
+    // Subject category or the faculty's own College — mirrors
+    // SectionSubject::faculty_mismatch on the server, which never
+    // flags a mismatch for someone explicitly linked to the Subject.
+    // Checked BEFORE the General Education branch below: a College
+    // faculty member (e.g. College of Teacher Education) can still
+    // carry an explicit qualification for a GenEd subject, and that
+    // shouldn't be overridden just because their College isn't
+    // "General Education".
+    if (faculty.qualified_subject_ids.includes(subject.id)) return true;
     if (subject.category === 'General Education') {
         // General Education subjects are owned by General Education
         // Faculty, i.e. faculty with no College of their own — same
@@ -352,7 +371,6 @@ const isQualifiedFor = (faculty, subject) => {
         // with what the recommendation engine considers eligible.
         return faculty.faculty_category === 'General Education Faculty' || faculty.college_id === null;
     }
-    if (faculty.qualified_subject_ids.includes(subject.id)) return true;
     // Major/Minor subjects fall back to a College match: a BSIT
     // (Major) subject is offered by the College of Computer Studies,
     // so any active CCS faculty member is a reasonable manual pick
@@ -651,8 +669,38 @@ const weeklyContactHours = (row) => {
     return lecture + laboratory;
 };
 
+// SIBLING SECTION PATTERN — Auto End Time normally targets the
+// Subject's full curriculum hours (weeklyContactHours below), which is
+// a sensible DEFAULT but ignores an already-confirmed sibling section
+// that intentionally runs shorter (e.g. BSIT-4A's CAP102 confirmed at
+// 4 hrs/week instead of the curriculum's 5 because of a Room/Faculty
+// availability constraint). Reuses the SAME recommendations[] cache
+// the Recommend panel already prefetches for every row on load (see
+// fetchRecommendations()/prefetchRecommendations() — the identical
+// scheduling.section-subjects.recommend endpoint RoomGrid's own
+// drag-and-drop sibling prefill calls), so no extra network round
+// trip is needed here.
+//
+// This only changes what Auto End Time defaults TO — the Registrar
+// can still overwrite End Time by hand afterward, and the Hours
+// Mismatch confirm gate on Save Schedule keeps checking the actual
+// scheduled hours against the curriculum's declared hours exactly as
+// before (weeklyContactHours is untouched), so a sibling-derived 4
+// hrs still asks for the same "Weekly Hours Mismatch — Save Anyway"
+// confirmation it would if typed in by hand.
+const siblingPatternHoursFor = (row) => {
+    const top = recommendations[row.id]?.combined?.recommendations?.[0];
+    if (!top?.is_sibling_pattern || !top.time?.start_time || !top.time?.end_time) return null;
+
+    const meetingsPerWeek = (top.time.days ?? []).length || 1;
+    const perMeetingMinutes = minutesBetweenTimes(top.time.start_time, top.time.end_time);
+    if (!perMeetingMinutes) return null;
+
+    return (perMeetingMinutes * meetingsPerWeek) / 60;
+};
+
 const computeAutoEndTime = (row) => {
-    const totalHours = weeklyContactHours(row);
+    const totalHours = siblingPatternHoursFor(row) ?? weeklyContactHours(row);
     const dayCount = row.days?.length ?? 0;
 
     if (!row.start_time || !totalHours || !dayCount) return null;
@@ -844,6 +892,26 @@ const tableConflicts = computed(() => {
             });
         }
 
+        // Faculty Mismatch Warning — the assigned Faculty carries no
+        // Teaching Qualification for this Subject and isn't from its
+        // academic home College/GenEd pool (see isQualifiedFor()
+        // above — the exact same rule the Faculty dropdown's
+        // Recommended/Qualified/Manual Override grouping already
+        // uses). Confirmable, not a hard block — Manual Override is a
+        // deliberately supported path — mirrors Room Type/Room
+        // College Mismatch exactly.
+        if (a.faculty_id && !stateFor(a.id).facultyMismatchConfirmed) {
+            const faculty = facultyById.value[a.faculty_id];
+            if (faculty && a.subject && !isQualifiedFor(faculty, a.subject)) {
+                list.push({
+                    type: 'facultyMismatch',
+                    rowIds: [a.id],
+                    label: 'Faculty Mismatch',
+                    detail: `${faculty.full_name} is not on file as qualified or from the academic home for ${a.subject?.subject_code ?? 'this subject'}.`,
+                });
+            }
+        }
+
         // Weekly Hours Mismatch Warning — mirrors the same check the
         // server runs on Save Schedule (SectionSubjectController).
         // Flexible by design: the Registrar is free to trim a
@@ -956,10 +1024,17 @@ const unconfirmedRoomCollegeRowIds = computed(() =>
     tableConflicts.value.filter((c) => c.type === 'roomCollege').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).roomCollegeConfirmed),
 );
 
+// Rows with an unconfirmed Faculty Mismatch — confirmable, same
+// pattern as unconfirmedRoomTypeRowIds/unconfirmedRoomCollegeRowIds
+// above.
+const unconfirmedFacultyMismatchRowIds = computed(() =>
+    tableConflicts.value.filter((c) => c.type === 'facultyMismatch').map((c) => c.rowIds[0]).filter((id) => !stateFor(id).facultyMismatchConfirmed),
+);
+
 // A row is "blocking" (true Conflict — Faculty/Room/Section) if it
-// appears in any non-capacity/hours/roomType/roomCollege conflict entry.
+// appears in any non-capacity/hours/roomType/roomCollege/facultyMismatch conflict entry.
 const blockingConflictRowIds = computed(
-    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity' && c.type !== 'hours' && c.type !== 'roomType' && c.type !== 'roomCollege').flatMap((c) => c.rowIds)),
+    () => new Set(tableConflicts.value.filter((c) => c.type !== 'capacity' && c.type !== 'hours' && c.type !== 'roomType' && c.type !== 'roomCollege' && c.type !== 'facultyMismatch').flatMap((c) => c.rowIds)),
 );
 
 const rowHasBlockingConflict = (rowId) => blockingConflictRowIds.value.has(rowId);
@@ -992,6 +1067,7 @@ const sectionConflictRowIds = computed(() => new Set(tableConflicts.value.filter
 const rowHasCapacityWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'capacity' && c.rowIds.includes(rowId));
 const rowHasRoomTypeWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'roomType' && c.rowIds.includes(rowId));
 const rowHasRoomCollegeWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'roomCollege' && c.rowIds.includes(rowId));
+const rowHasFacultyMismatchWarning = (rowId) => tableConflicts.value.some((c) => c.type === 'facultyMismatch' && c.rowIds.includes(rowId));
 
 const conflictTooltip = (rowId) => {
     const clientMessages = tableConflicts.value
@@ -1431,6 +1507,10 @@ const onFacultyChange = (row, value) => {
     // A new Faculty means any previous Teaching Load Limit
     // confirmation no longer applies — must be re-confirmed.
     stateFor(row.id).workloadConfirmed = false;
+    // A new Faculty means any previous Faculty Mismatch confirmation
+    // no longer applies — the new Faculty may or may not be
+    // qualified/from-college, so it must be re-evaluated fresh.
+    stateFor(row.id).facultyMismatchConfirmed = false;
     fetchBusyTimes(row);
 };
 const onRoomChange = (row, value) => {
@@ -1682,6 +1762,36 @@ const saveSchedule = async () => {
         });
     }
 
+    // Faculty Mismatch — also confirmable, not a hard block. Manual
+    // Override is a deliberately supported path (see the "Other
+    // Active Faculty (Manual Override)" group in the Faculty picker);
+    // this just makes sure the Registrar explicitly sees and accepts
+    // it before it's saved. Same pattern as Room Type/College
+    // Mismatch above.
+    const stillUnconfirmedFacultyMismatch = unconfirmedFacultyMismatchRowIds.value;
+    if (stillUnconfirmedFacultyMismatch.length > 0) {
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Faculty Mismatch',
+            html: tableConflicts.value
+                .filter((c) => c.type === 'facultyMismatch' && stillUnconfirmedFacultyMismatch.includes(c.rowIds[0]))
+                .map((c) => `<div class="text-left text-sm">${c.detail}</div>`)
+                .join(''),
+            showCancelButton: true,
+            confirmButtonText: 'Save Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+        });
+
+        if (!result.isConfirmed) {
+            return;
+        }
+
+        stillUnconfirmedFacultyMismatch.forEach((rowId) => {
+            stateFor(rowId).facultyMismatchConfirmed = true;
+        });
+    }
+
     savingSchedule.value = true;
 
     const buildPayload = () =>
@@ -1698,6 +1808,7 @@ const saveSchedule = async () => {
             hours_confirmed: Boolean(stateFor(row.id).hoursConfirmed),
             room_type_confirmed: Boolean(stateFor(row.id).roomTypeConfirmed),
             room_college_confirmed: Boolean(stateFor(row.id).roomCollegeConfirmed),
+            faculty_mismatch_confirmed: Boolean(stateFor(row.id).facultyMismatchConfirmed),
         }));
 
     const submit = async () => {
@@ -2914,7 +3025,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         >
                             <Tag
                                 :value="conflict.label"
-                                :severity="conflict.type === 'capacity' || conflict.type === 'hours' || conflict.type === 'roomType' || conflict.type === 'roomCollege' ? 'warning' : 'danger'"
+                                :severity="conflict.type === 'capacity' || conflict.type === 'hours' || conflict.type === 'roomType' || conflict.type === 'roomCollege' || conflict.type === 'facultyMismatch' ? 'warning' : 'danger'"
                                 class="!text-xs shrink-0"
                             />
                             <span class="text-slate-600">{{ conflict.detail }}</span>
@@ -3122,7 +3233,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     title="Assigned by Auto Generate Schedule — review and click Save Schedule to keep it, or Discard Suggestions to discard it."
                                                 />
                                                 <i
-                                                    v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id) || rowHasRoomTypeWarning(data.id)"
+                                                    v-if="rowIsInConflict(data) || rowHasCapacityWarning(data.id) || rowHasRoomTypeWarning(data.id) || rowHasFacultyMismatchWarning(data.id)"
                                                     class="pi pi-exclamation-triangle"
                                                     :class="rowIsInConflict(data) ? 'text-red-500' : 'text-amber-500'"
                                                     :title="rowIsInConflict(data) ? (conflictTooltip(data.id) || 'Conflict — click the row to find the best schedule') : (conflictTooltip(data.id) || 'Unresolved scheduling conflict')"
@@ -3207,7 +3318,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                                     placeholder="Select faculty"
                                                     class="w-full"
                                                     :disabled="isSectionFinalized"
-                                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id), 'unscheduled-field': rowIsUnscheduled(data) }"
+                                                    :class="{ 'p-invalid': stateFor(data.id).errors.faculty_id || facultyConflictRowIds.has(data.id) || rowHasFacultyMismatchWarning(data.id), 'unscheduled-field': rowIsUnscheduled(data) }"
                                                     emptyMessage="No active faculty"
                                                     emptyFilterMessage="No matching faculty"
                                                     :pt="{ overlay: { class: isDark ? 'dark-scope' : '' } }"
@@ -3404,6 +3515,18 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                             </Select>
                                             <p v-if="stateFor(data.id).errors.end_time" class="text-red-500 text-xs mt-1">
                                                 <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.end_time }}
+                                            </p>
+                                            <!-- SIBLING SECTION PATTERN note — mirrors RoomGrid's own
+                                                 prefill hint (see computeAutoEndTime/siblingPatternHoursFor
+                                                 above). Only shown while End Time still equals the
+                                                 auto-filled sibling-derived value; editing it by hand
+                                                 hides this automatically since the values diverge. -->
+                                            <p
+                                                v-else-if="siblingPatternHoursFor(data) && data.end_time === computeAutoEndTime(data)"
+                                                class="text-[11px] text-teal-600 mt-1"
+                                            >
+                                                <i class="pi pi-copy"></i>
+                                                Matches {{ recommendations[data.id]?.combined?.recommendations?.[0]?.pattern_source?.donor_section_code }}'s schedule.
                                             </p>
                                         </div>
                                     </div>

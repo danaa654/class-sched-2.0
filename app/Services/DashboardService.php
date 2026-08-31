@@ -266,13 +266,11 @@ class DashboardService
             ->whereNotNull('days')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
-            ->with(['section:id,section_code', 'subject:id,subject_code,lecture_hours,laboratory_hours', 'faculty:id,first_name,last_name', 'room:id,room_code,room_name,room_type'])
-            ->get(['id', 'section_id', 'subject_id', 'faculty_id', 'room_id', 'days', 'start_time', 'end_time', 'merged_into_section_subject_id', 'hours_confirmed', 'room_type_confirmed', 'room_college_confirmed']);
+            ->with(['section:id,section_code', 'subject:id,subject_code,lecture_hours,laboratory_hours,major_id', 'faculty:id,first_name,last_name,college_id', 'faculty.subjects:id', 'subject.major.department:id,college_id', 'room:id,room_code,room_name,room_type'])
+            ->get(['id', 'section_id', 'subject_id', 'faculty_id', 'room_id', 'days', 'start_time', 'end_time', 'merged_into_section_subject_id', 'hours_confirmed', 'room_type_confirmed', 'room_college_confirmed', 'faculty_mismatch_confirmed']);
 
         // Double-booking pairs — Faculty/Room/Section sharing a Day +
-        // overlapping Time. Faculty double-booking has no "flavor" of
-        // false-positive to fold in (unlike Room/Time below), so it
-        // stays a pure double-booking count, same as before.
+        // overlapping Time.
         $facultyPairs = $this->overlappingPairs($placements, 'faculty_id');
         $roomPairs = $this->overlappingPairs($placements, 'room_id');
         $sectionPairs = $this->overlappingPairs($placements, 'section_id');
@@ -293,6 +291,22 @@ class DashboardService
         // SectionSubjectController's own hours_confirmed check.
         $hoursMismatches = $this->hoursMismatchDetails($placements);
 
+        // Faculty Conflicts now also folds in Faculty Mismatch (a
+        // manually-assigned Faculty who isn't Teaching-Qualified for
+        // the Subject and isn't from its academic home College/GenEd
+        // pool) — same "problem with the Faculty on this class"
+        // family as a double-booking, just non-blocking rather than
+        // blocking. Mirrors SectionSubjectController's own
+        // faculty_mismatch_confirmed check, and brings Faculty
+        // Conflicts in line with how Room/Time Conflicts already fold
+        // in their own mismatch flavor below.
+        $facultyMismatches = $this->facultyMismatchDetails($placements);
+
+        $facultyConflictIds = $this->pairConflictIds($facultyPairs);
+        foreach ($facultyMismatches as $row) {
+            $facultyConflictIds[$row['id']] = true;
+        }
+
         $roomConflictIds = $this->pairConflictIds($roomPairs);
         foreach ($roomTypeMismatches as $row) {
             $roomConflictIds[$row['id']] = true;
@@ -304,9 +318,15 @@ class DashboardService
         }
 
         return [
-            // Faculty double-booked across any Section/College.
-            'faculty_conflicts' => count($this->pairConflictIds($facultyPairs)),
-            'faculty_conflicts_detail' => $this->pairDetails($facultyPairs, 'Double-Booked', 'faculty'),
+            // Faculty double-booked across any Section/College, PLUS
+            // Faculty Mismatch (assigned Faculty isn't qualified for
+            // or from the academic home of the Subject they're
+            // teaching).
+            'faculty_conflicts' => count($facultyConflictIds),
+            'faculty_conflicts_detail' => array_merge(
+                $this->pairDetails($facultyPairs, 'Double-Booked', 'faculty'),
+                array_map(fn ($row) => $this->stripId($row), $facultyMismatches),
+            ),
             // Room double-booked across any Section/College, PLUS Room
             // Type Mismatch (Lecture subject in a Lab room or vice
             // versa).
@@ -593,6 +613,46 @@ class DashboardService
                     'day' => $this->formatDays(array_values(array_filter(explode(',', (string) $p->days)))),
                     'time' => $this->formatTimeRange12h($p->start_time, $p->end_time),
                     'note' => "This schedule totals {$actualHours} hrs/week, but {$p->subject->subject_code} requires {$requiredHours} hrs/week.",
+                    'open_section_id' => $p->section_id,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Placements whose assigned Faculty isn't Teaching-Qualified for
+     * the Subject and isn't from the Subject's own academic home
+     * College/GenEd pool — same rule SectionSubjectController checks
+     * at save time before requiring faculty_mismatch_confirmed=true,
+     * and the same computed flag SectionSubject::faculty_mismatch
+     * already exposes to the Section Subjects page's own "Scheduling
+     * Issues" panel.
+     *
+     * A row already confirmed (faculty_mismatch_confirmed=true,
+     * persisted at save time) is excluded — see
+     * roomTypeMismatchDetails()'s docblock above for why.
+     *
+     * @param  Collection<int, SectionSubject>  $placements
+     * @return list<array<string, mixed>>
+     */
+    private function facultyMismatchDetails(Collection $placements): array
+    {
+        return $placements
+            ->filter(fn (SectionSubject $p) => $p->faculty_id && $p->faculty && $p->subject
+                && ! $p->faculty_mismatch_confirmed
+                && $p->faculty_mismatch === true)
+            ->map(function (SectionSubject $p) {
+                return [
+                    'id' => $p->id,
+                    'type' => 'Faculty Mismatch',
+                    'section_a' => $p->section?->section_code ?? '—',
+                    'subject_a' => $p->subject->subject_code,
+                    'section_b' => null,
+                    'subject_b' => null,
+                    'day' => $this->formatDays(array_values(array_filter(explode(',', (string) $p->days)))),
+                    'time' => $this->formatTimeRange12h($p->start_time, $p->end_time),
+                    'note' => "{$p->faculty->full_name} is not on file as qualified or from the academic home for {$p->subject->subject_code}.",
                     'open_section_id' => $p->section_id,
                 ];
             })

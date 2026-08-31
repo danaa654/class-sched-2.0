@@ -41,6 +41,7 @@ class SectionSubject extends Model
         'hours_confirmed',
         'room_type_confirmed',
         'room_college_confirmed',
+        'faculty_mismatch_confirmed',
         'status',
         'remarks',
         'edp_code',
@@ -63,6 +64,7 @@ class SectionSubject extends Model
             'hours_confirmed' => 'boolean',
             'room_type_confirmed' => 'boolean',
             'room_college_confirmed' => 'boolean',
+            'faculty_mismatch_confirmed' => 'boolean',
             'is_auto_generated' => 'boolean',
             'is_manually_modified' => 'boolean',
             'room_is_manual_override' => 'boolean',
@@ -102,6 +104,18 @@ class SectionSubject extends Model
             get: fn (?string $value) => $value ? substr($value, 0, 5) : $value,
         );
     }
+
+    /**
+     * `faculty_mismatch` is derived (see getFacultyMismatchAttribute()
+     * below) rather than a real column, so it must be explicitly
+     * appended to appear in JSON responses — every controller path
+     * that serializes a SectionSubject already eager-loads `subject`
+     * and `faculty` (see SectionSubjectController), so this is safe
+     * to compute on every response without a fresh N+1.
+     *
+     * @var list<string>
+     */
+    protected $appends = ['faculty_mismatch'];
 
     /**
      * The Section this placement belongs to.
@@ -170,5 +184,57 @@ class SectionSubject extends Model
     public function mergedPlacements(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(SectionSubject::class, 'merged_into_section_subject_id');
+    }
+
+    /**
+     * FACULTY MISMATCH — flags a manually-assigned Faculty who is
+     * neither Teaching-Qualification-linked to this Subject nor from
+     * the Subject's own academic home, so the Registrar/Dean can spot
+     * (e.g.) a CCS faculty member manually placed on a BSED Minor
+     * subject, or a CTE faculty member manually placed on a Rizal-
+     * type General Education/Minor subject that isn't theirs to
+     * teach. This is advisory only — the write path never blocks on
+     * it (Manual Override is a deliberately supported path, see
+     * RecommendationService's Manual Override tier) — it only labels
+     * the result so the mismatch isn't silently invisible afterward.
+     *
+     * Mirrors RecommendationService::subjectCollegeId()'s definition
+     * of a Subject's "academic home": null for General
+     * Education/Minor subjects (no owning Major/Department/College),
+     * otherwise the College that owns the Subject via its Major.
+     * A faculty member is NOT a mismatch if either:
+     *   - they carry an explicit Teaching Qualification for this
+     *     exact Subject (`faculty_subject` pivot), regardless of
+     *     College, or
+     *   - their own `college_id` matches the Subject's academic home
+     *     (General Education/Minor faculty for a GenEd/Minor Subject,
+     *     or same-College faculty for a Major/Professional Subject).
+     */
+    public function getFacultyMismatchAttribute(): ?bool
+    {
+        if ($this->faculty_id === null) {
+            return null;
+        }
+
+        $this->loadMissing(['subject.major.department', 'faculty.subjects']);
+
+        $subject = $this->subject;
+        $faculty = $this->faculty;
+
+        if (! $subject || ! $faculty) {
+            return null;
+        }
+
+        if ($faculty->subjects->contains('id', $subject->id)) {
+            return false;
+        }
+
+        $subjectCollegeId = $subject->major?->department?->college_id;
+
+        $isHomeMatch = $subjectCollegeId === null
+            ? $faculty->college_id === null
+            : $faculty->college_id === $subjectCollegeId;
+
+        return ! $isHomeMatch;
     }
 }

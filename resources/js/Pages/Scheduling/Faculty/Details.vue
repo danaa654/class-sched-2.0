@@ -32,10 +32,16 @@ const props = defineProps({
     faculty: { type: Object, required: true },
     colleges: { type: Array, default: () => [] },
     subjects: { type: Array, default: () => [] },
+    hardCapUnits: { type: Number, default: 40 },
 });
 
 const toast = useToast();
 const page = usePage();
+
+// Same restriction as the Faculty Master (Index) edit modal: only
+// Admin/Registrar may change the load ceiling directly. Everyone else
+// (Dean/OIC/Assistant Dean) must go through a load request instead.
+const canChangeMaxLoad = computed(() => !!page.props.auth?.can?.changeFacultyMaxLoad);
 
 watch(
     () => page.props.flash?.success,
@@ -656,6 +662,8 @@ const placementStatusSeverity = (status) => {
                     <InputNumber
                         v-model="facultyForm.max_teaching_units"
                         :min="0"
+                        :max="hardCapUnits"
+                        :disabled="!canChangeMaxLoad"
                         showButtons
                         buttonLayout="horizontal"
                         :invalid="!!facultyForm.errors.max_teaching_units"
@@ -663,6 +671,14 @@ const placementStatusSeverity = (status) => {
                         inputClass="w-full"
                     />
                     <small v-if="facultyForm.errors.max_teaching_units" class="text-red-500">{{ facultyForm.errors.max_teaching_units }}</small>
+                    <!-- Only Admin/Registrar may raise this ceiling directly, same as the Faculty Master edit modal. -->
+                    <p v-if="!canChangeMaxLoad" class="text-xs text-slate-400">
+                        Only Admin/Registrar can change this directly.
+                        <Link :href="route('scheduling.faculty')" class="text-teal-600 hover:underline font-medium">
+                            Request a load increase
+                        </Link>
+                    </p>
+                    <p v-else class="text-xs text-slate-400">Current teaching load ceiling: {{ hardCapUnits }} units.</p>
                 </div>
 
                 <div class="flex flex-col gap-1">

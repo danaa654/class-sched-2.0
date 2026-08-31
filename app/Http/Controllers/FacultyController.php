@@ -217,6 +217,11 @@ class FacultyController extends Controller
                 ->where('is_active', true)
                 ->orderBy('subject_code')
                 ->get(['id', 'subject_code', 'subject_title', 'category', 'units']),
+            // Same cap the Faculty Master (Index) edit modal uses — needed
+            // here so the Details page's own Edit Faculty modal can bound
+            // the Maximum Teaching Units field the same way instead of
+            // leaving it uncapped and editable by every role.
+            'hardCapUnits' => FacultyLoadRequest::effectiveCapFor($user),
         ]);
     }
 

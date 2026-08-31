@@ -49,21 +49,21 @@ const isScopedRole = computed(() =>
 // Faculty/Room/Time tiles open a "what is this conflict, exactly"
 // breakdown dialog (detailKey) instead of navigating straight to the
 // Section Subjects list — a bare count never says which two classes
-// collided or why. Room Conflicts folds in Room Type Mismatch and
-// Time Conflicts folds in Hours Mismatch (see DashboardService::
-// conflictSummary()), since both are "something's wrong with the
-// Room/Time this class landed in", just non-blocking rather than a
-// hard double-booking.
+// collided or why. Faculty Conflicts folds in Faculty Mismatch, Room
+// Conflicts folds in Room Type Mismatch, and Time Conflicts folds in
+// Hours Mismatch (see DashboardService::conflictSummary()), since all
+// three are "something's wrong with the Faculty/Room/Time this class
+// landed in", just non-blocking rather than a hard double-booking.
 const items = computed(() => [
     {
         key: 'faculty_conflicts',
         label: 'Faculty Conflicts',
         icon: 'pi-user',
         detailKey: 'faculty_conflicts_detail',
-        what: 'The same faculty member is placed on two classes that share a day and an overlapping time — they physically can\'t teach both.',
+        what: 'The same faculty member is placed on two classes that share a day and an overlapping time — they physically can\'t teach both. Also flags a manually-assigned faculty member who isn\'t qualified for or from the academic home of the subject they\'re teaching.',
         fix: canManageMasterData.value
-            ? 'Open the affected section in Section Subjects and reassign one of the two classes to a different time or to another faculty member.'
-            : 'Within your scheduling access, move one of the two classes to a different time or reassign it to another available faculty member.',
+            ? 'Open the affected section in Section Subjects and reassign one of the two classes to a different time or to another qualified faculty member.'
+            : 'Within your scheduling access, move one of the two classes to a different time or reassign it to another available, qualified faculty member.',
     },
     {
         key: 'room_conflicts',
@@ -142,10 +142,10 @@ const openConflictDetail = (item) => {
     conflictDialogVisible.value = true;
 };
 
-// Mismatch-type rows (Room Type Mismatch / Hours Mismatch) describe
-// only ONE class, not a colliding pair — the badge color also tells
-// them apart from a hard double-booking at a glance.
-const isMismatchType = (type) => type === 'Room Type Mismatch' || type === 'Hours Mismatch';
+// Mismatch-type rows (Room Type Mismatch / Hours Mismatch / Faculty
+// Mismatch) describe only ONE class, not a colliding pair — the badge
+// color also tells them apart from a hard double-booking at a glance.
+const isMismatchType = (type) => type === 'Room Type Mismatch' || type === 'Hours Mismatch' || type === 'Faculty Mismatch';
 
 // A tile either reads a single conflict count (conflicts[item.key]) or,
 // for fraction tiles, conflicts[item.fraction.scheduled]. Used for the

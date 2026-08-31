@@ -751,6 +751,37 @@ class SectionSubjectController extends Controller implements HasMiddleware
 
         $dayTokens = array_filter(explode(',', (string) $days));
 
+        // Faculty Mismatch Warning — mirrors Room Type/Room College
+        // Mismatch's exact "flagged, not blocked" pattern. The
+        // assigned Faculty carries no Teaching Qualification for this
+        // Subject and isn't from its academic home College/GenEd
+        // pool (see SectionSubject::getFacultyMismatchAttribute()) —
+        // e.g. a CCS faculty member manually placed on a BSED Minor
+        // subject. Not a hard block — Manual Override is a
+        // deliberately supported path (see the "Other Active Faculty
+        // (Manual Override)" group in RoomGrid.vue's facultyOptions)
+        // — but needs an explicit faculty_mismatch_confirmed=true to
+        // save anyway, OR $deferMismatchConfirmation.
+        if ($facultyId && ! $request->boolean('faculty_mismatch_confirmed') && ! $deferMismatchConfirmation) {
+            $candidateFaculty = Faculty::find($facultyId);
+            $subject->loadMissing('subject.major.department');
+            if ($candidateFaculty && $subject->subject) {
+                $candidateFaculty->loadMissing('subjects:id');
+                $isQualified = $candidateFaculty->subjects->contains('id', $subject->subject->id);
+                if (! $isQualified) {
+                    $subjectCollegeId = $subject->subject->major?->department?->college_id;
+                    $isHomeMatch = $subjectCollegeId === null
+                        ? $candidateFaculty->college_id === null
+                        : $candidateFaculty->college_id === $subjectCollegeId;
+
+                    if (! $isHomeMatch) {
+                        $errors['faculty_mismatch'] = "{$candidateFaculty->full_name} is not on file as qualified or from the academic home for "
+                            ."{$subject->subject->subject_code}. Confirm to save anyway.";
+                    }
+                }
+            }
+        }
+
         // Weekly Hours Mismatch Warning — the scheduled Days x
         // (End-Start) doesn't add up to what the Subject's curriculum
         // hours require (e.g. curriculum needs 5 hrs/week, the
@@ -947,6 +978,11 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // migration's docblock).
                     'room_type_confirmed' => $request->boolean('room_type_confirmed'),
                     'room_college_confirmed' => $request->boolean('room_college_confirmed'),
+                    // Faculty Mismatch — same persisted-confirmation
+                    // pattern as room_type_confirmed/room_college_confirmed
+                    // above. See the 2026_08_30_090000 migration's
+                    // docblock.
+                    'faculty_mismatch_confirmed' => $request->boolean('faculty_mismatch_confirmed'),
                     // A hand-edited row is no longer purely "Auto Generated" —
                     // untag it so Clear Generated Schedule / Regenerate never
                     // touch what the Registrar just chose themselves.
@@ -1605,8 +1641,25 @@ class SectionSubjectController extends Controller implements HasMiddleware
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
             ->with([
-                'subject:id,subject_code,subject_title',
-                'faculty:id,first_name,last_name',
+                // faculty_mismatch (see SectionSubject::getFacultyMismatchAttribute())
+                // needs subject.major.department (the Subject's academic
+                // home) and faculty.subjects (Teaching Qualifications) —
+                // both eager-loaded here alongside the columns the rest
+                // of this map() already needed, so computing the flag
+                // below never triggers a fresh per-row query.
+                // 'category' must be selected here too — is_out_of_category
+                // below calls $assignment->subject->isSharedResource(),
+                // which reads $this->category. A column-limited eager
+                // load that omits it silently returns null, which
+                // isSharedCategory() treats as "not shared" — so every
+                // Subject (including actual GenEd/Minor ones) looked
+                // exactly like a Major subject to an Assistant Dean,
+                // locking blocks that should have stayed draggable.
+                'subject:id,subject_code,subject_title,major_id,category',
+                'subject.major:id,department_id',
+                'subject.major.department:id,college_id',
+                'faculty:id,first_name,last_name,college_id',
+                'faculty.subjects:id',
                 // is_finalized must be selected here — the map() below
                 // reads $assignment->section->is_finalized to drive the
                 // Room Grid's locked/padlock rendering. A column-limited
@@ -1699,6 +1752,15 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     'faculty_name' => $assignment->faculty
                         ? trim("{$assignment->faculty->first_name} {$assignment->faculty->last_name}")
                         : null,
+                    // FACULTY MISMATCH — see SectionSubject::getFacultyMismatchAttribute().
+                    // Advisory only (never blocks the drag/drop write
+                    // path below); the Room Grid renders it as a badge
+                    // on the block so a manually-assigned faculty who
+                    // isn't Teaching-Qualification-linked or from the
+                    // Subject's own academic home (e.g. a CCS faculty
+                    // placed on a BSED Minor subject) stays visible
+                    // after the fact, not just at selection time.
+                    'faculty_mismatch' => (bool) $assignment->faculty_mismatch && ! $assignment->faculty_mismatch_confirmed,
                     'days' => $assignment->days,
                     'start_time' => $assignment->start_time,
                     'end_time' => $assignment->end_time,
@@ -2269,6 +2331,10 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // longer applies either.
                     'room_type_confirmed' => false,
                     'room_college_confirmed' => false,
+                    // faculty_id is being wiped above too, so any
+                    // Faculty Mismatch confirmation tied to that
+                    // faculty no longer applies either.
+                    'faculty_mismatch_confirmed' => false,
                     'is_auto_generated' => false,
                     'auto_generated_meta' => null,
                     'is_workload_override' => false,
@@ -2449,6 +2515,33 @@ class SectionSubjectController extends Controller implements HasMiddleware
                         ."{$room->room_name} belongs to {$roomCollegeName}. Confirm to save anyway.";
                 }
 
+                // Faculty Mismatch Warning — same rule/gate as
+                // performScheduleAssignmentUpdate() above, run here too
+                // since a batch save can persist rows that never went
+                // through the single-cell endpoint (e.g. Auto Generate
+                // results accepted as-is, or Auto Generate's own
+                // "Manual Scheduling" fallback rows the Registrar
+                // hand-assigned before Save).
+                if ($facultyId && empty($rowData['faculty_mismatch_confirmed'])) {
+                    $candidateFaculty = Faculty::find($facultyId);
+                    $subject->loadMissing('subject.major.department');
+                    if ($candidateFaculty && $subject->subject) {
+                        $candidateFaculty->loadMissing('subjects:id');
+                        $isQualified = $candidateFaculty->subjects->contains('id', $subject->subject->id);
+                        if (! $isQualified) {
+                            $subjectCollegeId = $subject->subject->major?->department?->college_id;
+                            $isHomeMatch = $subjectCollegeId === null
+                                ? $candidateFaculty->college_id === null
+                                : $candidateFaculty->college_id === $subjectCollegeId;
+
+                            if (! $isHomeMatch) {
+                                $rowErrors['faculty_mismatch'] = "{$candidateFaculty->full_name} is not on file as qualified or from the academic home for "
+                                    ."{$subject->subject->subject_code}. Confirm to save anyway.";
+                            }
+                        }
+                    }
+                }
+
                 // Weekly Hours Mismatch Warning — same rule/gate as
                 // updateSchedule() above, run here too since a batch
                 // save can persist rows that never went through the
@@ -2571,6 +2664,10 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     // on the next reload.
                     'room_type_confirmed' => ! empty($rowData['room_type_confirmed']),
                     'room_college_confirmed' => ! empty($rowData['room_college_confirmed']),
+                    // Faculty Mismatch — same persisted-confirmation
+                    // pattern as the room flags above. See the
+                    // 2026_08_30_090000 migration's docblock.
+                    'faculty_mismatch_confirmed' => ! empty($rowData['faculty_mismatch_confirmed']),
                     // "Save Schedule" finalizes any Auto Generated rows
                     // it saves — once saved they're a normal schedule,
                     // no longer a pending suggestion to clear/regenerate.

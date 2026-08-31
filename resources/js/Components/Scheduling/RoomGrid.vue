@@ -416,9 +416,12 @@ const blockTitle = (block) => {
     if (blockHasConflict(block)) {
         return `⚠ Conflict: overlaps another class in this room/time — ${block.section_code} ${block.subject_code}. This needs to be rescheduled.`;
     }
+    const mismatchSuffix = block.faculty_mismatch
+        ? ` ⚠ Faculty Mismatch — ${block.faculty_name ?? 'this faculty member'} is manually assigned outside ${block.subject_code ?? 'this subject'}'s qualified/academic-home faculty.`
+        : '';
     const state = blockAuthState(block);
-    if (state === 'current') return 'Click to edit · Drag to move';
-    if (state === 'authorized') return `Belongs to ${block.section_code} — within your authorized scheduling scope. Drag to move.`;
+    if (state === 'current') return `Click to edit · Drag to move${mismatchSuffix}`;
+    if (state === 'authorized') return `Belongs to ${block.section_code} — within your authorized scheduling scope. Drag to move.${mismatchSuffix}`;
     if (state === 'finalized') return `${block.section_code}'s schedule is finalized — an Admin/Registrar must unlock it before this can be edited.`;
     if (state === 'out_of_category') return `${block.subject_code} is a Major subject — outside your Assistant Dean scheduling scope (GenEd/Minor only). The Dean/OIC manages this.`;
     return 'This schedule is outside your scheduling scope.';
@@ -558,7 +561,7 @@ const onDragStartBlock = (block) => {
 // OTHER error key (room_id/faculty_id/days — real Room/Faculty/
 // Section/Time conflicts from ScheduleConflictService) is a hard
 // block and must never be offered a "confirm anyway" retry.
-const CONFIRMABLE_WARNING_KEYS = { capacity: 'capacity_confirmed', hours: 'hours_confirmed', room_type: 'room_type_confirmed', room_college: 'room_college_confirmed' };
+const CONFIRMABLE_WARNING_KEYS = { capacity: 'capacity_confirmed', hours: 'hours_confirmed', room_type: 'room_type_confirmed', room_college: 'room_college_confirmed', faculty_mismatch: 'faculty_mismatch_confirmed' };
 
 // Of the warning keys above, only Room Capacity is confirmed
 // immediately from Room Grid's own retry dialog. Room Type/Room
@@ -1239,10 +1242,19 @@ const sectionCollegeName = computed(() => props.section.major?.department?.colle
 
 const isQualifiedFor = (faculty, subject) => {
     if (!subject) return false;
+    // An explicit Teaching Qualification always wins, regardless of
+    // Subject category or the faculty's own College — mirrors
+    // SectionSubject::faculty_mismatch on the server, which never
+    // flags a mismatch for someone explicitly linked to the Subject.
+    // This must be checked BEFORE the General Education branch below:
+    // a College faculty member (e.g. College of Teacher Education)
+    // can still carry an explicit qualification for a GenEd subject
+    // like TCW, and that shouldn't be overridden by their College not
+    // being "General Education".
+    if (faculty.qualified_subject_ids?.includes(subject.id)) return true;
     if (subject.category === 'General Education') {
         return faculty.faculty_category === 'General Education Faculty' || faculty.college_id === null;
     }
-    if (faculty.qualified_subject_ids?.includes(subject.id)) return true;
     if (sectionCollegeId.value !== null) {
         return faculty.college_id === sectionCollegeId.value;
     }
@@ -1312,7 +1324,7 @@ const facultyOptions = computed(() => {
     return groups;
 });
 
-const openAssignModal = (row, day, rowIndex) => {
+const openAssignModal = async (row, day, rowIndex) => {
     const subject = row.subject || {};
     const defaultHours = (Number(subject.lecture_hours) || 0) + (Number(subject.laboratory_hours) || 0) || 3;
 
@@ -1346,12 +1358,16 @@ const openAssignModal = (row, day, rowIndex) => {
             selectedDays: targetDays.includes(day) ? [...targetDays] : [day],
             facultyId: targetBlock.faculty_id ?? null,
             editing: false,
+            siblingPatternSource: null,
         };
         assignModalVisible.value = true;
         loadFacultyRecommendations(row.id);
         return;
     }
 
+    // Open immediately with the plain curriculum defaults — the
+    // sibling lookup below is a network round trip and shouldn't make
+    // the modal feel like it's hanging.
     assignForm.value = {
         row,
         day,
@@ -1362,9 +1378,63 @@ const openAssignModal = (row, day, rowIndex) => {
         selectedDays: [day],
         facultyId: row.faculty_id ?? null,
         editing: false,
+        siblingPatternSource: null,
     };
     assignModalVisible.value = true;
     loadFacultyRecommendations(row.id);
+
+    // SIBLING SECTION PATTERN — prefill (never silently apply)
+    // Hours/Week, Meetings/Week, Days, and Faculty from a sibling
+    // Section's already-scheduled pattern for this exact Subject
+    // (same Major/Curriculum/Academic Year/Semester/Year Level — see
+    // SiblingSectionPatternService), when dropping into an otherwise
+    // empty slot. Without this, dropping into any slot that ISN'T the
+    // sibling's own exact occupied cell (the isShareable branch above)
+    // always fell back to the curriculum's textbook Hours/Week even
+    // when a sibling section had already been intentionally trimmed
+    // (e.g. Registrar manually confirmed 4 hrs/week instead of the
+    // curriculum's 5 for a faculty/room-availability reason) — forcing
+    // the same manual retyping + re-confirmation on every sibling
+    // section instead of just once.
+    //
+    // This mirrors Auto Generate Schedule's own use of the sibling
+    // pattern (AutoScheduleService::applySiblingPattern) but is purely
+    // a convenience default here: it does NOT set hours_confirmed, so
+    // if the copied hours still diverge from the curriculum, Save
+    // Schedule asks for the exact same "Weekly Hours Mismatch —
+    // Save Anyway" confirmation as always. Room is deliberately left
+    // alone (the Registrar already chose it by dropping here); only
+    // Hours/Week, Meetings/Week, Days, and Faculty are prefilled.
+    try {
+        const response = await fetch(
+            route('scheduling.section-subjects.recommend', [props.section.id, row.id]),
+            { headers: { Accept: 'application/json' } },
+        );
+        if (!response.ok) return;
+        const data = await response.json();
+        const top = data.combined?.recommendations?.[0];
+        if (!top?.is_sibling_pattern) return;
+
+        // Guard against a slow response landing after the modal was
+        // closed or reopened for a different row/drop in the meantime.
+        if (!assignModalVisible.value || assignForm.value.row?.id !== row.id || assignForm.value.day !== day) return;
+
+        const patternDays = top.time?.days ?? [];
+        const meetingsPerWeek = patternDays.length || 1;
+        const perMeetingHours = ((toMinutes(top.time.end_time) - toMinutes(top.time.start_time)) || 60) / 60;
+
+        assignForm.value = {
+            ...assignForm.value,
+            hoursPerWeek: Math.round(perMeetingHours * meetingsPerWeek * 100) / 100,
+            meetingsPerWeek,
+            selectedDays: patternDays.includes(day) ? [...patternDays] : [day],
+            facultyId: top.faculty?.id ?? assignForm.value.facultyId,
+            siblingPatternSource: top.pattern_source?.donor_section_code ?? null,
+        };
+    } catch (e) {
+        // Silent — the plain curriculum defaults are already shown and
+        // remain a perfectly valid starting point on their own.
+    }
 };
 
 // Click an existing block belonging to this section to edit its
@@ -1394,6 +1464,7 @@ const openEditModal = (block) => {
         selectedDays: [...rowDays],
         facultyId: row.faculty_id ?? null,
         editing: true,
+        siblingPatternSource: null,
     };
     assignModalVisible.value = true;
     loadFacultyRecommendations(row.id);
@@ -1492,6 +1563,27 @@ const assignRoomCollegeValid = computed(() => {
     if (!room?.college_id || !sectionCollegeId.value) return true;
     if (subject?.category === 'General Education') return true;
     return room.college_id === sectionCollegeId.value;
+});
+
+// FACULTY MISMATCH — advisory-only heads-up (never blocks Save,
+// mirrors assignRoomTypeValid/assignRoomCollegeValid's "confirmable,
+// not a hard block" spirit, except there's no confirm dialog here —
+// Manual Override is already a first-class supported path via the
+// "Other Active Faculty (Manual Override)" group above). Reuses the
+// exact same isQualifiedFor() rule the Faculty dropdown's grouping
+// already uses, so a Faculty picked from the "Manual Override" group
+// is exactly the case this flags. The server computes the
+// authoritative version of this as SectionSubject::faculty_mismatch
+// (see app/Models/SectionSubject.php), which is what actually
+// persists and drives the Master Grid badge after Save — this is
+// only a same-page heads-up before the round trip.
+const assignFacultyMismatch = computed(() => {
+    const facultyId = assignForm.value.facultyId;
+    const subject = assignForm.value.row?.subject;
+    if (!facultyId || !subject) return false;
+    const faculty = props.activeFaculty.find((f) => f.id === facultyId);
+    if (!faculty) return false;
+    return !isQualifiedFor(faculty, subject);
 });
 
 const perMeetingPreview = computed(() => {
@@ -1637,6 +1729,30 @@ const confirmAssign = async () => {
         deferMismatchConfirmation = true;
     }
 
+    // Faculty Mismatch — same deferred-confirmation pattern as Room
+    // Type/Room College Mismatch above: the Registrar acknowledges it
+    // here just to place the subject, but the mismatch only actually
+    // resolves via the Subjects tab's "Save Schedule".
+    if (assignFacultyMismatch.value) {
+        assignModalVisible.value = false;
+        const facultyOption = props.activeFaculty.find((f) => f.id === assignForm.value.facultyId);
+        const result = await Swal.fire({
+            icon: 'warning',
+            title: 'Faculty Mismatch',
+            html: `<div class="text-left text-sm">${facultyOption?.full_name ?? 'This faculty member'} is not on file as qualified or from the academic home for ${row.subject?.subject_code ?? 'this subject'}. This will still need to be confirmed on the Subjects tab's "Save Schedule" before it's fully resolved.</div>`,
+            showCancelButton: true,
+            confirmButtonText: 'Place Anyway',
+            cancelButtonText: 'Go Back',
+            confirmButtonColor: '#dc2626',
+            customClass: { container: 'roomgrid-swal-on-top' },
+        });
+        if (!result.isConfirmed) {
+            assignModalVisible.value = true; // reopen so they can adjust
+            return;
+        }
+        deferMismatchConfirmation = true;
+    }
+
     // Duration per meeting, rounded to the nearest 30 minutes so the
     // grid (hourly rows) still reads cleanly, minimum 30 minutes.
     const totalMinutes = hoursPerWeek * 60;
@@ -1661,6 +1777,7 @@ const confirmAssign = async () => {
         hours_confirmed: false,
         room_type_confirmed: false,
         room_college_confirmed: false,
+        faculty_mismatch_confirmed: false,
         defer_mismatch_confirmation: deferMismatchConfirmation,
     };
 
@@ -1991,6 +2108,11 @@ const removeAssignment = async () => {
                                             class="pi pi-exclamation-triangle absolute top-1 right-1 text-[10px] text-red-600"
                                         ></i>
                                         <i
+                                            v-else-if="blockAt(day, rowIndex).faculty_mismatch"
+                                            class="pi pi-user-edit absolute top-1 right-1 text-[10px] text-amber-600"
+                                            title="Faculty Mismatch — manually assigned outside this subject's qualified/academic-home faculty"
+                                        ></i>
+                                        <i
                                             v-else-if="blockAt(day, rowIndex).is_finalized"
                                             class="pi pi-lock absolute top-1 right-1 text-[9px] text-amber-700 opacity-80"
                                         ></i>
@@ -2012,6 +2134,7 @@ const removeAssignment = async () => {
                                         </div>
                                         <div v-if="blockAt(day, rowIndex).faculty_name" class="truncate text-[10px] opacity-75">{{ blockAt(day, rowIndex).faculty_name }}</div>
                                         <div v-if="blockHasConflict(blockAt(day, rowIndex))" class="text-[9px] font-semibold text-red-700 truncate">⚠ Conflict — needs rescheduling</div>
+                                        <div v-else-if="blockAt(day, rowIndex).faculty_mismatch" class="text-[9px] font-semibold text-amber-700 truncate">⚠ Faculty Mismatch</div>
                                         <div v-else-if="blockAt(day, rowIndex).is_finalized" class="text-[9px] italic opacity-75 truncate">Finalized — locked</div>
                                         <div v-else-if="!blockAt(day, rowIndex).can_edit" class="text-[9px] italic opacity-75 truncate">Outside your scheduling scope</div>
                                     </div>
@@ -2122,6 +2245,15 @@ const removeAssignment = async () => {
                             >{{ assignForm.requiredHours }} hrs/week</button>
                             <span v-else class="font-medium text-slate-500">{{ assignForm.requiredHours }} hrs/week</span>
                         </p>
+                        <!-- SIBLING SECTION PATTERN prefill note — see
+                             openAssignModal()'s sibling lookup. Purely
+                             informational: the Hours Mismatch confirm
+                             gate below still fires the same way if this
+                             copied value diverges from the curriculum. -->
+                        <p v-if="assignForm.siblingPatternSource" class="text-[11px] text-teal-600 mt-1">
+                            <i class="pi pi-copy"></i>
+                            Prefilled to match {{ assignForm.siblingPatternSource }}'s existing schedule for this subject.
+                        </p>
                     </div>
                     <div>
                         <label class="text-xs font-medium text-slate-500 mb-1 block">Meetings / Week</label>
@@ -2209,6 +2341,7 @@ const removeAssignment = async () => {
                         showClear
                         placeholder="Unassigned"
                         class="w-full"
+                        :class="{ '!border-amber-300': assignFacultyMismatch }"
                     >
                         <template #optiongroup="{ option }">
                             <span class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-400">{{ option.label }}</span>
@@ -2238,6 +2371,15 @@ const removeAssignment = async () => {
                             </div>
                         </template>
                     </Select>
+                    <p v-if="assignFacultyMismatch" class="flex items-start gap-1.5 text-xs text-amber-600 mt-1">
+                        <i class="pi pi-exclamation-triangle mt-0.5"></i>
+                        <span>
+                            <span class="font-semibold">Faculty Mismatch:</span>
+                            not on file as qualified or from the academic home for
+                            {{ assignForm.row?.subject?.subject_code ?? 'this subject' }}. You can still save this as
+                            a manual override — the assignment will carry a Faculty Mismatch flag on the grid.
+                        </span>
+                    </p>
                 </div>
 
                 <p class="text-[11px] text-slate-400">

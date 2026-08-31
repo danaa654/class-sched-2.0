@@ -75,15 +75,25 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
             // SectionSubjectController::performScheduleAssignmentUpdate().
             'room_type_confirmed' => ['sometimes', 'boolean'],
             'room_college_confirmed' => ['sometimes', 'boolean'],
+            // Set true once the Registrar has explicitly acknowledged a
+            // Faculty Mismatch warning (the assigned Faculty carries no
+            // Teaching Qualification for this Subject and isn't from
+            // its academic home College/GenEd pool — e.g. a CCS
+            // faculty member manually placed on a BSED Minor subject)
+            // — lets the save proceed despite the warning. Mirrors
+            // room_type_confirmed/room_college_confirmed exactly. See
+            // SectionSubjectController::performScheduleAssignmentUpdate().
+            'faculty_mismatch_confirmed' => ['sometimes', 'boolean'],
             // ROOM GRID DEFERRED CONFIRMATION — set true by the Room
             // Grid tab (RoomGrid.vue's confirmAssign()/writeSchedule())
             // when the Registrar chooses to place a subject despite a
-            // Room Type / Room College / Weekly Hours mismatch WITHOUT
-            // treating it as permanently confirmed. Lets
-            // performScheduleAssignmentUpdate() skip the room_type/
-            // room_college/hours 422 block for THIS save while still
-            // persisting room_type_confirmed/room_college_confirmed/
-            // hours_confirmed as false (never coerced true) — so the
+            // Room Type / Room College / Weekly Hours / Faculty
+            // Mismatch WITHOUT treating it as permanently confirmed.
+            // Lets performScheduleAssignmentUpdate() skip the
+            // room_type/room_college/hours/faculty_mismatch 422 block
+            // for THIS save while still persisting
+            // room_type_confirmed/room_college_confirmed/hours_confirmed/
+            // faculty_mismatch_confirmed as false (never coerced true) — so the
             // placement saves immediately (Room Grid's whole UX is
             // instant drag/drop), but the mismatch stays a live
             // "Scheduling Issue" until the Registrar explicitly

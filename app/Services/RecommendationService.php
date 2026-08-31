@@ -298,36 +298,37 @@ class RecommendationService
     }
 
     /**
-     * FACULTY SELECTION — academic-ownership-first strategy.
+     * FACULTY SELECTION — qualification-first, ownership-second
+     * strategy.
      *
-     * The question asked, in order, is "who owns this subject
-     * academically?" before "who can teach it?":
+     * The question asked, in order, is "who's explicitly qualified to
+     * teach this?" before "who owns this subject academically?":
      *
-     *   LEVEL 1 — Owning College/Program + Teaching Qualification
-     *     For a Major/Professional Subject, resolve the College that
-     *     owns it via Subject -> Major -> Department -> College (the
-     *     same chain the Section's own Curriculum belongs to), then
-     *     restrict to Active faculty whose own `college_id` matches
-     *     AND who are explicitly linked to this Subject via Teaching
-     *     Qualifications. For a General Education/Minor Subject (no
-     *     owning College — subjectCollegeId() is null), the pool is
-     *     General Education faculty (`college_id` null) who carry the
-     *     same Teaching Qualification. College match alone is never
-     *     enough on its own — a faculty member belonging to the right
-     *     College who ISN'T qualified for this specific Subject is not
-     *     a candidate at this tier, full stop.
+     *   LEVEL 1 — Explicit Teaching Qualification (any College)
+     *     Active faculty explicitly linked to this exact Subject via
+     *     Teaching Qualifications, regardless of which College they
+     *     belong to. An explicit Teaching Qualification is the
+     *     strongest signal available — the Registrar/Dean has
+     *     recorded, by name, "this faculty member can teach this
+     *     Subject" — so it is never subordinated to a same-College
+     *     candidate who merely happens to belong to the right pool
+     *     but has no such record (mirrors
+     *     SectionSubject::faculty_mismatch, which likewise never
+     *     flags a mismatch for an explicit Teaching Qualification
+     *     link regardless of College).
      *     Ranked by: No Schedule Conflicts, Lowest Teaching Load,
      *     Full-time before Part-time.
      *
-     *   LEVEL 4 — Cross-College Fallback
-     *     Only reached when Level 1 returns zero candidates — i.e. no
-     *     Active, Teaching-Qualification-linked faculty exists inside
-     *     the Subject's own academic home. Widens the same
-     *     Teaching-Qualification requirement to every College, and
-     *     flags the result `fallback = true` with a human-readable
-     *     `fallback_reason` so the Registrar/Auto Generate review can
-     *     surface a "Cross-college faculty fallback" notice instead of
-     *     silently treating it as an ordinary recommendation.
+     *   LEVEL 2 — Owning College/GenEd Pool (no Teaching Qualification
+     *     required)
+     *     Only reached when Level 1 returns zero candidates. For a
+     *     Major/Professional Subject, Active faculty whose own
+     *     `college_id` matches the Subject's owning College (via
+     *     Subject -> Major -> Department -> College). For a General
+     *     Education/Minor Subject, Active faculty with no College of
+     *     their own. Being in the right pool without a recorded
+     *     Teaching Qualification is still a reasonable candidate —
+     *     just ranked below anyone with an explicit qualification.
      *
      *   LEVEL 5 — Manual Scheduling
      *     No faculty eligible at either tier -> empty recommendations
@@ -405,33 +406,36 @@ class RecommendationService
         $collegeId = $this->subjectCollegeId($subject);
         $primaryTier = $collegeId !== null ? 'college_match' : 'general_education_match';
 
-        // LEVEL 1 — the Subject's own academic home (its owning
-        // College for a Major/Professional Subject, or the General
-        // Education pool for a GenEd/Minor Subject with no owning
-        // College of its own), restricted to faculty who are ALSO
-        // explicitly linked to this Subject via Teaching
-        // Qualifications. Being in the right College never substitutes
-        // for actually being qualified to teach the Subject.
-        $primaryQuery = Faculty::query()
+        // LEVEL 1 — explicit Teaching Qualification, ANY college. An
+        // explicit Teaching Qualification link is the strongest
+        // possible signal the Registrar/Dean has recorded — "this
+        // named faculty member is qualified to teach this exact
+        // Subject" — and it stands on its own regardless of which
+        // College that faculty happens to belong to (mirrors
+        // SectionSubject::faculty_mismatch, which never flags a
+        // Faculty Mismatch for someone with an explicit Teaching
+        // Qualification, college match or not). Previously this tier
+        // also required a college/GenEd-pool match, which meant a
+        // qualified-but-cross-college faculty member (e.g. a College
+        // of Teacher Education faculty explicitly qualified to teach
+        // a General Education subject) got buried behind unqualified
+        // same-pool faculty at Level 2 below, or never surfaced at
+        // all outside a "fallback" notice.
+        $primaryFaculty = Faculty::query()
             ->where('status', 'Active')
             ->whereHas('subjects', fn ($q) => $q->where('subjects.id', $subject->id))
-            ->with(['subjects:id']);
-
-        $primaryQuery = $collegeId !== null
-            ? $primaryQuery->where('college_id', $collegeId)
-            : $primaryQuery->whereNull('college_id');
-
-        $primaryFaculty = $primaryQuery->get();
+            ->with(['subjects:id'])
+            ->get();
 
         $primaryRanked = $primaryFaculty->isNotEmpty()
-            ? $this->rankFacultyCandidates($primaryFaculty, $subject, $current, tier: $primaryTier)
+            ? $this->rankFacultyCandidates($primaryFaculty, $subject, $current, tier: 'teaching_qualification')
             : [];
 
         if (! empty($primaryRanked)) {
             return [
                 'recommendations' => array_slice($primaryRanked, 0, self::MAX_FACULTY_RESULTS),
                 'message' => null,
-                'tier' => $primaryTier,
+                'tier' => 'teaching_qualification',
                 'fallback' => false,
                 'fallback_reason' => null,
             ];
@@ -483,46 +487,14 @@ class RecommendationService
             }
         }
 
-        // LEVEL 4 — CROSS-COLLEGE FALLBACK. Nobody inside the
-        // Subject's own academic home is both Active and Teaching-
-        // Qualification-linked to it, so the same Teaching
-        // Qualification requirement is widened to every College. This
-        // is still hard-gated on qualification — it is never "any
-        // available faculty regardless of college", only "qualified
-        // faculty regardless of college" — and is explicitly flagged
-        // as a fallback rather than presented as an ordinary
-        // recommendation.
-        $fallbackFaculty = Faculty::query()
-            ->where('status', 'Active')
-            ->whereHas('subjects', fn ($q) => $q->where('subjects.id', $subject->id))
-            ->with(['subjects:id'])
-            ->get();
-
-        $fallbackRanked = $fallbackFaculty->isNotEmpty()
-            ? $this->rankFacultyCandidates($fallbackFaculty, $subject, $current, tier: 'teaching_qualification')
-            : [];
-
-        if (! empty($fallbackRanked)) {
-            $fallbackReason = $collegeId !== null
-                ? "No suitable qualified faculty is available in this Subject's own College. Showing qualified faculty from other Colleges instead."
-                : 'No suitable qualified General Education faculty is available. Showing other qualified faculty instead.';
-
-            return [
-                'recommendations' => array_slice($fallbackRanked, 0, self::MAX_FACULTY_RESULTS),
-                'message' => $fallbackReason,
-                'tier' => 'teaching_qualification',
-                'fallback' => true,
-                'fallback_reason' => $fallbackReason,
-            ];
-        }
-
         // LEVEL 5 — nobody eligible at any tier: no Active faculty
         // exists in this Subject's own College/GenEd pool at all
         // (Level 2 already covers "College has faculty, just no TQ
         // recorded yet"), and no Active+TQ'd faculty exists anywhere
-        // else either. The Registrar (or Auto Generate Schedule) must
-        // assign this one manually — likely by adding a faculty
-        // member to that College on the Faculty page first.
+        // else either (Level 1 already searched every College, not
+        // just the Subject's own). The Registrar (or Auto Generate
+        // Schedule) must assign this one manually — likely by adding
+        // a faculty member to that College on the Faculty page first.
         return [
             'recommendations' => [],
             'message' => $collegeId !== null
