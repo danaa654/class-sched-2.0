@@ -36,24 +36,36 @@ const colorClasses = {
         iconDark: 'text-blue-400',
         glow: 'rgba(37, 99, 235, 0.35)',
         glowDark: 'rgba(56, 189, 248, 0.35)',
+        wash: 'from-blue-50 via-transparent to-transparent',
+        washDark: 'from-blue-500/10 via-transparent to-transparent',
+        bar: 'bg-blue-500',
     },
     emerald: {
         icon: 'text-emerald-600',
         iconDark: 'text-emerald-400',
         glow: 'rgba(16, 185, 129, 0.35)',
         glowDark: 'rgba(52, 211, 153, 0.35)',
+        wash: 'from-emerald-50 via-transparent to-transparent',
+        washDark: 'from-emerald-500/10 via-transparent to-transparent',
+        bar: 'bg-emerald-500',
     },
     amber: {
         icon: 'text-amber-600',
         iconDark: 'text-amber-400',
         glow: 'rgba(217, 119, 6, 0.35)',
         glowDark: 'rgba(251, 191, 36, 0.35)',
+        wash: 'from-amber-50 via-transparent to-transparent',
+        washDark: 'from-amber-500/10 via-transparent to-transparent',
+        bar: 'bg-amber-500',
     },
     violet: {
         icon: 'text-violet-600',
         iconDark: 'text-violet-400',
         glow: 'rgba(124, 58, 237, 0.35)',
         glowDark: 'rgba(167, 139, 250, 0.35)',
+        wash: 'from-violet-50 via-transparent to-transparent',
+        washDark: 'from-violet-500/10 via-transparent to-transparent',
+        bar: 'bg-violet-500',
     },
 };
 
@@ -68,9 +80,10 @@ const glowStyle = computed(() => ({
     <component
         :is="isClickable ? Link : 'div'"
         :href="isClickable ? route(href) : undefined"
-        class="neu-card flex items-center gap-4 rounded-2xl p-5 transition-colors duration-300"
-        :class="isClickable ? 'neu-card--clickable cursor-pointer' : ''"
+        class="neu-card relative flex items-center gap-4 overflow-hidden rounded-2xl bg-gradient-to-br p-5 transition-colors duration-300"
+        :class="[isClickable ? 'neu-card--clickable cursor-pointer' : '', isDark ? classes.washDark : classes.wash]"
     >
+        <span class="absolute inset-x-0 top-0 h-1 rounded-t-2xl" :class="classes.bar"></span>
         <span
             class="neu-icon-well neu-glow flex h-12 w-12 flex-none items-center justify-center rounded-xl"
             :style="glowStyle"

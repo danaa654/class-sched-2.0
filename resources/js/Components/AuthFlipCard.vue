@@ -144,7 +144,7 @@ const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null,
         <div class="auth-flip-card" :class="{ 'is-flipped': flipped }">
             <!-- Front face: Login -->
             <div class="auth-flip-face auth-flip-face--front">
-                <div class="neu-card neu-spotlight rounded-3xl">
+                <div class="neu-card neu-spotlight neon-border rounded-3xl" style="--neon-color: #22C55E;">
                     <div
                         class="auth-card-face-inner rounded-3xl p-8 transition-colors duration-300"
                     >
@@ -236,7 +236,7 @@ const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null,
                             <Button
                                 type="submit"
                                 :label="throttleSecondsRemaining !== null ? `Try again in ${throttleSecondsRemaining}s` : 'Login'"
-                                class="!w-full !border-[#2563EB]/60 !bg-[#2563EB] shadow-[0_8px_24px_rgba(37,99,235,0.45)]"
+                                class="!w-full !border-[#2563EB] !bg-[#2563EB]"
                                 size="large"
                                 :loading="loginForm.processing"
                                 :disabled="throttleSecondsRemaining !== null"
@@ -248,7 +248,7 @@ const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null,
 
             <!-- Back face: Forgot password -->
             <div class="auth-flip-face auth-flip-face--back">
-                <div class="neu-card neu-spotlight rounded-3xl">
+                <div class="neu-card neu-spotlight neon-border rounded-3xl" style="--neon-color: #22C55E;">
                     <div
                         class="auth-card-face-inner rounded-3xl p-8 transition-colors duration-300"
                     >
@@ -301,7 +301,7 @@ const schoolBranding = computed(() => page.props.schoolBranding ?? { name: null,
                             <Button
                                 type="submit"
                                 label="Email Password Reset Link"
-                                class="!w-full !border-[#2563EB]/60 !bg-[#2563EB] shadow-[0_8px_24px_rgba(37,99,235,0.45)]"
+                                class="!w-full !border-[#2563EB] !bg-[#2563EB]"
                                 size="large"
                                 :loading="forgotForm.processing"
                             />

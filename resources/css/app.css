@@ -153,42 +153,365 @@ body {
     font-weight: 400;
 }
 
-/* Thin, colorful scrollbar (site-wide) */
+/* Thin, quiet scrollbar (site-wide) */
 html {
     scrollbar-width: thin;
-    scrollbar-color: #2563EB #E0E7FF;
+    scrollbar-color: #CBD5E1 transparent;
 }
 
 html.dark {
-    scrollbar-color: #38BDF8 #0B1220;
+    scrollbar-color: #334155 transparent;
 }
 
 ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-    background: #E0E7FF;
+    background: transparent;
 }
 
 html.dark ::-webkit-scrollbar-track {
-    background: #0B1220;
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, #2563EB, #38BDF8);
+    background: #CBD5E1;
     border-radius: 9999px;
-    border: 2px solid #E0E7FF;
 }
 
 html.dark ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, #38BDF8, #2563EB);
-    border: 2px solid #0B1220;
+    background: #334155;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, #1D4ED8, #0EA5E9);
+    background: #94A3B8;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+/* =========================================================================
+   CLASSLY — "Dynamic Academic Glass" design system
+   Brand: blue #2563EB, navy #0F1B46, bright blue #3B82F6, red #EF3340,
+   violet #7C3AED, cyan #06B6D4. Glass surfaces + atmospheric gradients +
+   a faint animated schedule-grid backdrop, layered behind readable content.
+   ========================================================================= */
+
+:root {
+    --glass-bg-light: rgba(255, 255, 255, 0.55);
+    --glass-border-light: rgba(255, 255, 255, 0.45);
+    --glass-bg-dark: rgba(17, 24, 39, 0.65);
+    --glass-border-dark: rgba(255, 255, 255, 0.08);
+}
+
+/* Glass surface utility — apply alongside backdrop-blur-xl */
+.glass-surface {
+    background: var(--glass-bg-light);
+    border: 1px solid var(--glass-border-light);
+    box-shadow: 0 8px 32px rgba(15, 27, 70, 0.06);
+}
+
+.dark .glass-surface {
+    background: var(--glass-bg-dark);
+    border: 1px solid var(--glass-border-dark);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.glass-surface-hover {
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.glass-surface-hover:hover {
+    transform: translateY(-2px);
+    border-color: rgba(37, 99, 235, 0.35);
+    box-shadow: 0 12px 40px rgba(37, 99, 235, 0.12);
+}
+
+.dark .glass-surface-hover:hover {
+    border-color: rgba(124, 58, 237, 0.4);
+    box-shadow: 0 12px 40px rgba(124, 58, 237, 0.18);
+}
+
+/* Brand gradient text/surfaces */
+.brand-gradient-text {
+    background: linear-gradient(90deg, #2563EB, #EF3340);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.brand-gradient-bg {
+    background: linear-gradient(135deg, #2563EB, #EF3340);
+}
+
+.brand-gradient-border {
+    border-image: linear-gradient(90deg, #2563EB, #EF3340) 1;
+}
+
+/* Ambient atmosphere: faint schedule-grid + blurred blue/violet glow,
+   sits behind page content via a fixed, pointer-events-none layer.
+   Usage: <div class="academic-atmosphere"><div class="academic-atmosphere__grid" /><div class="academic-atmosphere__glow academic-atmosphere__glow--blue" />...</div> */
+.academic-atmosphere {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.academic-atmosphere__grid {
+    position: absolute;
+    inset: -10%;
+    background-image:
+        linear-gradient(rgba(37, 99, 235, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(37, 99, 235, 0.05) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: radial-gradient(ellipse at 50% 30%, black 0%, transparent 70%);
+    mask-image: radial-gradient(ellipse at 50% 30%, black 0%, transparent 70%);
+    animation: academic-grid-drift 40s linear infinite;
+}
+
+.dark .academic-atmosphere__grid {
+    background-image:
+        linear-gradient(rgba(124, 58, 237, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124, 58, 237, 0.08) 1px, transparent 1px);
+}
+
+@keyframes academic-grid-drift {
+    0% { transform: translate(0, 0); }
+    100% { transform: translate(64px, 64px); }
+}
+
+.academic-atmosphere__glow {
+    position: absolute;
+    width: 40vw;
+    height: 40vw;
+    max-width: 560px;
+    max-height: 560px;
+    border-radius: 9999px;
+    filter: blur(90px);
+    opacity: 0.35;
+    animation: academic-glow-pulse 12s ease-in-out infinite;
+}
+
+.academic-atmosphere__glow--blue {
+    top: -10%;
+    left: -8%;
+    background: #2563EB;
+}
+
+.academic-atmosphere__glow--violet {
+    bottom: -12%;
+    right: -6%;
+    background: #EF3340;
+    opacity: 0.22;
+    animation-delay: -6s;
+}
+
+.academic-atmosphere__glow--cyan {
+    top: 30%;
+    right: 15%;
+    width: 24vw;
+    height: 24vw;
+    max-width: 340px;
+    max-height: 340px;
+    background: #3B82F6;
+    opacity: 0.16;
+    animation-delay: -3s;
+}
+
+@keyframes academic-glow-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.35; }
+    50% { transform: scale(1.12); opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .academic-atmosphere__grid,
+    .academic-atmosphere__glow {
+        animation: none;
+    }
+}
+
+/* =========================================================================
+   CLASSLY — Welcome hero logo mark enhancements: orbit rings, sheen sweep,
+   floating orb, drifting chips, and sparkle accents.
+   ========================================================================= */
+
+.classly-hero-glow {
+    animation: classly-hero-glow-pulse 5s ease-in-out infinite;
+}
+
+@keyframes classly-hero-glow-pulse {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.08); }
+}
+
+.classly-orbit-spin {
+    animation: classly-spin 24s linear infinite;
+}
+
+.classly-orbit-spin-reverse {
+    animation: classly-spin-reverse 34s linear infinite;
+}
+
+@keyframes classly-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes classly-spin-reverse {
+    from { transform: rotate(360deg); }
+    to { transform: rotate(0deg); }
+}
+
+.classly-sheen-ring {
+    background: conic-gradient(from 0deg, rgba(255, 255, 255, 0.6), transparent 25%, transparent 75%, rgba(255, 255, 255, 0.6));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    animation: classly-spin 6s linear infinite;
+    opacity: 0.8;
+}
+
+.classly-logo-float {
+    animation: classly-float 4.5s ease-in-out infinite;
+}
+
+@keyframes classly-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+.classly-chip-drift {
+    animation: classly-chip-drift 6s ease-in-out infinite;
+}
+
+@keyframes classly-chip-drift {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-6px) scale(1.03); }
+}
+
+.classly-sparkle {
+    animation: classly-twinkle 2.4s ease-in-out infinite;
+}
+
+.classly-sparkle--a {
+    animation-delay: 0s;
+}
+
+.classly-sparkle--b {
+    animation-delay: 1.1s;
+}
+
+/* Feature chips: light up on hover/focus — brighter glass, glowing border,
+   subtle lift, and the icon picks up the brand cyan. */
+.classly-chip-glow {
+    cursor: default;
+    transition: transform 0.25s ease, background-color 0.25s ease,
+        border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.classly-chip-glow:hover,
+.classly-chip-glow:focus-visible {
+    transform: translateY(-4px) scale(1.06);
+    background-color: rgba(255, 255, 255, 0.4) !important;
+    border-color: rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5), 0 8px 24px rgba(56, 189, 248, 0.55),
+        0 0 32px rgba(56, 189, 248, 0.45);
+    /* pause the drift animation so the hover lift isn't fighting it */
+    animation-play-state: paused;
+}
+
+.classly-chip-glow:hover i,
+.classly-chip-glow:focus-visible i {
+    color: #E0F6FF;
+    text-shadow: 0 0 10px rgba(224, 246, 255, 0.9);
+}
+
+@keyframes classly-twinkle {
+    0%, 100% { opacity: 0.25; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .classly-hero-glow,
+    .classly-orbit-spin,
+    .classly-orbit-spin-reverse,
+    .classly-sheen-ring,
+    .classly-logo-float,
+    .classly-chip-drift,
+    .classly-sparkle {
+        animation: none;
+    }
+}
+
+/* Animated "neon" moving border — a conic gradient sweeping around the
+   card's edge, colored via --neon-color. Used on Dashboard attention
+   tiles to make an active conflict/status read as alive, not just red
+   text. Needs `position: relative` + `isolation: isolate` (included
+   here) so the ::before glow layer sits behind the card's own content
+   and background instead of covering it. */
+@property --neon-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
+.neon-border {
+    position: relative;
+    isolation: isolate;
+    --neon-color: #EF3340;
+}
+
+/* ::after, not ::before — cards that combine .neon-border with
+   .neu-spotlight (e.g. the auth login/forgot-password card) already use
+   ::before for the spotlight's ambient glow. An element can only have one
+   ::before; when two classes both declare it, the cascade (not the class)
+   decides which rules win, and since .neu-spotlight::before is declared
+   later in this file, it was silently clobbering this rule's inset/
+   background/z-index whenever both classes shared an element — which is
+   why the ring rendered fine on the dashboard (no .neu-spotlight there)
+   but never appeared on the auth card. */
+.neon-border::after {
+    content: '';
+    position: absolute;
+    inset: -1.5px;
+    border-radius: inherit;
+    padding: 1.5px;
+    background: conic-gradient(
+        from var(--neon-angle, 0deg),
+        transparent 0%,
+        var(--neon-color) 12%,
+        color-mix(in srgb, var(--neon-color) 60%, white) 18%,
+        var(--neon-color) 24%,
+        transparent 40%,
+        transparent 100%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: neon-rotate 3.5s linear infinite;
+    filter: drop-shadow(0 0 4px var(--neon-color));
+    pointer-events: none;
+    z-index: 1;
+    /* Forces its own compositing layer. Without this, browsers can fail
+       to render mask/filter correctly on descendants of an ancestor with
+       transform-style: preserve-3d (e.g. the auth flip card), causing the
+       ring to silently disappear even though the rules are all correct. */
+    transform: translateZ(0);
+}
+
+@keyframes neon-rotate {
+    to { --neon-angle: 360deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .neon-border::after {
+        animation: none;
+    }
 }
 
 /* ---- Ambient background particles (shared: Welcome.vue + AppLayout.vue) ---- */
@@ -341,7 +664,49 @@ html.dark ::-webkit-scrollbar-thumb {
     }
 }
 
-/* ---- 3D flip card: Welcome page service cards (Scheduling/Teachers/Reports) ---- */
+/* ---- Welcome page: liquid-glass navigation pill ---- */
+.liquid-glass-nav {
+    position: relative;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.45));
+    border: 1px solid rgba(255, 255, 255, 0.75);
+    box-shadow:
+        0 8px 32px rgba(2, 30, 84, 0.15),
+        inset 0 1px 1px rgba(255, 255, 255, 0.9),
+        inset 0 -1px 1px rgba(2, 30, 84, 0.05);
+    backdrop-filter: blur(24px) saturate(100%) brightness(1.15);
+    -webkit-backdrop-filter: blur(24px) saturate(100%) brightness(1.15);
+    overflow: hidden;
+}
+
+.liquid-glass-nav::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg, rgba(255, 255, 255, 0.6) 0%, transparent 35%, transparent 65%, rgba(255, 255, 255, 0.3) 100%);
+    pointer-events: none;
+}
+
+.dark .liquid-glass-nav {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05));
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.5),
+        inset 0 1px 1px rgba(255, 255, 255, 0.2),
+        inset 0 -1px 1px rgba(0, 0, 0, 0.35);
+}
+
+.dark .liquid-glass-nav::before {
+    background: linear-gradient(120deg, rgba(255, 255, 255, 0.12) 0%, transparent 35%, transparent 65%, rgba(255, 255, 255, 0.05) 100%);
+}
+
+/* ---- Welcome page: feature cards inside the blue footer section ---- */
+.footer-feature-card {
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 8px 32px rgba(2, 30, 84, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+}
+
+/* ---- 3D flip card: Welcome page Features cards ---- */
 .feature-flip-scene {
     perspective: 1600px;
     transition: transform 0.3s ease;
@@ -390,143 +755,51 @@ html.dark ::-webkit-scrollbar-thumb {
     }
 }
 
-/* ---- Global button styling: rounded + 3D pressed effect (site-wide) ---- */
+/* ---- Global button styling: quiet depth, not 3D (site-wide) ---- */
 .p-button:not(.p-button-text):not(.p-button-link) {
-    border-radius: 10px !important;
-    box-shadow:
-        0 3px 0 rgba(0, 0, 0, 0.22),
-        0 4px 10px rgba(0, 0, 0, 0.12) !important;
-    transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.2s ease !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
+    transition: box-shadow 0.15s ease, background-color 0.15s ease, border-color 0.15s ease !important;
 }
 
 .p-button:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    transform: translateY(-1px);
-    box-shadow:
-        0 4px 0 rgba(0, 0, 0, 0.22),
-        0 6px 14px rgba(0, 0, 0, 0.16) !important;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12) !important;
 }
 
 .p-button:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    transform: translateY(2px);
-    box-shadow:
-        0 1px 0 rgba(0, 0, 0, 0.22),
-        0 2px 4px rgba(0, 0, 0, 0.1) !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
 }
 
 .p-button:not(.p-button-text):not(.p-button-link):disabled {
     box-shadow: none !important;
-    transform: none !important;
 }
 
-/* Dark mode: the flat black drop-shadow above is invisible against the
-   navy surfaces, so swap it for a neon glow tinted to the button's own
-   severity color instead (default/primary blue, success green, danger
-   red, warn amber, info cyan, help purple, secondary/contrast neutral). */
+/* Dark mode: same quiet-depth approach, no neon glow */
 .dark .p-button:not(.p-button-text):not(.p-button-link) {
-    box-shadow:
-        0 3px 0 rgba(0, 0, 0, 0.35),
-        0 0 14px 1px rgba(37, 99, 235, 0.45) !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
 }
 .dark .p-button:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    box-shadow:
-        0 4px 0 rgba(0, 0, 0, 0.35),
-        0 0 20px 3px rgba(37, 99, 235, 0.65) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
 }
 .dark .p-button:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    box-shadow:
-        0 1px 0 rgba(0, 0, 0, 0.35),
-        0 0 10px 1px rgba(37, 99, 235, 0.45) !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
 }
 .dark .p-button:not(.p-button-text):not(.p-button-link):disabled {
     box-shadow: none !important;
 }
 
-.dark .p-button-success:not(.p-button-text):not(.p-button-link) {
-    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(34, 197, 94, 0.5) !important;
-}
-.dark .p-button-success:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(34, 197, 94, 0.7) !important;
-}
-.dark .p-button-success:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(34, 197, 94, 0.5) !important;
-}
-
-.dark .p-button-danger:not(.p-button-text):not(.p-button-link) {
-    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(239, 68, 68, 0.5) !important;
-}
-.dark .p-button-danger:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(239, 68, 68, 0.7) !important;
-}
-.dark .p-button-danger:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(239, 68, 68, 0.5) !important;
-}
-
-.dark .p-button-warn:not(.p-button-text):not(.p-button-link) {
-    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(245, 158, 11, 0.5) !important;
-}
-.dark .p-button-warn:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(245, 158, 11, 0.7) !important;
-}
-.dark .p-button-warn:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(245, 158, 11, 0.5) !important;
-}
-
-.dark .p-button-info:not(.p-button-text):not(.p-button-link) {
-    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(6, 182, 212, 0.5) !important;
-}
-.dark .p-button-info:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(6, 182, 212, 0.7) !important;
-}
-.dark .p-button-info:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(6, 182, 212, 0.5) !important;
-}
-
-.dark .p-button-help:not(.p-button-text):not(.p-button-link) {
-    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px 1px rgba(168, 85, 247, 0.5) !important;
-}
-.dark .p-button-help:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 20px 3px rgba(168, 85, 247, 0.7) !important;
-}
-.dark .p-button-help:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(168, 85, 247, 0.5) !important;
-}
-
-.dark .p-button-secondary:not(.p-button-text):not(.p-button-link),
-.dark .p-button-contrast:not(.p-button-text):not(.p-button-link) {
-    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 12px 1px rgba(148, 163, 184, 0.35) !important;
-}
-.dark .p-button-secondary:not(.p-button-text):not(.p-button-link):not(:disabled):hover,
-.dark .p-button-contrast:not(.p-button-text):not(.p-button-link):not(:disabled):hover {
-    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 18px 2px rgba(148, 163, 184, 0.5) !important;
-}
-.dark .p-button-secondary:not(.p-button-text):not(.p-button-link):not(:disabled):active,
-.dark .p-button-contrast:not(.p-button-text):not(.p-button-link):not(:disabled):active {
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 0 10px 1px rgba(148, 163, 184, 0.35) !important;
-}
-
-/* Dark mode outlined buttons get a soft matching glow too, since their
-   shadow was even fainter than the filled variant's. */
-.dark .p-button.p-button-outlined {
-    box-shadow: 0 0 10px 1px rgba(148, 163, 184, 0.3) !important;
-}
-.dark .p-button.p-button-outlined:not(:disabled):hover {
-    box-shadow: 0 0 16px 2px rgba(148, 163, 184, 0.5) !important;
-}
-
-/* Outlined buttons: same rounding + lift, lighter shadow so the border still reads */
+/* Outlined buttons: flat, border does the work */
 .p-button.p-button-outlined {
-    border-radius: 10px !important;
-    box-shadow: 0 2px 0 rgba(0, 0, 0, 0.1) !important;
-    transition: transform 0.12s ease, box-shadow 0.12s ease !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease !important;
 }
 
 .p-button.p-button-outlined:not(:disabled):hover {
-    transform: translateY(-1px);
-    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.12) !important;
+    box-shadow: none !important;
 }
 
 .p-button.p-button-outlined:not(:disabled):active {
-    transform: translateY(1px);
     box-shadow: none !important;
 }
 
@@ -561,19 +834,19 @@ html.dark ::-webkit-scrollbar-thumb {
 
 :root {
     --neu-bg-light: #F8FAFC;
-    --neu-card-light: #FDFBF6;
-    --neu-inset-light: #F7F4ED;
-    --neu-shadow-light-1: rgba(255, 253, 247, 0.9);
-    --neu-shadow-light-2: rgba(100, 116, 139, 0.55);
-    --neu-inset-shadow-light: rgba(100, 116, 139, 0.5);
-    --neu-border-light: rgba(255, 253, 247, 0.9);
+    --neu-card-light: #FFFFFF;
+    --neu-inset-light: #F1F5F9;
+    --neu-shadow-light-1: rgba(15, 23, 42, 0.04);
+    --neu-shadow-light-2: rgba(15, 23, 42, 0.08);
+    --neu-inset-shadow-light: rgba(15, 23, 42, 0.04);
+    --neu-border-light: #E2E8F0;
 
-    --neu-bg-dark: #0B1120;
-    --neu-card-dark: #141D33;
-    --neu-inset-dark: #070A14;
-    --neu-shadow-dark-1: rgba(255, 255, 255, 0.06);
-    --neu-shadow-dark-2: rgba(0, 0, 0, 0.75);
-    --neu-border-dark: rgba(255, 255, 255, 0.06);
+    --neu-bg-dark: #0B1020;
+    --neu-card-dark: #111827;
+    --neu-inset-dark: #172033;
+    --neu-shadow-dark-1: rgba(0, 0, 0, 0.2);
+    --neu-shadow-dark-2: rgba(0, 0, 0, 0.35);
+    --neu-border-dark: #263249;
 }
 
 .neu-surface {
@@ -584,66 +857,49 @@ html.dark ::-webkit-scrollbar-thumb {
     background: var(--neu-bg-dark);
 }
 
-/* Raised / extruded card */
+/* Card: quiet depth via border + subtle shadow, not extrusion */
 .neu-card {
     background: var(--neu-card-light);
     border: 1px solid var(--neu-border-light);
-    box-shadow:
-        0 18px 40px -12px rgba(30, 41, 59, 0.28),
-        0 4px 12px rgba(30, 41, 59, 0.10),
-        12px 12px 28px var(--neu-shadow-light-2),
-        -10px -10px 24px var(--neu-shadow-light-1);
-    transition: box-shadow 0.2s ease, transform 0.2s ease;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .dark .neu-card {
     background: var(--neu-card-dark);
     border-color: var(--neu-border-dark);
-    box-shadow:
-        10px 10px 24px var(--neu-shadow-dark-2),
-        -8px -8px 20px var(--neu-shadow-dark-1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 .neu-card--clickable:hover {
-    box-shadow:
-        13px 13px 26px var(--neu-shadow-light-2),
-        -13px -13px 26px var(--neu-shadow-light-1);
-    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+    border-color: #CBD5E1;
 }
 
 .dark .neu-card--clickable:hover {
-    box-shadow:
-        13px 13px 28px var(--neu-shadow-dark-2),
-        -10px -10px 24px var(--neu-shadow-dark-1);
-    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    border-color: #334155;
 }
 
 .neu-card--clickable:active {
-    transform: translateY(0);
-    box-shadow:
-        5px 5px 10px var(--neu-shadow-light-2),
-        -5px -5px 10px var(--neu-shadow-light-1);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .dark .neu-card--clickable:active {
-    box-shadow:
-        5px 5px 12px var(--neu-shadow-dark-2),
-        -4px -4px 10px var(--neu-shadow-dark-1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
-/* Pressed-in / inset surface (icon wells, progress track, active toggle) */
+/* Secondary/tonal surface (icon wells, progress track, active toggle) —
+   flat tonal fill instead of a pressed-in inset look */
 .neu-inset {
     background: var(--neu-inset-light);
-    box-shadow:
-        inset 5px 5px 10px var(--neu-inset-shadow-light),
-        inset -5px -5px 10px var(--neu-shadow-light-1);
+    box-shadow: none;
 }
 
 .dark .neu-inset {
     background: var(--neu-inset-dark);
-    box-shadow:
-        inset 5px 5px 11px var(--neu-shadow-dark-2),
-        inset -4px -4px 10px var(--neu-shadow-dark-1);
+    box-shadow: none;
 }
 
 /* Global form field density — shrinks every PrimeVue InputText, Select,
@@ -1040,23 +1296,17 @@ html.dark .p-multiselect-filter {
 /* Small icon well inside a neu-card, e.g. KPI icon badge */
 .neu-icon-well {
     background: var(--neu-inset-light);
-    box-shadow:
-        inset 3px 3px 6px var(--neu-inset-shadow-light),
-        inset -3px -3px 6px var(--neu-shadow-light-1);
+    box-shadow: none;
 }
 
 .dark .neu-icon-well {
     background: var(--neu-inset-dark);
-    box-shadow:
-        inset 3px 3px 7px var(--neu-shadow-dark-2),
-        inset -3px -3px 7px var(--neu-shadow-dark-1);
+    box-shadow: none;
 }
 
-/* Accent glow for a colored element sitting on a dark neu surface
-   (mirrors the reference screenshots' glowing toggle/CTA look).
-   Pass --neu-glow-color from inline style or a utility if needed. */
+/* Accent ring for a colored element (replaces the old glow) */
 .neu-glow {
-    box-shadow: 0 0 18px 2px var(--neu-glow-color, rgba(37, 99, 235, 0.45));
+    box-shadow: 0 0 0 3px var(--neu-glow-color, rgba(37, 99, 235, 0.12));
 }
 
 /* Soft ambient "spotlight" behind a hero card (login card, dashboard
@@ -1075,14 +1325,14 @@ html.dark .p-multiselect-filter {
     position: absolute;
     inset: -40px -40px auto -40px;
     height: 220px;
-    background: radial-gradient(ellipse at center, rgba(37, 99, 235, 0.16), transparent 70%);
+    background: radial-gradient(ellipse at center, rgba(37, 99, 235, 0.05), transparent 70%);
     filter: blur(10px);
     z-index: -1;
     pointer-events: none;
 }
 
 .dark .neu-spotlight::before {
-    background: radial-gradient(ellipse at center, rgba(56, 189, 248, 0.22), transparent 70%);
+    background: radial-gradient(ellipse at center, rgba(56, 189, 248, 0.06), transparent 70%);
 }
 
 /* Toggle switch track, neumorphic style */
@@ -1116,52 +1366,39 @@ html.dark .p-multiselect-filter {
    ========================================================================= */
 
 :root {
-    --neu-navy-bg: #0B1849;
-    --neu-navy-raised-bg: #14225E;
-    --neu-navy-shadow-1: rgba(255, 255, 255, 0.08);
-    --neu-navy-shadow-2: rgba(0, 0, 0, 0.65);
+    --neu-navy-bg: #0F1B46;
+    --neu-navy-raised-bg: #1A2A5C;
 }
 
 .neu-navy-surface {
     background: var(--neu-navy-bg);
 }
 
-/* Raised chip/button on navy (icon buttons, nav items on hover) */
+/* Chip/button on navy (icon buttons, nav items on hover) — flat tonal fill */
 .neu-navy-raised {
     background: var(--neu-navy-raised-bg);
-    box-shadow:
-        4px 4px 9px var(--neu-navy-shadow-2),
-        -3px -3px 8px var(--neu-navy-shadow-1);
-    transition: box-shadow 0.15s ease, transform 0.15s ease;
+    box-shadow: none;
+    transition: background-color 0.15s ease;
 }
 
 .neu-navy-raised:hover {
-    box-shadow:
-        5px 5px 12px var(--neu-navy-shadow-2),
-        -4px -4px 10px var(--neu-navy-shadow-1);
+    background: #223268;
 }
 
 .neu-navy-raised:active {
-    box-shadow:
-        inset 2px 2px 5px var(--neu-navy-shadow-2),
-        inset -2px -2px 5px var(--neu-navy-shadow-1);
+    background: #14225E;
 }
 
-/* Pressed-in well on navy (academic term pill, active nav item track) */
+/* Tonal well on navy (academic term pill, active nav item track) */
 .neu-navy-inset {
-    background: #071235;
-    box-shadow:
-        inset 3px 3px 7px var(--neu-navy-shadow-2),
-        inset -2px -2px 6px var(--neu-navy-shadow-1);
+    background: #0A1538;
+    box-shadow: none;
 }
 
-/* Active nav item: keeps the brand blue fill (so current page is still
-   unambiguous), with a soft glow instead of a hard block edge. */
+/* Active nav item: solid brand blue fill, no glow */
 .neu-navy-active {
     background: #2563EB;
-    box-shadow:
-        2px 2px 6px var(--neu-navy-shadow-2),
-        0 0 14px 1px rgba(37, 99, 235, 0.45);
+    box-shadow: none;
 }
 
 /* SweetAlert2 confirm/alert popups vs. PrimeVue Dialogs — PrimeVue
@@ -1176,4 +1413,26 @@ html.dark .p-multiselect-filter {
    triggered from. */
 .swal2-container {
     z-index: 11000 !important;
+}
+/* Click "bubble" ripple for the feature cards on the landing page:
+   a translucent circle that expands and fades from the click point. */
+.click-ripple {
+    position: absolute;
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.15) 60%, rgba(255, 255, 255, 0) 70%);
+    pointer-events: none;
+    transform: scale(0);
+    animation: click-ripple-bubble 650ms ease-out forwards;
+    z-index: 5;
+}
+
+@keyframes click-ripple-bubble {
+    0% {
+        transform: scale(0);
+        opacity: 0.9;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 0;
+    }
 }

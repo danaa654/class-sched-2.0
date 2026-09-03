@@ -3,7 +3,6 @@ import { Link, usePage } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
 import ThemeToggle from '@/Components/ThemeToggle.vue';
 import NotificationBell from '@/Components/NotificationBell.vue';
-import AmbientBackground from '@/Components/AmbientBackground.vue';
 import TermSwitcher from '@/Components/TermSwitcher.vue';
 import { useTheme } from '@/composables/useTheme';
 
@@ -95,14 +94,13 @@ const isActive = (routeName) => {
 </script>
 
 <template>
-    <div class="relative min-h-screen overflow-hidden transition-colors duration-300" :class="isDark ? 'bg-[#0B1120]' : 'bg-[#F8FAFC]'">
-        <AmbientBackground :is-dark="isDark" />
+    <div class="relative min-h-screen overflow-hidden transition-colors duration-300" :class="isDark ? 'bg-[#0B1020]' : 'bg-[#F2F2F2]'">
         <!-- Top Navigation Bar -->
-        <header class="neu-navy-surface h-16 w-full flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30 shadow-[0_4px_12px_rgba(0,0,0,0.35)]">
+        <header class="neu-navy-surface h-16 w-full flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-30 border-b border-black/10">
             <div class="flex items-center gap-4">
                 <button
                     type="button"
-                    class="neu-navy-raised flex h-9 w-9 items-center justify-center rounded-full text-slate-300 hover:text-white text-lg leading-none"
+                    class="neu-navy-raised flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:text-white text-lg leading-none"
                     @click="sidebarOpen = !sidebarOpen"
                 >
                     ☰
@@ -128,7 +126,7 @@ const isActive = (routeName) => {
 
             <div class="flex items-center gap-5">
                 <TermSwitcher />
-                <span class="neu-navy-raised flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
+                <span class="neu-navy-raised flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
                     <NotificationBell v-if="user" />
                 </span>
                 <ThemeToggle />
@@ -137,7 +135,7 @@ const isActive = (routeName) => {
 
         <!-- Left Sidebar -->
         <aside
-            class="neu-navy-surface fixed top-16 left-0 bottom-0 flex flex-col text-slate-200 overflow-hidden transition-all duration-200 z-20 shadow-[4px_0_12px_rgba(0,0,0,0.25)]"
+            class="neu-navy-surface fixed top-16 left-0 bottom-0 flex flex-col text-slate-200 overflow-hidden transition-all duration-200 z-20 border-r border-black/10"
             :class="sidebarOpen ? 'w-[200px]' : 'w-0 overflow-hidden'"
         >
             <nav class="flex-1 overflow-y-auto py-3 px-2 space-y-0.5 w-[200px] text-[13px] sidebar-scroll">
@@ -315,20 +313,13 @@ const isActive = (routeName) => {
     display: none; /* Chrome/Safari/Edge Chromium */
 }
 
-/* Sidebar footer hover glows */
+/* Sidebar footer hover states — flat, no glow */
 .neu-user-card:hover {
-    box-shadow:
-        inset 3px 3px 7px var(--neu-navy-shadow-2),
-        inset -2px -2px 6px var(--neu-navy-shadow-1),
-        0 0 12px 1px rgba(16, 185, 129, 0.45);
+    background: #0A1538;
 }
 
 .neu-logout-btn:hover {
-    background: linear-gradient(145deg, #ef4444, #dc2626);
-    box-shadow:
-        4px 4px 10px rgba(0, 0, 0, 0.5),
-        -3px -3px 8px rgba(255, 255, 255, 0.05),
-        0 0 14px 1px rgba(239, 68, 68, 0.55);
+    background: #EF4444;
     color: #ffffff;
 }
 </style>

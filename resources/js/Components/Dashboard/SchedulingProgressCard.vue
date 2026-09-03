@@ -38,10 +38,19 @@ const textColorClass = computed(() => {
 const cardPt = computed(() => ({
     body: { class: props.isDark ? '!bg-transparent' : '' },
 }));
+
+const washClass = computed(() => {
+    const percent = props.progress.overall_percent;
+
+    if (percent >= 90) return props.isDark ? 'from-emerald-500/10' : 'from-emerald-50';
+    if (percent >= 70) return props.isDark ? 'from-amber-500/10' : 'from-amber-50';
+
+    return props.isDark ? 'from-red-500/10' : 'from-red-50';
+});
 </script>
 
 <template>
-    <div class="neu-card rounded-2xl">
+    <div class="neu-card rounded-2xl bg-gradient-to-br via-transparent to-transparent" :class="washClass">
         <Card
             class="!rounded-2xl !bg-transparent transition-colors duration-300"
             :pt="cardPt"

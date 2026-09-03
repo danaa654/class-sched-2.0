@@ -203,8 +203,8 @@ const cardPt = computed(() => ({
                     v-for="item in items"
                     :key="item.key"
                     class="relative rounded-xl"
-                    :class="(!item.informational && valueFor(item) > 0) ? 'neu-card neu-glow' : 'neu-inset'"
-                    :style="(!item.informational && valueFor(item) > 0) ? { '--neu-glow-color': isDark ? 'rgba(248, 113, 113, 0.25)' : 'rgba(220, 38, 38, 0.2)' } : {}"
+                    :class="(!item.informational && valueFor(item) > 0) ? 'neu-card neon-border' : 'neu-inset'"
+                    :style="(!item.informational && valueFor(item) > 0) ? { '--neon-color': '#EF3340' } : {}"
                 >
                     <!-- Stops the card-wide Link below from firing when the info icon is used. -->
                     <span class="absolute right-2 top-2 z-10" @click.stop.prevent @mousedown.stop>

@@ -137,9 +137,38 @@ const roleLabel = computed(() => props.roles.join(', ') || 'No role assigned');
         </Link>
 
         <!-- 1. Header -->
-        <div class="neu-card neu-spotlight mb-6 rounded-2xl">
+        <div class="neu-card neu-spotlight relative mb-6 overflow-hidden rounded-2xl">
+            <!-- subtle blue/red gradient wash + decorative shapes -->
+            <div class="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                <div
+                    class="absolute inset-0"
+                    :class="isDark
+                        ? 'bg-gradient-to-br from-blue-500/10 via-transparent to-red-500/10'
+                        : 'bg-gradient-to-br from-blue-50 via-transparent to-red-50/60'"
+                ></div>
+                <div
+                    class="absolute -right-10 -top-16 h-44 w-44 rounded-full bg-gradient-to-br"
+                    :class="isDark ? 'from-blue-500/20 via-blue-500/5 to-transparent' : 'from-blue-200/80 via-blue-100/40 to-transparent'"
+                ></div>
+                <div
+                    class="absolute -bottom-20 right-16 h-40 w-40 rounded-full bg-gradient-to-tr"
+                    :class="isDark ? 'from-red-500/20 via-red-500/5 to-transparent' : 'from-red-200/70 via-red-100/30 to-transparent'"
+                ></div>
+                <div
+                    class="absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-gradient-to-tr border-4"
+                    :class="isDark ? 'from-blue-500/10 to-transparent border-blue-400/10' : 'from-blue-100/60 to-transparent border-blue-100'"
+                ></div>
+                <div
+                    class="absolute left-[38%] top-0 h-3 w-3 rounded-full bg-gradient-to-br"
+                    :class="isDark ? 'from-red-400/50 to-blue-400/30' : 'from-red-400/80 to-blue-300/60'"
+                ></div>
+                <div
+                    class="absolute left-[55%] bottom-4 h-20 w-20 rounded-full bg-gradient-to-r blur-xl"
+                    :class="isDark ? 'from-blue-500/10 to-red-500/10' : 'from-blue-200/40 to-red-200/40'"
+                ></div>
+            </div>
             <div
-                class="flex flex-col gap-4 rounded-2xl p-6 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between"
+                class="relative flex flex-col gap-4 rounded-2xl p-6 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between"
             >
                 <div>
                     <div v-if="schoolBranding.name" class="mb-1 flex items-center gap-2">
