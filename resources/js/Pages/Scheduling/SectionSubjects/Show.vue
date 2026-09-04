@@ -773,9 +773,12 @@ const statusSeverity = (status) => {
 
 // True once at least one scheduling field is blocked by a Faculty,
 // Room, or Time conflict — surfaced as a warning badge next to Status.
+// `workload` covers a row skipped by a batch Save because its Faculty's
+// Teaching Load warning wasn't confirmed (see the Save handler below) —
+// without it, those rows silently fail to save with no visible highlight.
 const hasActiveConflict = (row) => {
     const errors = stateFor(row.id).errors;
-    return Boolean(errors.faculty_id || errors.room_id || errors.days || errors.start_time || errors.end_time);
+    return Boolean(errors.faculty_id || errors.room_id || errors.days || errors.start_time || errors.end_time || errors.workload);
 };
 
 /* ------------------------------------------------------------------ */
@@ -1945,6 +1948,20 @@ const saveSchedule = async () => {
         if (data.errors) {
             Object.entries(data.errors).forEach(([rowId, fieldErrors]) => {
                 Object.assign(stateFor(Number(rowId)).errors, fieldErrors);
+            });
+        }
+
+        // A row can also be skipped because its Faculty's Teaching Load
+        // warning was never confirmed (Administrator-only "Override &
+        // Save") — the backend tracks that separately from data.errors
+        // (see batchUpdateSchedule()'s $workloadWarnings), so without
+        // this it's counted in the "N subjects were skipped" toast but
+        // never actually highlighted on the table, leaving no visible
+        // sign of which rows need attention.
+        if (data.workload_warnings) {
+            Object.entries(data.workload_warnings).forEach(([rowId, warning]) => {
+                stateFor(Number(rowId)).errors.workload = warning.message
+                    ?? `${warning.faculty_name} would exceed their allowable teaching load. Confirm to save anyway.`;
             });
         }
 
@@ -3194,11 +3211,11 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         :rowClass="
                             (row) =>
                                 rowIsInConflict(row)
-                                    ? '!bg-red-50 conflict-row-clickable'
+                                    ? '!bg-red-50 conflict-row-clickable row-light-bg'
                                     : rowHasCapacityWarning(row.id)
-                                      ? '!bg-amber-50'
+                                      ? '!bg-amber-50 row-light-bg'
                                       : dirtyRowIds.has(row.id)
-                                        ? '!bg-amber-50'
+                                        ? '!bg-amber-50 row-light-bg'
                                         : undefined
                         "
                         @row-click="onRowClick"
@@ -3587,6 +3604,9 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                                     </p>
                                     <p v-if="stateFor(data.id).errors.capacity" class="text-red-500 text-xs mt-1">
                                         <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.capacity }}
+                                    </p>
+                                    <p v-if="stateFor(data.id).errors.workload" class="text-red-500 text-xs mt-1">
+                                        <i class="pi pi-exclamation-triangle mr-1"></i>{{ stateFor(data.id).errors.workload }}
                                     </p>
                                 </div>
                             </template>
@@ -4573,6 +4593,27 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 .dark-scope :deep(.p-select-label.p-placeholder),
 .dark-scope :deep(.p-multiselect-label.p-placeholder) { color: #7C8CA8 !important; }
 .dark-scope :deep(.p-multiselect-chip .p-chip) { background: rgba(255, 255, 255, 0.1) !important; color: #F8FAFC !important; }
+
+/* Conflict / capacity-warning / unsaved (dirty) rows keep a light
+   pink or amber background even in dark mode (see :rowClass above) so
+   they read as a warning against the otherwise-dark table. The
+   general dark-mode field styling above (near-white text on a
+   near-transparent white fill) is invisible against that light row
+   background — this restores normal dark text and a solid white
+   field fill specifically inside those rows. */
+.dark-scope :deep(tr.row-light-bg .p-inputtext),
+.dark-scope :deep(tr.row-light-bg .p-select),
+.dark-scope :deep(tr.row-light-bg .p-multiselect),
+.dark-scope :deep(tr.row-light-bg .p-datepicker-input) {
+    background: #ffffff !important;
+    border-color: rgba(15, 23, 42, 0.15) !important;
+    color: #1E293B !important;
+}
+.dark-scope :deep(tr.row-light-bg .p-select-label),
+.dark-scope :deep(tr.row-light-bg .p-multiselect-label) { color: #1E293B !important; }
+.dark-scope :deep(tr.row-light-bg .p-select-label.p-placeholder),
+.dark-scope :deep(tr.row-light-bg .p-multiselect-label.p-placeholder) { color: #64748B !important; }
+.dark-scope :deep(tr.row-light-bg .p-inputtext::placeholder) { color: #64748B !important; }
 
 .dark-scope :deep(.p-datatable) { background: transparent !important; color: #F1F5F9 !important; }
 .dark-scope :deep(.p-datatable-thead > tr > th) { background: rgba(255, 255, 255, 0.06) !important; color: #F1F5F9 !important; border-color: rgba(255, 255, 255, 0.12) !important; }

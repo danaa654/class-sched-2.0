@@ -539,7 +539,11 @@ class ScheduleConflictService
 
     private function describeWindow(SectionSubject $conflict): string
     {
-        return trim("{$conflict->days} {$conflict->start_time}-{$conflict->end_time}", ' -');
+        $start = $conflict->start_time ? \Carbon\Carbon::parse($conflict->start_time)->format('g:i A') : '';
+        $end = $conflict->end_time ? \Carbon\Carbon::parse($conflict->end_time)->format('g:i A') : '';
+        $range = trim("{$start}-{$end}", '-');
+
+        return trim("{$conflict->days} {$range}", ' -');
     }
 
     /**

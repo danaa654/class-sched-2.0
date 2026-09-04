@@ -206,23 +206,33 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
             </div>
 
             <!-- Page Title -->
-            <div class="mb-8 flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                    <h1 class="text-2xl font-bold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
-                        {{ curriculum.name }}
-                    </h1>
-                    <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
-                        {{ curriculum.major?.name || 'No Major' }} · {{ curriculum.start_year }}–{{ curriculum.end_year }} ·
-                        Manage the subjects that make up this curriculum, arranged by Year Level and Semester.
-                    </p>
+            <div class="neu-card neu-spotlight relative mb-8 overflow-hidden rounded-2xl">
+                <div class="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                    <div class="absolute inset-0" :class="isDark ? 'bg-gradient-to-br from-blue-500/10 via-transparent to-red-500/10' : 'bg-gradient-to-br from-blue-50 via-transparent to-red-50/60'"></div>
+                    <div class="absolute -right-10 -top-16 h-44 w-44 rounded-full bg-gradient-to-br" :class="isDark ? 'from-blue-500/20 via-blue-500/5 to-transparent' : 'from-blue-200/80 via-blue-100/40 to-transparent'"></div>
+                    <div class="absolute -bottom-20 right-16 h-40 w-40 rounded-full bg-gradient-to-tr" :class="isDark ? 'from-red-500/20 via-red-500/5 to-transparent' : 'from-red-200/70 via-red-100/30 to-transparent'"></div>
+                    <div class="absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-gradient-to-tr border-4" :class="isDark ? 'from-blue-500/10 to-transparent border-blue-400/10' : 'from-blue-100/60 to-transparent border-blue-100'"></div>
+                    <div class="absolute left-[38%] top-0 h-3 w-3 rounded-full bg-gradient-to-br" :class="isDark ? 'from-red-400/50 to-blue-400/30' : 'from-red-400/80 to-blue-300/60'"></div>
+                    <div class="absolute left-[55%] bottom-4 h-20 w-20 rounded-full bg-gradient-to-r blur-xl" :class="isDark ? 'from-blue-500/10 to-red-500/10' : 'from-blue-200/40 to-red-200/40'"></div>
                 </div>
-                <Button
-                    label="Back to Curriculums"
-                    icon="pi pi-arrow-left"
-                    text
-                    severity="secondary"
-                    @click="router.visit(route('curriculums'))"
-                />
+                <div class="relative flex items-start justify-between gap-4 flex-wrap rounded-2xl p-6 transition-colors duration-300">
+                    <div>
+                        <h1 class="text-2xl font-bold tracking-tight" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
+                            {{ curriculum.name }}
+                        </h1>
+                        <p class="mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                            {{ curriculum.major?.name || 'No Major' }} · {{ curriculum.start_year }}–{{ curriculum.end_year }} ·
+                            Manage the subjects that make up this curriculum, arranged by Year Level and Semester.
+                        </p>
+                    </div>
+                    <Button
+                        label="Back to Curriculums"
+                        icon="pi pi-arrow-left"
+                        text
+                        severity="secondary"
+                        @click="router.visit(route('curriculums'))"
+                    />
+                </div>
             </div>
 
             <div class="neu-card rounded-2xl transition-colors duration-300">

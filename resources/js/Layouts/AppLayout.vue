@@ -100,12 +100,12 @@ const isActive = (routeName) => {
             <div class="flex items-center gap-4">
                 <button
                     type="button"
-                    class="neu-navy-raised flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:text-white text-lg leading-none"
+                    class="flex h-9 w-9 items-center justify-center rounded-lg transition-opacity hover:opacity-80 active:scale-95"
+                    :title="sidebarOpen ? 'Hide sidebar' : 'Show sidebar'"
                     @click="sidebarOpen = !sidebarOpen"
                 >
-                    ☰
+                    <img src="/logo.png" alt="Toggle sidebar" class="h-7 w-7" />
                 </button>
-                <img src="/logo.png" alt="" class="h-7 w-7" />
                 <span class="text-xl font-bold tracking-tight text-white">CLASSLY</span>
 
                 <!-- School branding (Settings → General) — separate from CLASSLY's own mark above -->

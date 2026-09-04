@@ -290,7 +290,7 @@ const select = async (option) => {
                 v-uppercase
                 type="text"
                 placeholder="Search faculty…"
-                class="w-full text-sm border rounded-md pl-2.5 pr-7 py-1.5 border-slate-200 focus:outline-none focus:border-primary-400 faculty-recommendation-input"
+                class="w-full text-sm font-medium border rounded-md pl-2.5 pr-7 py-1.5 border-slate-200 text-slate-800 bg-white focus:outline-none focus:border-primary-400 faculty-recommendation-input"
                 autocomplete="off"
                 @click="openDropdown"
                 @input="onType"

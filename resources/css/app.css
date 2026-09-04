@@ -1436,3 +1436,35 @@ html.dark .p-multiselect-filter {
         opacity: 0;
     }
 }
+/* =========================================================================
+   Global modal header styling — every PrimeVue <Dialog> header (Add/Edit
+   forms, confirmations, etc.) uses the same navy as the sidebar/topbar
+   (--neu-navy-bg), regardless of light/dark theme or per-page pt overrides.
+   Applied once, globally, so every current and future modal matches.
+   ========================================================================= */
+.p-dialog {
+    overflow: hidden !important;
+}
+
+.p-dialog-header {
+    background: var(--neu-navy-bg) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+}
+
+.p-dialog-header * {
+    color: #ffffff !important;
+}
+
+.p-dialog-header .p-dialog-header-icon,
+.p-dialog-header .p-dialog-close-button {
+    color: rgba(255, 255, 255, 0.85) !important;
+    background: transparent !important;
+}
+
+.p-dialog-header .p-dialog-header-icon:hover,
+.p-dialog-header .p-dialog-close-button:hover {
+    background: rgba(255, 255, 255, 0.12) !important;
+    color: #ffffff !important;
+}

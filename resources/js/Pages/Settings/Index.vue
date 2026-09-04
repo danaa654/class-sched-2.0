@@ -196,7 +196,17 @@ const onUpdateAccount = () => {
         <Toast />
 
         <div class="max-w-6xl mx-auto w-full neu-form" :class="isDark ? 'dark-scope' : ''">
-            <div class="mb-6">
+            <!-- Page Title -->
+            <div class="neu-card neu-spotlight relative mb-6 overflow-hidden rounded-2xl">
+                <div class="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                    <div class="absolute inset-0 bg-gradient-to-br from-blue-50 via-transparent to-red-50/60"></div>
+                    <div class="absolute -right-10 -top-16 h-44 w-44 rounded-full bg-gradient-to-br from-blue-200/80 via-blue-100/40 to-transparent"></div>
+                    <div class="absolute -bottom-20 right-16 h-40 w-40 rounded-full bg-gradient-to-tr from-red-200/70 via-red-100/30 to-transparent"></div>
+                    <div class="absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-gradient-to-tr border-4 from-blue-100/60 to-transparent border-blue-100"></div>
+                    <div class="absolute left-[38%] top-0 h-3 w-3 rounded-full bg-gradient-to-br from-red-400/80 to-blue-300/60"></div>
+                    <div class="absolute left-[55%] bottom-4 h-20 w-20 rounded-full bg-gradient-to-r blur-xl from-blue-200/40 to-red-200/40"></div>
+                </div>
+                <div class="relative rounded-2xl p-6 transition-colors duration-300">
                 <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 text-[#1E293B]">
                     Settings
                     <InfoPopover
@@ -214,6 +224,7 @@ const onUpdateAccount = () => {
                     System-wide configuration. Faculty, Rooms, Subjects, Sections, Programs, Colleges and the
                     Curriculum keep their own dedicated pages — Settings only controls how the system behaves.
                 </p>
+                </div>
             </div>
 
             <Tabs v-model:value="activeTab">
