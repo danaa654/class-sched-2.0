@@ -76,6 +76,12 @@ const scopedCollegeId = computed(() => page.props.auth?.collegeId ?? null);
 // finalize AND to unlock (SectionPolicy::finalize()/unlockSchedule()).
 // This is UI-visibility only; the Policy re-checks server-side.
 const canManageFinalization = computed(() => !!page.props.auth?.can?.manageFinalization);
+// Admin/Registrar only — mirrors SectionPolicy::create(); gates the
+// "Add Section" button here the same way canManageRooms gates "Add
+// Room" on the Rooms page. Server-side enforcement is still the
+// Policy check in SectionController::store()/previewBatch()/
+// storeBatch() via authorizeSectionCollege().
+const canManageSections = computed(() => !!page.props.auth?.can?.manageSections);
 const hasNoAssignedCollege = computed(() => !!page.props.auth?.hasNoAssignedCollege);
 
 // Show a toast whenever the backend flashes a success/error message.
@@ -1415,7 +1421,7 @@ const onUnlockSection = (section) => {
                                 @click="onRefresh"
                                 aria-label="Refresh"
                             />
-                            <Button label="Add Section" icon="pi pi-plus" severity="success" @click="openAdd" />
+                            <Button v-if="canManageSections" label="Add Section" icon="pi pi-plus" severity="success" @click="openAdd" />
                         </div>
                     </div>
 
@@ -1470,7 +1476,7 @@ const onUnlockSection = (section) => {
                                     <template v-if="hasActiveFilters">
                                         Try changing or clearing your filters.
                                     </template>
-                                    <template v-else>
+                                    <template v-else-if="canManageSections">
                                         Click "Add Section" to create your first section.
                                     </template>
                                 </p>
@@ -1484,7 +1490,7 @@ const onUnlockSection = (section) => {
                                     @click="clearFilters"
                                 />
                                 <Button
-                                    v-else
+                                    v-else-if="canManageSections"
                                     label="Add Section"
                                     icon="pi pi-plus"
                                     severity="success"

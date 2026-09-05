@@ -219,6 +219,16 @@ class FacultyWorkloadService
 
             return [
                 'id' => $ss->id,
+                // Needed by the Faculty Details page's inline schedule
+                // editor: the Room options endpoint
+                // (scheduling.section-subjects.rooms) is Section-scoped,
+                // and the save itself goes through the Room Grid's
+                // cross-section move endpoint
+                // (scheduling.room-grid.move), which authorizes against
+                // THIS row's own Section regardless of what Section (if
+                // any) is "currently open" elsewhere in the UI — see
+                // SectionSubjectController::moveRoomGridAssignment().
+                'section_id' => $ss->section_id,
                 'edp_code' => $ss->edp_code,
                 'subject_code' => $ss->subject->subject_code,
                 'subject_title' => $ss->subject->subject_title,
@@ -226,11 +236,28 @@ class FacultyWorkloadService
                 'load' => $usesHours
                     ? (int) $ss->subject->lecture_hours + (int) $ss->subject->laboratory_hours
                     : (int) $ss->subject->units,
+                // Lets the Faculty Details page's Room picker put
+                // Laboratory rooms first for a subject that needs lab
+                // time — same "wants Laboratory" signal SectionSubjects/
+                // Show.vue's own Room dropdown groups on
+                // (subject.laboratory_hours > 0).
+                'requires_lab' => (int) $ss->subject->laboratory_hours > 0,
+                // The Subject's real required weekly teaching hours —
+                // same value + fallback rule
+                // SectionSubjectController::performScheduleAssignmentUpdate()'s
+                // Weekly Hours Mismatch check uses (lecture + laboratory
+                // hours, defaulting to 3 when the Subject has neither
+                // set). Lets the Faculty Details page's "Suggest
+                // Available Time" filter out incomplete candidates
+                // before they're ever shown, instead of only catching
+                // the mismatch after the Registrar tries to Save.
+                'required_hours' => ((int) $ss->subject->lecture_hours + (int) $ss->subject->laboratory_hours) ?: 3,
                 // Host + every merged rider's Section Code, joined
                 // with " & " (e.g. "BSIT-4A & BSIT-4A-IRREG") — falls
                 // back to the plain single Section Code when nothing
                 // is merged into this row.
                 'section_code' => $sectionCodes->implode(' & '),
+                'room_id' => $ss->room_id,
                 'room_name' => $ss->room?->room_name,
                 'days' => $ss->days,
                 'start_time' => $ss->start_time,

@@ -18,19 +18,16 @@ class SectionPolicy
         return $this->canAccess($user, $section);
     }
 
-    /** Full Section CRUD (create/rename/delete/change program) is Registrar/Admin/College-owner only — never Assistant Dean (spec §8). */
+    /** Creating a new Section is Admin/Registrar only — Dean/OIC and Assistant Dean may no longer create sections. */
     public function create(User $user): bool
     {
-        return AccessScope::isUnrestricted($user) || AccessScope::isCollegeScoped($user);
+        return AccessScope::isUnrestricted($user);
     }
 
+    /** @param  int|null  $collegeId  Unused now that creation is Admin/Registrar only; kept so existing call sites don't need to change their signature. */
     public function createForCollege(User $user, ?int $collegeId): bool
     {
-        if (AccessScope::isUnrestricted($user)) {
-            return true;
-        }
-
-        return AccessScope::isCollegeScoped($user) && AccessScope::canAccessCollege($user, $collegeId);
+        return AccessScope::isUnrestricted($user);
     }
 
     public function update(User $user, Section $section): bool

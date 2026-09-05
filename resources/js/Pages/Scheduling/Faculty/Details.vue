@@ -262,6 +262,289 @@ const placementStatusSeverity = (status) => {
             return 'secondary';
     }
 };
+
+/* ------------------------------------------------------------------ */
+/* Assigned Subjects — inline Day/Time/Room editor.                    */
+/*                                                                      */
+/* Adviser request: this list should not be view-only — a change in a  */
+/* faculty member's actual schedule should be editable right here,     */
+/* with the same conflict detection the Room Grid / Subjects tab use,  */
+/* instead of forcing a trip to the Section's own Subjects tab.        */
+/*                                                                      */
+/* Reuses scheduling.room-grid.move (SectionSubjectController::         */
+/* moveRoomGridAssignment() -> performScheduleAssignmentUpdate()) —     */
+/* the SAME write path + conflict checks as the Room Grid — rather      */
+/* than a second, parallel one. That endpoint authorizes against the    */
+/* schedule row's OWN Section (never a "currently open" Section), which */
+/* is exactly right here since this page has no single Section in       */
+/* context and different rows can belong to different Sections.         */
+/* ------------------------------------------------------------------ */
+
+const DAY_TOKENS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+};
+
+const editingPlacementId = ref(null);
+const editForm = ref({ days: [], start_time: '', end_time: '', room_id: null });
+const editSaving = ref(false);
+const editErrors = ref({});
+const editRoomOptions = ref([]);
+const editRoomsLoading = ref(false);
+const editTimeSuggestions = ref([]);
+const editTimeSuggestionsLoading = ref(false);
+const editTimeSuggestionsMessage = ref('');
+// The Subject's real required weekly teaching hours (lecture +
+// laboratory), captured when the editor opens — see startEditPlacement().
+// Used to filter out RecommendationService::recommendSingleDaySlots()'s
+// "fill in just ONE occurrence" candidates from this editor's
+// suggestions, since those are meant to pair with the row's OTHER
+// already-kept meeting day(s) (a different, partial-fix workflow —
+// see RecommendedTimeModal.vue's docblock), not to stand alone as a
+// complete weekly schedule. Left null when it can't be determined
+// (e.g. the row wasn't fully scheduled yet), in which case every
+// candidate is shown rather than risk hiding valid ones.
+const editRequiredHours = ref(null);
+
+// Warning keys the backend flags as "confirm to save anyway" rather
+// than a hard block — see UpdateSectionSubjectScheduleRequest's
+// docblock. A real Room/Faculty/Section/Time conflict comes back
+// under a different key (room_id/faculty_id/days) and is never
+// offered a retry, matching RoomGrid.vue's CONFIRMABLE_WARNING_KEYS.
+const CONFIRMABLE_WARNING_KEYS = { room_type: 'room_type_confirmed', room_college: 'room_college_confirmed', hours: 'hours_confirmed' };
+
+const minutesBetween = (start, end) => {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return (eh * 60 + em) - (sh * 60 + sm);
+};
+
+// A candidate's TOTAL weekly hours = (session length) x (how many
+// days it meets) — must equal the Subject's required hours exactly,
+// same check performSchedule AssignmentUpdate() runs server-side
+// before allowing a save without an explicit hours_confirmed=true.
+const totalsRequiredHours = (candidate) => {
+    if (editRequiredHours.value == null) return true;
+    const hours = (minutesBetween(candidate.start_time, candidate.end_time) * candidate.days.length) / 60;
+    return Math.abs(hours - editRequiredHours.value) < 0.01;
+};
+
+// "Suggest Available Time" — reuses the exact same recommendation
+// engine (RecommendationService::recommendTimes()/recommendSingleDaySlots())
+// the Auto Generate review panel and Room Grid's own Day/Time editor
+// use, via scheduling.section-subjects.time-recommendations. It scores
+// candidate Day/Time slots against THIS faculty member's and THIS
+// row's currently-saved Room's actual bookings, so anything it returns
+// is already conflict-free — never a second, hand-rolled availability
+// check that could disagree with what Save actually validates against.
+//
+// Only full, COMPLETE weekly patterns are surfaced here (see
+// totalsRequiredHours() above) — this editor replaces the row's
+// entire Day/Time in one shot, so a single leftover "Fri 2.5 hrs"
+// option that only covers half of a 5-hr subject would silently
+// under-schedule it if applied on its own.
+const fetchTimeSuggestions = async (placement) => {
+    if (!placement.section_id) return;
+
+    editTimeSuggestionsLoading.value = true;
+    editTimeSuggestions.value = [];
+    editTimeSuggestionsMessage.value = '';
+
+    try {
+        const url = new URL(route('scheduling.section-subjects.time-recommendations', [placement.section_id, placement.id]));
+
+        const response = await fetch(url, { headers: { Accept: 'application/json' } });
+        const data = await response.json();
+        const complete = (data.recommendations ?? []).filter(totalsRequiredHours);
+        editTimeSuggestions.value = complete.slice(0, 3);
+
+        if (!editTimeSuggestions.value.length) {
+            editTimeSuggestionsMessage.value = (data.recommendations ?? []).length
+                ? `No open slot covers the full ${editRequiredHours.value} hrs/week this subject needs in this room right now.`
+                : (data.message ?? 'No open slots found for this room right now.');
+        }
+    } catch (e) {
+        editTimeSuggestionsMessage.value = 'Could not load suggestions. Please try again.';
+    } finally {
+        editTimeSuggestionsLoading.value = false;
+    }
+};
+
+const applyTimeSuggestion = (suggestion) => {
+    editForm.value.days = [...suggestion.days];
+    editForm.value.start_time = suggestion.start_time;
+    editForm.value.end_time = suggestion.end_time;
+    editTimeSuggestions.value = [];
+};
+
+const startEditPlacement = async (placement) => {
+    editingPlacementId.value = placement.id;
+    editErrors.value = {};
+    editTimeSuggestions.value = [];
+    editTimeSuggestionsMessage.value = '';
+    editRequiredHours.value = placement.required_hours ?? null;
+    editForm.value = {
+        days: placement.days ? placement.days.split(',').map((d) => d.trim()).filter(Boolean) : [],
+        start_time: placement.start_time ? placement.start_time.slice(0, 5) : '',
+        end_time: placement.end_time ? placement.end_time.slice(0, 5) : '',
+        room_id: placement.room_id ?? null,
+    };
+
+    editRoomOptions.value = [];
+    if (placement.section_id) {
+        editRoomsLoading.value = true;
+        try {
+            const response = await fetch(route('scheduling.section-subjects.rooms', placement.section_id), {
+                headers: { Accept: 'application/json' },
+            });
+            const data = await response.json();
+            // Same scope Room Grid's own sidebar uses (see RoomGrid.vue's
+            // recommendedRooms) — only rooms belonging to this Section's
+            // own Department/College/shared-pool, never the full,
+            // unfiltered Room list.
+            const recommended = data.recommended ?? [];
+
+            // Same "type-matched first" grouping SectionSubjects/Show.vue's
+            // own Room dropdown uses — a Major/lab subject should see
+            // Laboratory rooms before plain Lecture rooms, not an
+            // alphabetical mix of both.
+            const wantsLaboratory = !!placement.requires_lab;
+            const typeMatched = [];
+            const others = [];
+            recommended.forEach((room) => {
+                (room.room_type === (wantsLaboratory ? 'Laboratory' : 'Lecture') ? typeMatched : others).push(room);
+            });
+
+            const groups = [];
+            if (typeMatched.length) groups.push({ label: wantsLaboratory ? 'Laboratory Rooms' : 'Lecture Rooms', rooms: typeMatched });
+            if (others.length) groups.push({ label: wantsLaboratory ? 'Other Rooms' : 'Laboratory Rooms', rooms: others });
+
+            // If this row's CURRENT room isn't in the recommended set at
+            // all (e.g. an earlier manual override), keep it in its own
+            // group so the Select doesn't show blank for it.
+            const hasCurrent = placement.room_id && recommended.some((r) => r.id === placement.room_id);
+            if (placement.room_id && !hasCurrent) {
+                groups.unshift({ label: 'Current Room', rooms: [{ id: placement.room_id, room_name: placement.room_name ?? 'Current room' }] });
+            }
+
+            editRoomOptions.value = groups;
+        } catch (e) {
+            // Room list failing to load isn't fatal — the Select just
+            // shows the room currently assigned (if any) and the user
+            // can retry by re-opening the editor.
+        } finally {
+            editRoomsLoading.value = false;
+        }
+    }
+};
+
+const cancelEditPlacement = () => {
+    editingPlacementId.value = null;
+    editErrors.value = {};
+    editTimeSuggestions.value = [];
+    editTimeSuggestionsMessage.value = '';
+};
+
+const saveEditPlacement = async (placement, confirmedKeys = {}) => {
+    editSaving.value = true;
+    editErrors.value = {};
+
+    try {
+        const response = await fetch(route('scheduling.room-grid.move', placement.id), {
+            method: 'PATCH',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-XSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({
+                days: editForm.value.days,
+                start_time: editForm.value.start_time || null,
+                end_time: editForm.value.end_time || null,
+                room_id: editForm.value.room_id || null,
+                ...confirmedKeys,
+            }),
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            toast.add({ severity: 'success', summary: 'Schedule updated', detail: `${placement.subject_code}'s schedule was saved.`, life: 4000 });
+            editingPlacementId.value = null;
+            // Refreshes both the placements list and the Current
+            // Load summary cards from the server — a Day/Time/Room
+            // change doesn't move the Units number, but keeps this
+            // page's copy of the row (and any other viewer's) exactly
+            // in sync with what was just saved.
+            router.reload({ only: ['faculty'] });
+            return;
+        }
+
+        // Hard conflict (Room/Faculty/Section/Time already booked
+        // elsewhere) OR a confirmable soft warning — both come back
+        // as { errors: { key: message } }.
+        if (data.errors) {
+            const confirmableKey = Object.keys(data.errors).find((key) => CONFIRMABLE_WARNING_KEYS[key]);
+
+            if (confirmableKey) {
+                const result = await Swal.fire({
+                    icon: 'warning',
+                    title: 'Confirm this change',
+                    text: data.errors[confirmableKey],
+                    showCancelButton: true,
+                    confirmButtonText: 'Save Anyway',
+                    cancelButtonText: 'Cancel',
+                });
+                if (result.isConfirmed) {
+                    return saveEditPlacement(placement, { ...confirmedKeys, [CONFIRMABLE_WARNING_KEYS[confirmableKey]]: true });
+                }
+                return;
+            }
+
+            // A real conflict — never silently overridable. Toast it
+            // front-and-center (easy to miss the row itself if the
+            // table has scrolled) AND show it right on the row so it's
+            // obvious which field caused it.
+            editErrors.value = data.errors;
+            toast.add({
+                severity: 'error',
+                summary: 'Scheduling conflict',
+                detail: Object.values(data.errors).join(' '),
+                life: 8000,
+            });
+            return;
+        }
+
+        // Workload Limit warning (409) — only relevant if a Faculty
+        // reassignment were allowed here, but the backend still runs
+        // this check on every save, so it's handled defensively.
+        if (data.workload_warning) {
+            if (!data.can_override) {
+                toast.add({ severity: 'error', summary: 'Cannot save', detail: data.message, life: 6000 });
+                return;
+            }
+            const result = await Swal.fire({
+                icon: 'warning',
+                title: 'Conflict',
+                text: data.message,
+                showCancelButton: true,
+                confirmButtonText: 'Proceed Anyway',
+                cancelButtonText: 'Cancel',
+            });
+            if (result.isConfirmed) {
+                return saveEditPlacement(placement, { ...confirmedKeys, workload_confirmed: true });
+            }
+            return;
+        }
+
+        toast.add({ severity: 'error', summary: 'Could not save', detail: data.message || 'Please try again.', life: 5000 });
+    } catch (e) {
+        toast.add({ severity: 'error', summary: 'Network error', detail: 'Could not reach the server. Please try again.', life: 5000 });
+    } finally {
+        editSaving.value = false;
+    }
+};
 </script>
 
 <template>
@@ -556,14 +839,77 @@ const placementStatusSeverity = (status) => {
                                         </Column>
                                         <Column header="Schedule">
                                             <template #body="{ data }">
-                                                <span v-if="data.days">
+                                                <div v-if="editingPlacementId === data.id" class="flex flex-col gap-1.5">
+                                                    <MultiSelect
+                                                        v-model="editForm.days"
+                                                        :options="DAY_TOKENS"
+                                                        placeholder="Days"
+                                                        class="w-full text-xs"
+                                                        display="chip"
+                                                    />
+                                                    <div class="flex items-center gap-1.5">
+                                                        <input v-model="editForm.start_time" type="time" class="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
+                                                        <span class="text-slate-400">–</span>
+                                                        <input v-model="editForm.end_time" type="time" class="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
+                                                    </div>
+                                                    <small v-if="editErrors.days" class="text-red-600">{{ editErrors.days }}</small>
+                                                    <small v-if="editErrors.start_time" class="text-red-600">{{ editErrors.start_time }}</small>
+                                                    <small v-if="editErrors.end_time" class="text-red-600">{{ editErrors.end_time }}</small>
+                                                    <small v-if="editErrors.hours" class="text-red-600">{{ editErrors.hours }}</small>
+
+                                                    <Button
+                                                        label="Suggest Available Time"
+                                                        icon="pi pi-sparkles"
+                                                        size="small"
+                                                        text
+                                                        :loading="editTimeSuggestionsLoading"
+                                                        class="!text-xs !p-0 !justify-start"
+                                                        @click="fetchTimeSuggestions(data)"
+                                                    />
+                                                    <div v-if="editTimeSuggestions.length" class="flex flex-col gap-1">
+                                                        <button
+                                                            v-for="(s, idx) in editTimeSuggestions"
+                                                            :key="idx"
+                                                            type="button"
+                                                            class="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs text-emerald-700 hover:bg-emerald-100"
+                                                            @click="applyTimeSuggestion(s)"
+                                                        >
+                                                            {{ s.days.join(', ') }} &middot; {{ formatTime(s.start_time) }}–{{ formatTime(s.end_time) }}
+                                                        </button>
+                                                    </div>
+                                                    <small v-else-if="editTimeSuggestionsMessage" class="text-slate-400">{{ editTimeSuggestionsMessage }}</small>
+                                                </div>
+                                                <span v-else-if="data.days">
                                                     {{ data.days }} &middot; {{ formatTime(data.start_time) }}–{{ formatTime(data.end_time) }}
                                                 </span>
                                                 <span v-else class="text-slate-400">Not yet scheduled</span>
                                             </template>
                                         </Column>
                                         <Column field="room_name" header="Room">
-                                            <template #body="{ data }">{{ data.room_name || '—' }}</template>
+                                            <template #body="{ data }">
+                                                <div v-if="editingPlacementId === data.id" class="flex flex-col gap-1.5">
+                                                    <Select
+                                                        v-model="editForm.room_id"
+                                                        :options="editRoomOptions"
+                                                        optionLabel="room_name"
+                                                        optionValue="id"
+                                                        optionGroupLabel="label"
+                                                        optionGroupChildren="rooms"
+                                                        :loading="editRoomsLoading"
+                                                        placeholder="Select room"
+                                                        showClear
+                                                        class="w-full text-xs"
+                                                    >
+                                                        <template #optiongroup="{ option }">
+                                                            <span class="text-xs font-semibold tracking-wide text-slate-400 uppercase">{{ option.label }}</span>
+                                                        </template>
+                                                    </Select>
+                                                    <small v-if="editErrors.room_id" class="text-red-600">{{ editErrors.room_id }}</small>
+                                                    <small v-if="editErrors.room_type" class="text-red-600">{{ editErrors.room_type }}</small>
+                                                    <small v-if="editErrors.room_college" class="text-red-600">{{ editErrors.room_college }}</small>
+                                                </div>
+                                                <span v-else>{{ data.room_name || '—' }}</span>
+                                            </template>
                                         </Column>
                                         <Column header="Load">
                                             <template #body="{ data }">{{ data.load }} {{ workload?.unit_label ?? 'Units' }}</template>
@@ -571,6 +917,29 @@ const placementStatusSeverity = (status) => {
                                         <Column field="status" header="Status">
                                             <template #body="{ data }">
                                                 <Tag :value="data.status" :severity="placementStatusSeverity(data.status)" />
+                                            </template>
+                                        </Column>
+                                        <Column header="Actions" style="width: 6rem">
+                                            <template #body="{ data }">
+                                                <div v-if="editingPlacementId === data.id" class="flex items-center gap-1">
+                                                    <Button
+                                                        icon="pi pi-check"
+                                                        severity="success"
+                                                        text
+                                                        rounded
+                                                        :loading="editSaving"
+                                                        @click="saveEditPlacement(data)"
+                                                    />
+                                                    <Button icon="pi pi-times" severity="secondary" text rounded :disabled="editSaving" @click="cancelEditPlacement" />
+                                                </div>
+                                                <Button
+                                                    v-else
+                                                    icon="pi pi-pencil"
+                                                    text
+                                                    rounded
+                                                    aria-label="Edit schedule"
+                                                    @click="startEditPlacement(data)"
+                                                />
                                             </template>
                                         </Column>
                                     </DataTable>
