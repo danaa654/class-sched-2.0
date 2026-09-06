@@ -573,25 +573,11 @@ const timeOptions = computed(() => {
     const startMinutes = startH * 60 + startM;
     const endMinutes = endH * 60 + endM;
 
-    // Lunch Break (fixed 12:00 PM-1:00 PM — see SchoolYear::LUNCH_BREAK_START/END)
-    // blocks any class time that would actually fall INSIDE it (e.g.
-    // 12:30 PM), since that would overlap SchoolYear::overlapsLunchBreak().
-    // The boundary marks themselves — 12:00 PM and 1:00 PM — do NOT
-    // overlap lunch (a class can legitimately end right as lunch starts,
-    // at 12:00 PM, or begin right as lunch ends, at 1:00 PM), so they
-    // stay in this base list. Excluding a class from STARTING at 12:00
-    // PM (which would run straight into lunch) is handled separately in
-    // timeOptionsFor() below, since that restriction only applies to
-    // Start Time, not End Time.
-    const [lunchStartH, lunchStartM] = props.schedulingWindow.lunch_start.split(':').map(Number);
-    const [lunchEndH, lunchEndM] = props.schedulingWindow.lunch_end.split(':').map(Number);
-    const lunchStartMinutes = lunchStartH * 60 + lunchStartM;
-    const lunchEndMinutes = lunchEndH * 60 + lunchEndM;
-
+    // Lunch Break restriction removed per adviser direction — the
+    // 12:00 PM-1:00 PM window is no longer excluded from Start/End
+    // Time options; classes may be scheduled through it freely.
     const options = [];
     for (let m = startMinutes; m <= endMinutes; m += TIME_OPTION_STEP_MINUTES) {
-        if (m > lunchStartMinutes && m < lunchEndMinutes) continue;
-
         const h = Math.floor(m / 60);
         const min = m % 60;
         const value = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
@@ -599,11 +585,6 @@ const timeOptions = computed(() => {
     }
     return options;
 });
-
-// Minutes-since-midnight for the lunch boundary, reused by
-// timeOptionsFor()/endTimeOptionsFor() below to keep the "can't START
-// at 12:00 PM" rule in one place instead of re-parsing lunch_start twice.
-const lunchStartValue = computed(() => props.schedulingWindow.lunch_start?.slice(0, 5));
 
 /* --- Busy Time Ranges — grey out Start/End Time slots that would        */
 /* overlap a schedule the row's currently selected Room and/or Faculty    */
@@ -644,12 +625,10 @@ const rangesOverlap = (startA, endA, startB, endB) => startA < endB && endA > st
 // resource is still occupied by something else.
 const timeOptionsFor = (row) => {
     const ranges = busyTimes[row.id] ?? [];
-    return timeOptions.value
-        .filter((opt) => opt.value !== lunchStartValue.value)
-        .map((opt) => ({
-            ...opt,
-            disabled: ranges.some((r) => opt.value >= r.start_time && opt.value < r.end_time),
-        }));
+    return timeOptions.value.map((opt) => ({
+        ...opt,
+        disabled: ranges.some((r) => opt.value >= r.start_time && opt.value < r.end_time),
+    }));
 };
 
 const endTimeOptionsFor = (row) => {

@@ -1817,6 +1817,7 @@ class SectionSubjectController extends Controller implements HasMiddleware
                     'section_subject_id' => $assignment->id,
                     'subject_code' => $assignment->subject?->subject_code,
                     'subject_title' => $assignment->subject?->subject_title,
+                    'edp_code' => $assignment->edp_code,
                     'section_id' => $assignment->section_id,
                     'section_code' => $assignment->section?->section_code,
                     'section_name' => $assignment->section?->section_name,

@@ -37,8 +37,6 @@ const props = defineProps({
             default_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
             default_class_start_time: '07:00',
             default_class_end_time: '17:00',
-            lunch_break_start: '12:00',
-            lunch_break_end: '13:00',
         }),
     },
 });
@@ -65,10 +63,6 @@ const formatTimeLabel = (time) => {
     const displayHour = hour % 12 === 0 ? 12 : hour % 12;
     return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`;
 };
-
-const lunchBreakLabel = computed(
-    () => `${formatTimeLabel(props.schedulingSettingsOptions.lunch_break_start)} – ${formatTimeLabel(props.schedulingSettingsOptions.lunch_break_end)}`,
-);
 
 // Class Start Time / Class End Time dropdown options — every
 // half-hour mark from 5:00 AM to 9:00 PM (e.g. "7:00 AM", "7:30 AM",
@@ -731,18 +725,6 @@ const helpPopover = ref(null);
                 <div class="grid grid-cols-2 gap-1 mt-1">
                     <small v-if="academicTermForm.errors.class_start_time" class="text-red-500">{{ academicTermForm.errors.class_start_time }}</small>
                     <small v-if="academicTermForm.errors.class_end_time" class="text-red-500">{{ academicTermForm.errors.class_end_time }}</small>
-                </div>
-
-                <!-- Lunch Break — locked information row, never editable -->
-                <div class="mt-5 rounded-xl border px-4 py-3" :class="isDark ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-slate-50'">
-                    <div class="flex items-center justify-between">
-                        <span class="text-sm font-medium" :class="isDark ? 'text-slate-200' : 'text-slate-700'">Lunch Break</span>
-                        <i class="pi pi-lock text-xs" :class="isDark ? 'text-slate-500' : 'text-slate-400'" title="Not editable"></i>
-                    </div>
-                    <p class="text-sm mt-1" :class="isDark ? 'text-slate-400' : 'text-slate-500'">{{ lunchBreakLabel }}</p>
-                    <p class="text-xs mt-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">
-                        The Auto Schedule AI will never generate a class that overlaps this period.
-                    </p>
                 </div>
 
                 <!-- Time Interval — locked information row, always 30 Minutes -->

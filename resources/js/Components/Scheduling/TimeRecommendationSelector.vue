@@ -157,16 +157,9 @@ const timeOptions = computed(() => {
     const startMinutes = startH * 60 + startM;
     const endMinutes = endH * 60 + endM;
 
-    const hasLunch = props.schedulingWindow.lunch_start && props.schedulingWindow.lunch_end;
-    const [lunchStartH, lunchStartM] = hasLunch ? props.schedulingWindow.lunch_start.split(':').map(Number) : [null, null];
-    const [lunchEndH, lunchEndM] = hasLunch ? props.schedulingWindow.lunch_end.split(':').map(Number) : [null, null];
-    const lunchStartMinutes = hasLunch ? lunchStartH * 60 + lunchStartM : null;
-    const lunchEndMinutes = hasLunch ? lunchEndH * 60 + lunchEndM : null;
-
+    // Lunch Break restriction removed per adviser direction.
     const options = [];
     for (let m = startMinutes; m <= endMinutes; m += TIME_OPTION_STEP_MINUTES) {
-        if (hasLunch && m > lunchStartMinutes && m < lunchEndMinutes) continue;
-
         const h = Math.floor(m / 60);
         const min = m % 60;
         const value = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
@@ -215,9 +208,6 @@ const addMinutes = (date, minutes) => {
 const totalWeeklyMinutes = ref(null);
 const adjustingForDayChange = ref(false);
 
-const LUNCH_START_MIN = 12 * 60; // 12:00 PM
-const LUNCH_END_MIN = 13 * 60; // 1:00 PM
-
 // Hard ceiling on manually-picked meetings/week — mirrors the backend's
 // `days` => max:3 validation on the time-override route. This only stops
 // picking an unreasonable number of days; it never removes a day the
@@ -263,13 +253,10 @@ const closeEditor = () => {
 // label the hint text below, never to cap or truncate the selection.
 const expectedMeetings = ref(2);
 
-// Overlap check against the fixed lunch break (12:00 PM - 1:00 PM).
-const lunchConflict = computed(() => {
-    const startMin = toMinutesOfDay(editStart.value);
-    const endMin = toMinutesOfDay(editEnd.value);
-    if (startMin === null || endMin === null || endMin <= startMin) return false;
-    return startMin < LUNCH_END_MIN && endMin > LUNCH_START_MIN;
-});
+// Lunch Break restriction removed per adviser direction — always false,
+// kept so activeConflictReason/currentConflictReason below don't need
+// restructuring.
+const lunchConflict = computed(() => false);
 
 // True only while openEditor() is populating the fields from the
 // current recommendation — suppresses the auto-adjust-End watcher
@@ -503,12 +490,8 @@ const toMinutesFromString = (value) => {
     return h * 60 + m;
 };
 
-const currentLunchConflict = computed(() => {
-    const startMin = toMinutesFromString(current.value?.start_time);
-    const endMin = toMinutesFromString(current.value?.end_time);
-    if (startMin === null || endMin === null || endMin <= startMin) return false;
-    return startMin < LUNCH_END_MIN && endMin > LUNCH_START_MIN;
-});
+// Lunch Break restriction removed per adviser direction — always false.
+const currentLunchConflict = computed(() => false);
 
 const currentSectionConflictSibling = computed(() => {
     const startMin = toMinutesFromString(current.value?.start_time);

@@ -173,8 +173,8 @@ class UpdateSectionSubjectScheduleRequest extends FormRequest
     {
         return [
             'end_time.after' => 'End Time must be later than Start Time.',
-            'start_time.after_or_equal' => 'Start Time must be within this School Year\'s Scheduling Window (starts at ' . self::windowStart() . ').',
-            'end_time.before_or_equal' => 'End Time must be within this School Year\'s Scheduling Window (ends at ' . self::windowEnd() . ').',
+            'start_time.after_or_equal' => 'Start Time must be within this School Year\'s Scheduling Window (starts at ' . SchoolYear::to12Hour(self::windowStart()) . ').',
+            'end_time.before_or_equal' => 'End Time must be within this School Year\'s Scheduling Window (ends at ' . SchoolYear::to12Hour(self::windowEnd()) . ').',
             'capacity.min' => 'Capacity must be at least 1.',
         ];
     }

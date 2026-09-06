@@ -385,11 +385,11 @@ class ScheduleConflictServiceTest extends TestCase
     }
 
     /* -------------------------------------------------------------
-     * TEST 10 — LUNCH BREAK (fixed 12:00 PM - 1:00 PM window) blocks
-     * any slot that overlaps it in any way, independent of whether
-     * an Active School Year exists at all.
+     * TEST 10 — LUNCH BREAK restriction removed per adviser direction:
+     * a slot overlapping 12:00 PM - 1:00 PM is no longer blocked (as
+     * long as it doesn't trip any other conflict rule).
      * ----------------------------------------------------------- */
-    public function test_a_slot_overlapping_the_lunch_break_is_blocked(): void
+    public function test_a_slot_overlapping_the_former_lunch_break_is_allowed(): void
     {
         $section = $this->makeSection('BSIT-4A');
 
@@ -402,8 +402,7 @@ class ScheduleConflictServiceTest extends TestCase
             'end_time' => '12:30',
         ], excludingSectionSubjectId: 0);
 
-        $this->assertArrayHasKey('days', $errors);
-        $this->assertStringContainsString('Lunch Break', $errors['days']);
+        $this->assertArrayNotHasKey('days', $errors);
     }
 
     /* -------------------------------------------------------------

@@ -206,22 +206,30 @@ const formatHourLabel = (hhmm) => {
 
 const intervalMinutes = computed(() => props.schedulingWindow.interval_minutes || 30);
 
-// A row "is lunch" if its slot overlaps the fixed Lunch Break window
-// (never editable — see SchoolYear's docblock) — same overlap rule
-// the Auto Schedule AI itself refuses to cross.
-const isLunchRow = (hour) => {
-    const lunchStart = toMinutes(props.schedulingWindow.lunch_start || '12:00');
-    const lunchEnd = toMinutes(props.schedulingWindow.lunch_end || '13:00');
-    const slotStart = toMinutes(hour);
-    const slotEnd = slotStart + intervalMinutes.value;
-    return slotStart < lunchEnd && slotEnd > lunchStart;
-};
+// Lunch Break restriction removed per adviser direction — always false,
+// so no row is merged/blocked and every slot (including 12:00-1:00) is
+// an ordinary schedulable row.
+const isLunchRow = () => false;
 
 // "8:00 AM" -> "8:00 AM – 8:30 AM", using the grid's own interval so a
 // 15/30/60-min Time Interval setting always produces the right range.
 const formatSlotRange = (hhmm) => {
     const end = toHHMM(toMinutes(hhmm) + intervalMinutes.value);
     return `${formatHourLabel(hhmm)} – ${formatHourLabel(end)}`;
+};
+
+// Compact time label for a placed block's card — "8:00am-1:00pm" style
+// (lowercase, no space before am/pm) so it reads well at the block's
+// small font size without eating into the space subject/faculty need.
+const formatCompactTime = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    const period = h >= 12 ? 'pm' : 'am';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return m === 0 ? `${h12}${period}` : `${h12}:${String(m).padStart(2, '0')}${period}`;
+};
+const formatBlockTimeRange = (block) => {
+    if (!block?.start_time || !block?.end_time) return '';
+    return `${formatCompactTime(block.start_time)}-${formatCompactTime(block.end_time)}`;
 };
 
 // The Lunch Break window is fixed and never scheduled into (see
@@ -2316,7 +2324,7 @@ const removeAssignment = async () => {
                     <div
                         class="grid text-[13px]"
                         :style="{
-                            gridTemplateColumns: `92px repeat(${days.length}, minmax(130px, 1fr))`,
+                            gridTemplateColumns: `120px repeat(${days.length}, minmax(130px, 1fr))`,
                             gridTemplateRows: `36px repeat(${hourRows.length}, 24px)`,
                         }"
                     >
@@ -2336,7 +2344,7 @@ const removeAssignment = async () => {
                         <template v-for="(hour, rowIndex) in hourRows" :key="`t-${hour}`">
                             <div
                                 v-if="!isLunchRow(hour) || isFirstLunchRow(rowIndex)"
-                                class="border-r border-b border-slate-300 flex items-center justify-end pr-1.5 leading-none whitespace-nowrap text-[9px]"
+                                class="border-r border-b border-slate-300 flex items-center justify-end px-1.5 leading-none whitespace-nowrap overflow-visible text-[10px]"
                                 :class="isLunchRow(hour) ? 'text-amber-700 font-bold' : (hour.endsWith(':00') ? 'text-slate-700 font-semibold' : 'text-slate-500 font-medium')"
                                 :style="{ gridColumn: 1, gridRow: isLunchRow(hour) ? `${rowIndex + 2} / span ${lunchSpan}` : rowIndex + 2 }"
                             >
@@ -2403,10 +2411,11 @@ const removeAssignment = async () => {
                                             class="pi pi-arrows-alt absolute top-1 right-1 text-[9px] opacity-0 group-hover:opacity-60"
                                         ></i>
                                         <div class="font-semibold truncate">{{ blockAt(day, rowIndex).subject_code }}</div>
-                                        <div class="truncate">
-                                            {{ blockAt(day, rowIndex).section_code }}
+                                        <div class="truncate text-[10px] opacity-80">
+                                            <span v-if="blockAt(day, rowIndex).edp_code">EDP {{ blockAt(day, rowIndex).edp_code }} · </span>{{ blockAt(day, rowIndex).section_code }}
                                         </div>
                                         <div v-if="blockAt(day, rowIndex).faculty_name" class="truncate text-[10px] opacity-75">{{ blockAt(day, rowIndex).faculty_name }}</div>
+                                        <div class="truncate text-[10px] font-medium opacity-90">{{ formatBlockTimeRange(blockAt(day, rowIndex)) }}</div>
                                         <div v-if="blockHasConflict(blockAt(day, rowIndex))" class="text-[9px] font-semibold text-red-700 truncate">⚠ Conflict — needs rescheduling</div>
                                         <div v-else-if="blockAt(day, rowIndex).faculty_mismatch" class="text-[9px] font-semibold text-amber-700 truncate">⚠ Faculty Mismatch</div>
                                         <div v-else-if="blockAt(day, rowIndex).is_finalized" class="text-[9px] italic opacity-75 truncate">Finalized — locked</div>
@@ -2448,7 +2457,7 @@ const removeAssignment = async () => {
                 </div>
                 <p class="text-[11px] text-slate-400 mt-2">
                     Drag a subject from "Unscheduled Subjects" onto a slot to place it, or drag an existing block to move it. Click a block to edit its Faculty, Hours/Week, Meetings/Week, or Days.
-                    Schedules belonging to any section within your authorized scheduling scope can be moved from here, even if it isn't the currently selected section — schedules outside your scope stay locked, and a finalized section's schedule (amber, padlock) stays locked for everyone until an Admin/Registrar unlocks it. The Lunch Break slot is fixed and can't be scheduled into.
+                    Schedules belonging to any section within your authorized scheduling scope can be moved from here, even if it isn't the currently selected section — schedules outside your scope stay locked, and a finalized section's schedule (amber, padlock) stays locked for everyone until an Admin/Registrar unlocks it.
                     <span v-if="showSectionGhost" class="block mt-1"><i class="pi pi-eye mr-1 text-violet-500"></i>Striped violet slots show where {{ section.section_code }} is already scheduled in another room — dropping a subject there will still conflict for the section even though this room is free.</span>
                 </p>
             </div>

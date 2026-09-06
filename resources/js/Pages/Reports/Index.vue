@@ -399,13 +399,8 @@ const timeToMinutes12h = (label) => {
 
 const gridIntervalMinutes = computed(() => props.schedulingWindow.interval_minutes || 30);
 
-const gridIsLunchRow = (hour) => {
-    const lunchStart = toMinutes24(props.schedulingWindow.lunch_start || '12:00');
-    const lunchEnd = toMinutes24(props.schedulingWindow.lunch_end || '13:00');
-    const slotStart = toMinutes24(hour);
-    const slotEnd = slotStart + gridIntervalMinutes.value;
-    return slotStart < lunchEnd && slotEnd > lunchStart;
-};
+// Lunch Break restriction removed per adviser direction — always false.
+const gridIsLunchRow = () => false;
 const gridFormatSlotRange = (hhmm) => `${formatHourLabel(hhmm)} – ${formatHourLabel(toHHMM(toMinutes24(hhmm) + gridIntervalMinutes.value))}`;
 
 const gridHourRows = computed(() => {
@@ -843,7 +838,7 @@ const summaryCards = computed(() => [
                     <div
                         class="grid text-[13px]"
                         :style="{
-                            gridTemplateColumns: `92px repeat(${gridDays.length}, minmax(140px, 1fr))`,
+                            gridTemplateColumns: `120px repeat(${gridDays.length}, minmax(140px, 1fr))`,
                             gridTemplateRows: `36px repeat(${gridHourRows.length}, 26px)`,
                         }"
                     >
@@ -857,7 +852,7 @@ const summaryCards = computed(() => [
                         <template v-for="(hour, rowIndex) in gridHourRows" :key="`t-${hour}`">
                             <div
                                 v-if="!gridIsLunchRow(hour) || gridIsFirstLunchRow(rowIndex)"
-                                class="flex items-center justify-end whitespace-nowrap border-b border-r border-slate-300 pr-1.5 text-[9px] leading-none"
+                                class="flex items-center justify-end whitespace-nowrap overflow-visible border-b border-r border-slate-300 px-1.5 text-[10px] leading-none"
                                 :class="gridIsLunchRow(hour) ? 'font-bold text-amber-700' : (hour.endsWith(':00') ? 'font-semibold text-slate-700' : 'font-medium text-slate-500')"
                                 :style="{ gridColumn: 1, gridRow: gridIsLunchRow(hour) ? `${rowIndex + 2} / span ${gridLunchSpan}` : rowIndex + 2 }"
                             >

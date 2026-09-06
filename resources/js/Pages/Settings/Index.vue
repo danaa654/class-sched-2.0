@@ -65,6 +65,17 @@ const activeTab = ref(requestedTab ?? (props.visibleGroups[0] ?? 'general'));
 const canEdit = (group) => props.editableGroups.includes(group);
 const has = (group) => props.visibleGroups.includes(group);
 
+// "19:00" -> "7:00 PM" — the Academic tab's Class Hours summary reads
+// straight off the Active School Year record (raw 24-hour "H:i"), so it
+// needs its own display formatter rather than showing that value as-is.
+const formatTime12 = (time) => {
+    if (!time) return '—';
+    const [hour, minute] = time.split(':').map(Number);
+    const period = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+    return `${hour12}:${String(minute).padStart(2, '0')} ${period}`;
+};
+
 const onError = () => {
     toast.add({ severity: 'warn', summary: 'Missing information', detail: 'Please check the highlighted fields and try again.', life: 3000 });
 };
@@ -215,7 +226,7 @@ const onUpdateAccount = () => {
                             'System-wide configuration that controls how scheduling behaves — not the data itself (Faculty, Rooms, Subjects, Sections, and Curriculum each have their own pages).',
                         ]"
                         :bullets="[
-                            'Academic — a read-only summary of the daily class window, lunch break, and available scheduling days; managed on the Academic Calendar page.',
+                            'Academic — a read-only summary of the daily class window and available scheduling days; managed on the Academic Terms page.',
                             'Changing these settings affects future scheduling; it does not retroactively change schedules already saved.',
                         ]"
                     />
@@ -290,15 +301,14 @@ const onUpdateAccount = () => {
                                     <Tag severity="info" value="Managed in Academic Calendar" />
                                 </div>
                                 <p class="text-sm text-slate-500 mb-4">
-                                    Class Start/End Time, Time Interval, Working Days, and Lunch Break already live on the
+                                    Class Start/End Time, Time Interval, and Working Days already live on the
                                     Active School Year so the Auto Schedule engine has one source of truth. Change them from the
                                     Academic Calendar page — Settings only shows the current values here.
                                 </p>
                                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
                                     <div><span class="text-slate-400 block">Active School Year</span>{{ schoolYear.name }}</div>
-                                    <div><span class="text-slate-400 block">Class Hours</span>{{ schoolYear.class_start_time }} – {{ schoolYear.class_end_time }}</div>
+                                    <div><span class="text-slate-400 block">Class Hours</span>{{ formatTime12(schoolYear.class_start_time) }} – {{ formatTime12(schoolYear.class_end_time) }}</div>
                                     <div><span class="text-slate-400 block">Time Interval</span>{{ schoolYear.time_interval }} minutes</div>
-                                    <div><span class="text-slate-400 block">Lunch Break</span>{{ schoolYear.lunch_start }} – {{ schoolYear.lunch_end }} <Tag severity="danger" value="HARD CONSTRAINT" class="!text-[10px] ml-1" /></div>
                                     <div class="sm:col-span-2"><span class="text-slate-400 block">Working Days</span>{{ schoolYear.available_days.join(', ') }}</div>
                                 </div>
                                 <Button as="a" :href="route('academic-calendar')" label="Open Academic Calendar" icon="pi pi-external-link" text class="!mt-4 !px-0" />

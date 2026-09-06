@@ -382,8 +382,9 @@ class RoomUtilizationService
         $start = $schoolYear?->classStartTime() ?? SchoolYear::DEFAULT_CLASS_START_TIME;
         $end = $schoolYear?->classEndTime() ?? SchoolYear::DEFAULT_CLASS_END_TIME;
 
+        // Lunch Break restriction removed per adviser direction — no
+        // longer added as a blocked range.
         $blocked = $dayPlacements->map(fn (SectionSubject $p) => [substr($p->start_time, 0, 5), substr($p->end_time, 0, 5)])->all();
-        $blocked[] = [SchoolYear::LUNCH_BREAK_START, SchoolYear::LUNCH_BREAK_END];
 
         usort($blocked, fn ($a, $b) => $a[0] <=> $b[0]);
 

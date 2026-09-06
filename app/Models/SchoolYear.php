@@ -222,20 +222,17 @@ class SchoolYear extends Model
     }
 
     /**
-     * Whether a Start/End Time range overlaps the fixed Lunch Break
-     * (12:00 PM - 1:00 PM) in any way — including a class that starts
-     * before lunch and runs into it, one that starts during lunch, or
-     * one that fully contains the lunch window.
+     * Lunch Break restriction removed per adviser direction — classes
+     * may now be scheduled through 12:00 PM - 1:00 PM. Always returns
+     * false so every call site that gates on this (ScheduleConflictService,
+     * RecommendationService, SectionSubjectController validation,
+     * RoomUtilizationService) stops treating that window as blocked.
+     * Kept as a method (rather than deleted) so none of those call
+     * sites need to change.
      */
     public static function overlapsLunchBreak(string $startTime, string $endTime): bool
     {
-        $lunchStart = self::minutesFromTime(self::LUNCH_BREAK_START);
-        $lunchEnd = self::minutesFromTime(self::LUNCH_BREAK_END);
-
-        $start = self::minutesFromTime($startTime);
-        $end = self::minutesFromTime($endTime);
-
-        return $start < $lunchEnd && $end > $lunchStart;
+        return false;
     }
 
     private function formatTime(?string $value): ?string
@@ -245,6 +242,22 @@ class SchoolYear extends Model
         }
 
         return substr($value, 0, 5);
+    }
+
+    /**
+     * "19:00" -> "7:00 PM" — shared 12-hour display helper for
+     * user-facing validation/conflict messages that quote a Class
+     * Start/End Time (e.g. ScheduleConflictService, the schedule
+     * update FormRequest), so times are never surfaced to the
+     * Registrar in raw 24-hour form.
+     */
+    public static function to12Hour(string $time): string
+    {
+        [$hour, $minute] = array_map('intval', explode(':', substr($time, 0, 5)));
+        $period = $hour >= 12 ? 'PM' : 'AM';
+        $hour12 = $hour % 12 === 0 ? 12 : $hour % 12;
+
+        return sprintf('%d:%02d %s', $hour12, $minute, $period);
     }
 
     private function toMinutes(string $time): int

@@ -227,7 +227,7 @@ class ScheduleConflictService
         // 8. Time within allowed class hours (Class Start/End Time).
         if ($activeSchoolYear && ! $activeSchoolYear->isWithinSchedulingPolicy($startTime, $endTime)) {
             return ['days' => 'This time falls outside the allowed class hours ('
-                .$activeSchoolYear->classStartTime().' - '.$activeSchoolYear->classEndTime().').', ];
+                .SchoolYear::to12Hour($activeSchoolYear->classStartTime()).' - '.SchoolYear::to12Hour($activeSchoolYear->classEndTime()).').', ];
         }
 
         // 9. Subject duration — the slot must actually fit the
