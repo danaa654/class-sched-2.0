@@ -48,7 +48,7 @@ const userManagementItems = [
 // since Assistant Dean/Dean/OIC all need to browse it (write access
 // is enforced per-row by the backend regardless).
 const academicSetupItems = computed(() => [
-    ...(can.value.manageAcademicCalendar ? [{ label: 'Academic Calendar', route: 'academic-calendar', icon: 'pi pi-calendar' }] : []),
+    ...(can.value.manageAcademicCalendar ? [{ label: 'Academic Terms', route: 'academic-calendar', icon: 'pi pi-calendar' }] : []),
     ...(can.value.manageAcademicStructure ? [{ label: 'Academic Structure', route: 'academic-structure', icon: 'pi pi-sitemap' }] : []),
     ...(can.value.manageCurriculum ? [{ label: 'Curriculum', route: 'curriculums', icon: 'pi pi-book' }] : []),
     { label: 'Subjects', route: 'subjects', icon: 'pi pi-bookmark' },
