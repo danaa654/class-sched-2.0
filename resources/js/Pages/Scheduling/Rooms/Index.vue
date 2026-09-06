@@ -100,6 +100,106 @@ watch(
 );
 
 /* ------------------------------------------------------------------ */
+/* Bulk Import — Room Master                                          */
+/*                                                                      */
+/* Adding a whole building's worth of Rooms one at a time through the */
+/* Add Room dialog doesn't scale. Backed by RoomController::import() —*/
+/* every row gets the exact same validation a manual Add Room would,  */
+/* and rows that fail are reported back individually rather than      */
+/* aborting the whole file. Same pattern as Subjects/Index.vue's Bulk */
+/* Import.                                                             */
+/* ------------------------------------------------------------------ */
+
+const importVisible = ref(false);
+const importForm = useForm({ file: null });
+const importFileName = ref('');
+
+const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+};
+
+const previewRows = ref([]);
+const previewLoading = ref(false);
+const previewError = ref('');
+const previewSummary = computed(() => ({
+    new: previewRows.value.filter((r) => r.status === 'new').length,
+    exists: previewRows.value.filter((r) => r.status === 'exists').length,
+    error: previewRows.value.filter((r) => r.status === 'error').length,
+}));
+const previewStatusMeta = {
+    new: { severity: 'success', label: 'New' },
+    exists: { severity: 'warn', label: 'Already exists' },
+    error: { severity: 'danger', label: 'Invalid' },
+};
+
+const resetImportPreview = () => {
+    previewRows.value = [];
+    previewError.value = '';
+    previewLoading.value = false;
+};
+
+const openImport = () => {
+    importForm.reset();
+    importForm.clearErrors();
+    importFileName.value = '';
+    resetImportPreview();
+    importVisible.value = true;
+};
+
+const onImportFileChange = async (event) => {
+    const file = event.target.files?.[0] ?? null;
+    importForm.file = file;
+    importFileName.value = file?.name ?? '';
+    resetImportPreview();
+
+    if (!file) return;
+
+    previewLoading.value = true;
+    try {
+        const body = new FormData();
+        body.append('file', file);
+
+        const response = await fetch(route('scheduling.rooms.import.preview'), {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'X-XSRF-TOKEN': csrfToken() },
+            body,
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            previewError.value = data?.error ?? 'Could not read this file. Please check it and try again.';
+            return;
+        }
+
+        previewRows.value = data.rows ?? [];
+    } catch (e) {
+        previewError.value = 'Could not reach the server to preview this file.';
+    } finally {
+        previewLoading.value = false;
+    }
+};
+
+const submitImport = () => {
+    if (!importForm.file) {
+        toast.add({ severity: 'warn', summary: 'No file selected', detail: 'Please choose a CSV file first.', life: 4000 });
+        return;
+    }
+
+    importForm.post(route('scheduling.rooms.import'), {
+        forceFormData: true,
+        preserveScroll: true,
+        onSuccess: () => {
+            importVisible.value = false;
+            importForm.reset();
+            importFileName.value = '';
+            resetImportPreview();
+        },
+    });
+};
+
+/* ------------------------------------------------------------------ */
 /* Search / list                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -587,6 +687,7 @@ const closeSchedule = () => {
                                     @click="onRefresh"
                                     aria-label="Refresh"
                                 />
+                                <Button v-if="canManageRooms" label="Import" icon="pi pi-upload" severity="secondary" outlined @click="openImport" />
                                 <Button v-if="canManageRooms" label="Add Room" icon="pi pi-plus" severity="success" @click="openAdd" />
                             </div>
                         </template>
@@ -1050,6 +1151,102 @@ const closeSchedule = () => {
                     severity="success"
                     :loading="roomForm.processing"
                     @click="onSaveRoom()"
+                />
+            </template>
+        </Dialog>
+
+        <!-- Bulk Import Dialog -->
+        <Dialog
+            v-model:visible="importVisible"
+            modal
+            header="Import Rooms"
+            :style="{ width: '680px' }"
+            :breakpoints="{ '640px': '95vw' }"
+            :draggable="false"
+            :pt="{
+                root: { class: isDark ? '!bg-[#141D33] !border !border-white/10 !text-white !rounded-2xl !shadow-2xl dark-scope' : '!border !border-[rgba(30,41,59,0.06)] !rounded-2xl !shadow-2xl' },
+                header: { class: isDark ? '!bg-[#141D33] !border-b !border-white/10 !rounded-t-2xl' : '!rounded-t-2xl' },
+                content: { class: isDark ? '!bg-[#141D33]' : '' },
+                footer: { class: isDark ? '!bg-[#141D33] !border-t !border-white/10 !rounded-b-2xl' : '!rounded-b-2xl' },
+            }"
+        >
+            <div class="flex flex-col gap-4">
+                <p class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                    Upload a CSV of rooms to add them all at once — handy when setting up a whole new building or
+                    laboratory wing instead of adding each room one by one.
+                </p>
+
+                <a
+                    :href="route('scheduling.rooms.import.template')"
+                    class="inline-flex w-fit items-center gap-2 text-sm font-medium text-blue-600 hover:underline"
+                >
+                    <i class="pi pi-download"></i>
+                    Download CSV template
+                </a>
+
+                <div>
+                    <label class="mb-1 block text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">CSV File</label>
+                    <input
+                        type="file"
+                        accept=".csv,text/csv"
+                        class="neu-inset w-full rounded-xl border-none p-2 text-sm"
+                        :class="isDark ? 'text-slate-200' : ''"
+                        @change="onImportFileChange"
+                    />
+                    <small v-if="importFileName" class="mt-1 block text-slate-400">Selected: {{ importFileName }}</small>
+                    <small v-if="importForm.errors.file" class="mt-1 block text-red-500">{{ importForm.errors.file }}</small>
+                </div>
+
+                <!-- Preview overview — read straight from the file the
+                     moment it's chosen, before anything is saved, so a
+                     room that already exists is flagged up front
+                     instead of only surfacing as an error after Import
+                     is clicked. -->
+                <div v-if="previewLoading" class="flex items-center gap-2 text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                    <i class="pi pi-spin pi-spinner"></i>
+                    Reading file…
+                </div>
+
+                <div v-else-if="previewError" class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {{ previewError }}
+                </div>
+
+                <div v-else-if="previewRows.length" class="flex flex-col gap-2">
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                        <Tag severity="success" :value="`${previewSummary.new} new`" />
+                        <Tag severity="warn" :value="`${previewSummary.exists} already exist`" v-if="previewSummary.exists" />
+                        <Tag severity="danger" :value="`${previewSummary.error} invalid`" v-if="previewSummary.error" />
+                        <span :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                            — rooms already on file will be skipped, not duplicated.
+                        </span>
+                    </div>
+
+                    <DataTable :value="previewRows" size="small" scrollable scrollHeight="260px" class="text-sm">
+                        <Column field="room_name" header="Name" style="width: 180px" />
+                        <Column field="building" header="Building" style="width: 160px" />
+                        <Column header="Status" style="min-width: 220px">
+                            <template #body="{ data }">
+                                <div class="flex flex-col gap-0.5">
+                                    <Tag :severity="previewStatusMeta[data.status].severity" :value="previewStatusMeta[data.status].label" class="w-fit" />
+                                    <small v-if="data.message" :class="data.status === 'error' ? 'text-red-500' : (isDark ? 'text-slate-400' : 'text-slate-500')">
+                                        {{ data.message }}
+                                    </small>
+                                </div>
+                            </template>
+                        </Column>
+                    </DataTable>
+                </div>
+            </div>
+
+            <template #footer>
+                <Button label="Close" severity="secondary" outlined @click="importVisible = false" />
+                <Button
+                    label="Import"
+                    icon="pi pi-upload"
+                    severity="success"
+                    :loading="importForm.processing"
+                    :disabled="previewLoading || (previewRows.length > 0 && previewSummary.new === 0)"
+                    @click="submitImport"
                 />
             </template>
         </Dialog>

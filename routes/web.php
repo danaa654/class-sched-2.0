@@ -150,6 +150,12 @@ Route::middleware('auth')->group(function () {
     Route::put('/scheduling/teaching-qualifications/{faculty}', [TeachingQualificationController::class, 'update'])->name('scheduling.teaching-qualifications.update');
     Route::get('/scheduling/rooms', [RoomController::class, 'index'])->name('scheduling.rooms');
     Route::get('/scheduling/rooms/{room}/schedule', [RoomController::class, 'schedule'])->name('scheduling.rooms.schedule');
+    // Bulk Import — Room Master (mirrors Subject Library's Bulk
+    // Import). Placed above the {room} routes so "import" is never
+    // mistaken for a room identifier.
+    Route::get('/scheduling/rooms/import/template', [RoomController::class, 'importTemplate'])->name('scheduling.rooms.import.template');
+    Route::post('/scheduling/rooms/import/preview', [RoomController::class, 'preview'])->name('scheduling.rooms.import.preview');
+    Route::post('/scheduling/rooms/import', [RoomController::class, 'import'])->name('scheduling.rooms.import');
     Route::post('/scheduling/rooms', [RoomController::class, 'store'])->name('scheduling.rooms.store');
     Route::put('/scheduling/rooms/{room}', [RoomController::class, 'update'])->name('scheduling.rooms.update');
     Route::delete('/scheduling/rooms/{room}', [RoomController::class, 'destroy'])->name('scheduling.rooms.destroy');

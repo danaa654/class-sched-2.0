@@ -469,6 +469,17 @@ class SubjectController extends Controller
         $required = ['subject_code', 'subject_title', 'category', 'units', 'lecture_hours', 'laboratory_hours'];
         $missing = array_diff($required, $header);
         if (! empty($missing)) {
+            // Columns that only ever appear in the Room Master's Bulk
+            // Import template — if any show up here, the person
+            // almost certainly picked the wrong file rather than
+            // mistyped a Subject column, so say that plainly instead
+            // of just listing what's "missing" from a file that was
+            // never meant to be a Subjects CSV in the first place.
+            $roomOnlyColumns = ['room_name', 'building', 'room_type', 'room_category'];
+            if (! empty(array_intersect($roomOnlyColumns, $header))) {
+                return ['error' => 'This looks like a Rooms CSV, not a Subjects CSV. Please upload a file exported for Subject import — download the template below for the exact expected format.'];
+            }
+
             return ['error' => 'The file is missing required column(s): '.implode(', ', $missing).'. Download the template for the exact expected columns.'];
         }
 
