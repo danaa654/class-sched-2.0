@@ -97,6 +97,13 @@ class HandleInertiaRequests extends Middleware
                 // see RoomController::destroy() and
                 // RoomUtilizationService::deletionImpact().
                 'roomDeletionImpact' => fn () => $request->session()->get('roomDeletionImpact'),
+                // Per-row failure detail from the Subject Library's
+                // Bulk Import — see SubjectController::import(). A
+                // plain success/error string can't show which
+                // specific rows failed and why, so this rides
+                // alongside them the same way facultyDeletionImpact/
+                // roomDeletionImpact do.
+                'subjectImportErrors' => fn () => $request->session()->get('subjectImportErrors'),
             ],
             // The currently Active Academic Term (School Year +
             // Semester) — the real, system-wide one, unaffected by

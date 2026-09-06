@@ -103,6 +103,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/subjects', [SubjectController::class, 'store'])->name('subjects.store');
     Route::put('/subjects/{subject}', [SubjectController::class, 'update'])->name('subjects.update');
     Route::delete('/subjects/{subject}', [SubjectController::class, 'destroy'])->name('subjects.destroy');
+    // Bulk Import — spec: "adding a new curriculum one subject at a
+    // time by hand is a hassle". The template download and the import
+    // POST both sit under the same middleware group (auth + role
+    // gate) as the rest of Subjects, and the import itself is
+    // authorized per-row exactly like a manual Add Subject would be
+    // (see SubjectController::import()).
+    Route::get('/subjects/import/template', [SubjectController::class, 'importTemplate'])->name('subjects.import.template');
+    Route::post('/subjects/import/preview', [SubjectController::class, 'preview'])->name('subjects.import.preview');
+    Route::post('/subjects/import', [SubjectController::class, 'import'])->name('subjects.import');
     Route::get('/curriculums', [CurriculumController::class, 'index'])->name('curriculums');
     Route::post('/curriculums', [CurriculumController::class, 'store'])->name('curriculums.store');
     Route::put('/curriculums/{curriculum}', [CurriculumController::class, 'update'])->name('curriculums.update');

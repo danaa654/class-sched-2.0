@@ -198,6 +198,119 @@ watch(
     },
 );
 
+/* ------------------------------------------------------------------ */
+/* Bulk Import — Subject Library                                       */
+/*                                                                      */
+/* Adviser request: adding a whole new curriculum's worth of Subjects  */
+/* one-by-one through the Add Subject dialog doesn't scale. Backed by  */
+/* SubjectController::import() — every row gets the exact same         */
+/* validation + Role/College authorization a manual Add Subject would, */
+/* and rows that fail are reported back individually rather than       */
+/* aborting the whole file.                                            */
+/* ------------------------------------------------------------------ */
+
+const importVisible = ref(false);
+const importForm = useForm({ file: null });
+const importFileName = ref('');
+
+// Preview overview — read the CSV as soon as it's chosen and show,
+// per row, whether the subject_code is brand-new or already exists
+// in the master list (e.g. "MMW" is already on file), before anything
+// is actually saved. Mirrors the fetch()+X-XSRF-TOKEN pattern used by
+// the Sections page's manual-subjects-preview.
+const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : (document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+};
+
+const previewRows = ref([]);
+const previewLoading = ref(false);
+const previewError = ref('');
+const previewSummary = computed(() => ({
+    new: previewRows.value.filter((r) => r.status === 'new').length,
+    exists: previewRows.value.filter((r) => r.status === 'exists').length,
+    error: previewRows.value.filter((r) => r.status === 'error').length,
+}));
+const previewStatusMeta = {
+    new: { severity: 'success', label: 'New' },
+    exists: { severity: 'warn', label: 'Already exists' },
+    error: { severity: 'danger', label: 'Invalid' },
+};
+
+const resetPreview = () => {
+    previewRows.value = [];
+    previewError.value = '';
+    previewLoading.value = false;
+};
+
+const openImport = () => {
+    importForm.reset();
+    importForm.clearErrors();
+    importFileName.value = '';
+    resetPreview();
+    importVisible.value = true;
+};
+
+const onImportFileChange = async (event) => {
+    const file = event.target.files?.[0] ?? null;
+    importForm.file = file;
+    importFileName.value = file?.name ?? '';
+    resetPreview();
+
+    if (!file) return;
+
+    previewLoading.value = true;
+    try {
+        const body = new FormData();
+        body.append('file', file);
+
+        const response = await fetch(route('subjects.import.preview'), {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'X-XSRF-TOKEN': csrfToken() },
+            body,
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            previewError.value = data?.error ?? 'Could not read this file. Please check it and try again.';
+            return;
+        }
+
+        previewRows.value = data.rows ?? [];
+    } catch (e) {
+        previewError.value = 'Could not reach the server to preview this file.';
+    } finally {
+        previewLoading.value = false;
+    }
+};
+
+const submitImport = () => {
+    if (!importForm.file) {
+        toast.add({ severity: 'warn', summary: 'No file selected', detail: 'Please choose a CSV file first.', life: 4000 });
+        return;
+    }
+
+    importForm.post(route('subjects.import'), {
+        forceFormData: true,
+        preserveScroll: true,
+        onSuccess: () => {
+            // The Registrar already reviewed exactly this outcome in
+            // the preview overview before clicking Import — the New /
+            // Already Exists / Invalid table above IS that review, so
+            // there's nothing left to re-surface here. Close the
+            // dialog every time; the global success/error toast
+            // (watchers above) still reports the final created/
+            // skipped/error counts.
+            importVisible.value = false;
+            importForm.reset();
+            importFileName.value = '';
+            resetPreview();
+        },
+    });
+};
+
+
 const openAdd = () => {
     editingSubject.value = null;
     subjectForm.reset();
@@ -361,6 +474,7 @@ const onDeleteSubject = (subject) => {
                                     @click="onRefresh"
                                     aria-label="Refresh"
                                 />
+                                <Button label="Import" icon="pi pi-upload" severity="secondary" outlined @click="openImport" />
                                 <Button label="Add Subject" icon="pi pi-plus" severity="success" @click="openAdd" />
                             </div>
                         </template>
@@ -808,6 +922,97 @@ const onDeleteSubject = (subject) => {
                     severity="success"
                     :loading="subjectForm.processing"
                     @click="onSaveSubject"
+                />
+            </template>
+        </Dialog>
+
+        <!-- Bulk Import Dialog -->
+        <Dialog
+            v-model:visible="importVisible"
+            modal
+            header="Import Subjects"
+            :style="{ width: '680px' }"
+            :breakpoints="{ '640px': '95vw' }"
+            :draggable="false"
+        >
+            <div class="flex flex-col gap-4">
+                <p class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                    Upload a CSV of subjects to add them all at once — handy when setting up a whole new curriculum
+                    instead of adding each subject one by one.
+                </p>
+
+                <a
+                    :href="route('subjects.import.template')"
+                    class="inline-flex w-fit items-center gap-2 text-sm font-medium text-blue-600 hover:underline"
+                >
+                    <i class="pi pi-download"></i>
+                    Download CSV template
+                </a>
+
+                <div>
+                    <label class="mb-1 block text-sm font-medium" :class="isDark ? 'text-slate-300' : 'text-slate-700'">CSV File</label>
+                    <input
+                        type="file"
+                        accept=".csv,text/csv"
+                        class="neu-inset w-full rounded-xl border-none p-2 text-sm"
+                        :class="isDark ? 'text-slate-200' : ''"
+                        @change="onImportFileChange"
+                    />
+                    <small v-if="importFileName" class="mt-1 block text-slate-400">Selected: {{ importFileName }}</small>
+                    <small v-if="importForm.errors.file" class="mt-1 block text-red-500">{{ importForm.errors.file }}</small>
+                </div>
+
+                <!-- Preview overview — read straight from the file the
+                     moment it's chosen, before anything is saved, so a
+                     subject that already exists (e.g. "MMW") is flagged
+                     up front instead of only surfacing as an error
+                     after Import is clicked. -->
+                <div v-if="previewLoading" class="flex items-center gap-2 text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                    <i class="pi pi-spin pi-spinner"></i>
+                    Reading file…
+                </div>
+
+                <div v-else-if="previewError" class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {{ previewError }}
+                </div>
+
+                <div v-else-if="previewRows.length" class="flex flex-col gap-2">
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                        <Tag severity="success" :value="`${previewSummary.new} new`" />
+                        <Tag severity="warn" :value="`${previewSummary.exists} already exist`" v-if="previewSummary.exists" />
+                        <Tag severity="danger" :value="`${previewSummary.error} invalid`" v-if="previewSummary.error" />
+                        <span :class="isDark ? 'text-slate-400' : 'text-slate-500'">
+                            — subjects already on file will be skipped, not duplicated.
+                        </span>
+                    </div>
+
+                    <DataTable :value="previewRows" size="small" scrollable scrollHeight="260px" class="text-sm">
+                        <Column field="subject_code" header="Code" style="width: 100px" />
+                        <Column field="subject_title" header="Title" style="width: 220px" />
+                        <Column header="Status" style="min-width: 220px">
+                            <template #body="{ data }">
+                                <div class="flex flex-col gap-0.5">
+                                    <Tag :severity="previewStatusMeta[data.status].severity" :value="previewStatusMeta[data.status].label" class="w-fit" />
+                                    <small v-if="data.message" :class="data.status === 'error' ? 'text-red-500' : (isDark ? 'text-slate-400' : 'text-slate-500')">
+                                        {{ data.message }}
+                                    </small>
+                                </div>
+                            </template>
+                        </Column>
+                    </DataTable>
+                </div>
+
+            </div>
+
+            <template #footer>
+                <Button label="Close" severity="secondary" outlined @click="importVisible = false" />
+                <Button
+                    label="Import"
+                    icon="pi pi-upload"
+                    severity="success"
+                    :loading="importForm.processing"
+                    :disabled="previewLoading || (previewRows.length > 0 && previewSummary.new === 0)"
+                    @click="submitImport"
                 />
             </template>
         </Dialog>
