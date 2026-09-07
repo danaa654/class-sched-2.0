@@ -12,6 +12,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -249,6 +250,14 @@ class UsersController extends Controller
             'last_name' => ['required', 'string', 'max:255'],
             'suffix' => ['nullable', 'string', 'max:50'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            // Profile photo — optional. 'image' covers jpg/png/webp/etc;
+            // 2MB cap keeps the "public" disk from filling up with
+            // full-resolution phone photos. 'remove_photo' is a separate
+            // boolean flag (rather than overloading a null 'photo') so
+            // "didn't touch the photo field" and "explicitly clear it"
+            // stay distinguishable.
+            'photo' => ['nullable', 'image', 'max:2048'],
+            'remove_photo' => ['nullable', 'boolean'],
             // STRONG tier — this is a user setting their OWN password
             // (voluntary self-service change), so it goes through
             // PasswordPolicyService like every other self-set-password
@@ -266,6 +275,21 @@ class UsersController extends Controller
             'suffix' => $validated['suffix'] ?? null,
             'email' => $validated['email'],
         ]);
+
+        // New photo replaces (and deletes) any existing one. An explicit
+        // "remove_photo" clears it without a replacement. Neither
+        // touches profile_photo_path when the user didn't interact with
+        // the photo field at all, so the rest of the form can still be
+        // saved on its own.
+        if ($request->hasFile('photo')) {
+            if ($user->profile_photo_path) {
+                Storage::disk('public')->delete($user->profile_photo_path);
+            }
+            $user->profile_photo_path = $request->file('photo')->store('profile-photos', 'public');
+        } elseif ($request->boolean('remove_photo') && $user->profile_photo_path) {
+            Storage::disk('public')->delete($user->profile_photo_path);
+            $user->profile_photo_path = null;
+        }
 
         if (! empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);

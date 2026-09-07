@@ -120,7 +120,7 @@ const semesterOptions = [
 ];
 
 /* ------------------------------------------------------------------ */
-/* Academic Terms                                                      */
+/* Term Setup                                                      */
 /*                                                                      */
 /* This is the single place School Year (Start Year/End Year),         */
 /* Semester, Status, Remarks, and Scheduling Preferences are all       */
@@ -363,13 +363,13 @@ const helpPopover = ref(null);
 </script>
 
 <template>
-    <Head title="Academic Terms" />
+    <Head title="Term Setup" />
 
     <AppLayout>
         <Toast />
 
         <template #header>
-            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Academic Terms</span>
+            <span class="text-lg font-semibold" :class="isDark ? 'text-white' : 'text-[#1E293B]'">Term Setup</span>
         </template>
 
         <div class="max-w-7xl mx-auto w-full">
@@ -385,9 +385,9 @@ const helpPopover = ref(null);
                 </div>
                 <div class="relative rounded-2xl p-6 transition-colors duration-300">
                 <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2" :class="isDark ? 'text-white' : 'text-[#1E293B]'">
-                    Academic Terms
+                    Term Setup
                     <InfoPopover
-                        title="Academic Terms"
+                        title="Term Setup"
                         :paragraphs="[
                             'Manages the school\'s academic terms — School Year, Semester, and Scheduling Preferences — used by the scheduling system.',
                         ]"
@@ -425,7 +425,7 @@ const helpPopover = ref(null);
                 </div>
             </Popover>
 
-            <!-- Academic Terms -->
+            <!-- Term Setup -->
             <div class="neu-card rounded-2xl transition-colors duration-300">
                 <Card
                     class="!rounded-2xl !bg-transparent !border-0 !shadow-none"
@@ -462,7 +462,7 @@ const helpPopover = ref(null);
                         </template>
                     </Toolbar>
 
-                    <!-- Academic Terms Table -->
+                    <!-- Term Setup Table -->
                     <DataTable
                         :value="academicTerms.data"
                         :loading="academicTermLoading"

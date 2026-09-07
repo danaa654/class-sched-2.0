@@ -47,6 +47,19 @@
 
         .totals { margin-top: 14px; font-size: 11.5px; text-align: right; font-weight: 700; color: #1e293b; }
 
+        /* Faculty schedule sign-off — table-based (not flex) because
+           DomPDF's CSS support doesn't reliably handle flexbox; this
+           mirrors the print view's 3-column "Confirmed / Noted /
+           Approved by" layout using a plain table instead. */
+        table.signoff { width: 100%; margin-top: 34px; table-layout: fixed; }
+        table.signoff td { vertical-align: top; padding: 0 10px; font-size: 10.5px; }
+        table.signoff td:first-child { padding-left: 0; }
+        table.signoff td:last-child { padding-right: 0; }
+        .signoff-label { color: #94a3b8; font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 24px; }
+        .signoff-entry { margin-bottom: 18px; }
+        .signoff-name { border-top: 1px solid #334155; padding-top: 4px; margin: 0; font-weight: 700; color: #1e293b; }
+        .signoff-role { font-size: 9px; color: #64748b; margin: 1px 0 0; }
+
         .footer { margin-top: 24px; font-size: 9px; color: #94a3b8; text-align: right; }
     </style>
 </head>
@@ -104,6 +117,44 @@
     </table>
 
     <div class="totals">Total Teaching Hours: {{ number_format($totalHours, 1) }}</div>
+
+    <table class="signoff">
+        <tr>
+            <td style="width: 34%;">
+                <p class="signoff-label">Confirmed by</p>
+                <p class="signoff-name">{{ $faculty->full_name }}</p>
+                <p class="signoff-role">Faculty</p>
+            </td>
+            <td style="width: 33%;">
+                <p class="signoff-label">Noted by</p>
+                @forelse(($deans ?? []) as $dean)
+                    <div class="signoff-entry">
+                        <p class="signoff-name">{{ $dean['name'] }}</p>
+                        <p class="signoff-role">{{ $dean['role'] }}, {{ $dean['college'] }}</p>
+                    </div>
+                @empty
+                    <div class="signoff-entry">
+                        <p class="signoff-name">&nbsp;</p>
+                        <p class="signoff-role">Dean</p>
+                    </div>
+                @endforelse
+            </td>
+            <td style="width: 33%;">
+                <p class="signoff-label">Approved by</p>
+                @forelse(($approvers ?? []) as $approver)
+                    <div class="signoff-entry">
+                        <p class="signoff-name">{{ $approver['name'] }}</p>
+                        <p class="signoff-role">{{ $approver['role'] }}</p>
+                    </div>
+                @empty
+                    <div class="signoff-entry">
+                        <p class="signoff-name">&nbsp;</p>
+                        <p class="signoff-role">Registrar</p>
+                    </div>
+                @endforelse
+            </td>
+        </tr>
+    </table>
 
     <div class="footer">Generated: {{ now()->format('F j, Y g:i A') }}</div>
 </body>

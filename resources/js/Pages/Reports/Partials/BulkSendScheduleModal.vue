@@ -89,13 +89,14 @@ function confirmSend() {
 .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 27, 61, 0.45); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal-card { background: #fff; border-radius: 10px; padding: 24px; width: 440px; max-width: 92vw; }
 .modal-title { margin: 0 0 16px; font-size: 18px; font-weight: 700; }
-.row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
-.label { color: #6b7280; }
+.row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 14px; }
+.row > span:last-child { min-width: 0; text-align: right; overflow-wrap: anywhere; }
+.label { color: #6b7280; flex-shrink: 0; }
 .banner { margin-top: 14px; padding: 10px 12px; border-radius: 8px; font-size: 13px; }
 .banner-info { background: #eef4ff; border: 1px solid #bcd3ff; color: #1e3a8a; }
 .banner-error { background: #fdecec; border: 1px solid #f5b5b5; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-.btn { padding: 8px 16px; border-radius: 8px; font-size: 14px; border: none; cursor: pointer; }
+.btn { padding: 8px 16px; border-radius: 12px; font-size: 14px; border: none; cursor: pointer; }
 .btn-secondary { background: #f1f3f9; color: #1f2937; }
 .btn-primary { background: #16a34a; color: #fff; }
 .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }

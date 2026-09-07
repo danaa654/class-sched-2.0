@@ -188,13 +188,42 @@ const accountForm = useForm({
     last_name: page.props.auth?.user?.last_name ?? '',
     suffix: page.props.auth?.user?.suffix ?? '',
     email: page.props.auth?.user?.email ?? '',
+    photo: null,
+    remove_photo: false,
     password: '',
     password_confirmation: '',
 });
+// Local preview URL for a newly-picked (not yet saved) photo file —
+// separate from the saved auth.user.profile_photo_url so the avatar
+// updates instantly on selection without waiting on a round trip.
+const photoPreviewUrl = ref(null);
+const photoInput = ref(null);
+const onPhotoSelected = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    accountForm.photo = file;
+    accountForm.remove_photo = false;
+    photoPreviewUrl.value = URL.createObjectURL(file);
+};
+const onRemovePhoto = () => {
+    accountForm.photo = null;
+    accountForm.remove_photo = true;
+    photoPreviewUrl.value = null;
+    if (photoInput.value) photoInput.value.value = '';
+};
+const accountAvatarUrl = computed(() => (accountForm.remove_photo ? null : (photoPreviewUrl.value ?? page.props.auth?.user?.profile_photo_url ?? null)));
+const accountInitials = computed(() => `${accountForm.first_name?.charAt(0) ?? ''}${accountForm.last_name?.charAt(0) ?? ''}`.toUpperCase());
 const onUpdateAccount = () => {
     accountForm.transform((data) => ({ ...data, _method: 'put' })).post(route('account.update'), {
         preserveScroll: true,
-        onSuccess: () => { accountForm.password = ''; accountForm.password_confirmation = ''; },
+        forceFormData: true,
+        onSuccess: () => {
+            accountForm.password = '';
+            accountForm.password_confirmation = '';
+            accountForm.photo = null;
+            accountForm.remove_photo = false;
+            photoPreviewUrl.value = null;
+        },
         onError,
     });
 };
@@ -226,7 +255,7 @@ const onUpdateAccount = () => {
                             'System-wide configuration that controls how scheduling behaves — not the data itself (Faculty, Rooms, Subjects, Sections, and Curriculum each have their own pages).',
                         ]"
                         :bullets="[
-                            'Academic — a read-only summary of the daily class window and available scheduling days; managed on the Academic Terms page.',
+                            'Academic — a read-only summary of the daily class window and available scheduling days; managed on the Term Setup page.',
                             'Changing these settings affects future scheduling; it does not retroactively change schedules already saved.',
                         ]"
                     />
@@ -298,12 +327,12 @@ const onUpdateAccount = () => {
                             <template #content>
                                 <div class="flex items-center justify-between mb-1">
                                     <h2 class="text-lg font-bold text-[#1E293B]">Scheduling Window &amp; Calendar</h2>
-                                    <Tag severity="info" value="Managed in Academic Calendar" />
+                                    <Tag severity="info" value="Managed in Term Setup" />
                                 </div>
                                 <p class="text-sm text-slate-500 mb-4">
                                     Class Start/End Time, Time Interval, and Working Days already live on the
                                     Active School Year so the Auto Schedule engine has one source of truth. Change them from the
-                                    Academic Calendar page — Settings only shows the current values here.
+                                    Term Setup page — Settings only shows the current values here.
                                 </p>
                                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
                                     <div><span class="text-slate-400 block">Active School Year</span>{{ schoolYear.name }}</div>
@@ -311,7 +340,7 @@ const onUpdateAccount = () => {
                                     <div><span class="text-slate-400 block">Time Interval</span>{{ schoolYear.time_interval }} minutes</div>
                                     <div class="sm:col-span-2"><span class="text-slate-400 block">Working Days</span>{{ schoolYear.available_days.join(', ') }}</div>
                                 </div>
-                                <Button as="a" :href="route('academic-calendar')" label="Open Academic Calendar" icon="pi pi-external-link" text class="!mt-4 !px-0" />
+                                <Button as="a" :href="route('academic-calendar')" label="Open Term Setup" icon="pi pi-external-link" text class="!mt-4 !px-0" />
                             </template>
                         </Card>
                         </div>
@@ -568,6 +597,22 @@ const onUpdateAccount = () => {
                                 <p class="text-sm text-slate-500 mb-5">Update your own profile and change your password.</p>
 
                                 <form class="pt-1" autocomplete="off" @submit.prevent="onUpdateAccount">
+                                    <div class="flex items-center gap-4 mb-6">
+                                        <div class="relative shrink-0">
+                                            <img v-if="accountAvatarUrl" :src="accountAvatarUrl" class="h-16 w-16 rounded-full object-cover border border-slate-200" alt="Profile photo" />
+                                            <span v-else class="flex h-16 w-16 items-center justify-center rounded-full bg-slate-200 text-lg font-bold text-slate-600">{{ accountInitials }}</span>
+                                        </div>
+                                        <div>
+                                            <input ref="photoInput" type="file" accept="image/*" class="hidden" @change="onPhotoSelected" />
+                                            <div class="flex gap-2">
+                                                <Button type="button" label="Upload Photo" icon="pi pi-camera" size="small" outlined @click="photoInput?.click()" />
+                                                <Button v-if="accountAvatarUrl" type="button" label="Remove" icon="pi pi-trash" size="small" text severity="danger" @click="onRemovePhoto" />
+                                            </div>
+                                            <p class="text-xs text-slate-400 mt-1">JPG or PNG, up to 2MB.</p>
+                                            <small v-if="accountForm.errors.photo" class="text-red-500 block">{{ accountForm.errors.photo }}</small>
+                                        </div>
+                                    </div>
+
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                         <FloatLabel variant="on">
                                             <InputText v-uppercase id="accFirstName" size="large" v-model="accountForm.first_name" class="w-full" autocomplete="off" :invalid="!!accountForm.errors.first_name" />

@@ -29,6 +29,11 @@ const iconFor = (type) => ({
     AUTO_SCHEDULE_NEEDS_ATTENTION: '🛠️',
 }[type] ?? '🔔');
 
+// Falls back to initials when the actor has no uploaded photo — same
+// "first + last initial" convention as the sidebar/Manage Account
+// avatars elsewhere in the app.
+const actorInitials = (actor) => `${actor.first_name?.charAt(0) ?? actor.name?.charAt(0) ?? ''}${actor.last_name?.charAt(0) ?? ''}`.toUpperCase();
+
 function setFilter(value) {
     router.get(route('notifications'), { filter: value }, { preserveState: true, preserveScroll: true });
 }
@@ -103,8 +108,22 @@ async function deleteNotification(notification) {
                         @keydown.enter="openNotification(notification)"
                     >
                         <span class="flex items-center gap-2 pr-8 text-sm font-semibold" :class="isDark ? 'text-white' : 'text-slate-800'">
-                            <span>{{ iconFor(notification.type) }}</span>
+                            <img
+                                v-if="notification.actor?.profile_photo_url"
+                                :src="notification.actor.profile_photo_url"
+                                alt=""
+                                class="h-6 w-6 shrink-0 rounded-full object-cover"
+                            />
+                            <span
+                                v-else-if="notification.actor"
+                                class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                                :class="isDark ? 'bg-white/10' : 'bg-slate-400'"
+                            >
+                                {{ actorInitials(notification.actor) }}
+                            </span>
+                            <span v-else>{{ iconFor(notification.type) }}</span>
                             <span>{{ notification.title }}</span>
+                            <span v-if="notification.actor" class="font-normal" :class="isDark ? 'text-slate-500' : 'text-slate-400'">— {{ notification.actor.name }}</span>
                             <span v-if="!notification.is_read" class="ml-auto h-2 w-2 shrink-0 rounded-full bg-blue-500"></span>
                         </span>
                         <span class="whitespace-pre-line pr-8 text-sm" :class="isDark ? 'text-slate-300' : 'text-slate-600'">{{ notification.message }}</span>

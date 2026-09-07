@@ -23,6 +23,7 @@ import TabPanel from 'primevue/tabpanel';
 import Toast from 'primevue/toast';
 import ProgressBar from 'primevue/progressbar';
 import InfoPopover from '@/Components/InfoPopover.vue';
+import SendScheduleModal from '@/Pages/Reports/Partials/SendScheduleModal.vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { theme } = useTheme();
@@ -33,6 +34,13 @@ const props = defineProps({
     colleges: { type: Array, default: () => [] },
     subjects: { type: Array, default: () => [] },
     hardCapUnits: { type: Number, default: 40 },
+    // Term-scoped data backing the Workload tab's Print / Send via Email
+    // buttons — same underlying flow as Reports > Schedule by Faculty's
+    // single-faculty send, see FacultyController@show.
+    scheduleMeta: {
+        type: Object,
+        default: () => ({ academic_term_id: null, academic_year: null, semester: null, is_finalized: false }),
+    },
 });
 
 const toast = useToast();
@@ -63,6 +71,41 @@ const fullName = computed(() => {
     const suffix = props.faculty.suffix ? ` ${props.faculty.suffix}` : '';
     return `${props.faculty.last_name}, ${props.faculty.first_name}${middleInitial}${suffix}`;
 });
+
+/* ------------------------------------------------------------------ */
+/* Workload tab — Print / Send via Email (mirrors Reports > Schedule    */
+/* by Faculty's single-faculty flow, scoped to whichever term this     */
+/* user is currently viewing rather than a report filter).             */
+/* ------------------------------------------------------------------ */
+const showSendScheduleModal = ref(false);
+
+const sendScheduleFaculty = computed(() => ({
+    id: props.faculty.id,
+    full_name: fullName.value,
+    faculty_id: props.faculty.faculty_id,
+    email: props.faculty.email,
+}));
+
+const sendScheduleTerm = computed(() => {
+    if (!props.scheduleMeta.academic_term_id) return null;
+    return {
+        id: props.scheduleMeta.academic_term_id,
+        label: `${props.scheduleMeta.academic_year} · ${props.scheduleMeta.semester}`,
+    };
+});
+
+function printFacultySchedule() {
+    if (!props.scheduleMeta.academic_year) return;
+    window.open(
+        route('reports.print', {
+            report_type: 'schedule_by_faculty',
+            faculty_id: [props.faculty.id],
+            academic_year: props.scheduleMeta.academic_year,
+            semester: props.scheduleMeta.semester,
+        }),
+        '_blank',
+    );
+}
 
 /* ------------------------------------------------------------------ */
 /* Information tab                                                     */
@@ -743,6 +786,24 @@ const saveEditPlacement = async (placement, confirmedKeys = {}) => {
 
                             <!-- WORKLOAD -->
                             <TabPanel value="workload">
+                                <div class="mb-4 flex items-center justify-end gap-2">
+                                    <Button
+                                        label="Print"
+                                        icon="pi pi-print"
+                                        severity="secondary"
+                                        outlined
+                                        :disabled="!scheduleMeta.academic_year"
+                                        title="Print this faculty member's schedule (Schedule by Faculty report)."
+                                        @click="printFacultySchedule"
+                                    />
+                                    <Button
+                                        label="Send via Email"
+                                        icon="pi pi-send"
+                                        severity="success"
+                                        :disabled="!scheduleMeta.academic_year"
+                                        @click="showSendScheduleModal = true"
+                                    />
+                                </div>
                                 <div
                                     class="mb-6 flex items-center justify-between rounded-xl p-4 neu-inset"
                                     :class="workloadStatusMeta.class"
@@ -1125,6 +1186,15 @@ const saveEditPlacement = async (placement, confirmedKeys = {}) => {
                 <Button label="Save Changes" icon="pi pi-check" severity="success" :loading="facultyForm.processing" @click="onSaveFaculty" />
             </template>
         </Dialog>
+
+        <SendScheduleModal
+            :show="showSendScheduleModal"
+            :faculty="sendScheduleFaculty"
+            :academic-term="sendScheduleTerm"
+            :is-finalized="scheduleMeta.is_finalized"
+            @close="showSendScheduleModal = false"
+            @sent="showSendScheduleModal = false"
+        />
 
     </AppLayout>
 </template>

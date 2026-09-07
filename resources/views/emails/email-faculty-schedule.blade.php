@@ -37,7 +37,7 @@
 
                 <p>If there are any concerns regarding your schedule, please contact the appropriate academic office.</p>
 
-                <p style="margin-top:24px;">Regards,<br><strong>CLASSLY</strong><br>Academic Scheduling System</p>
+                <p style="margin-top:24px;">Regards,<br><strong>{{ $senderName }}</strong><br>{{ $schoolName }}</p>
             </td>
         </tr>
     </table>

@@ -1595,6 +1595,24 @@ const validateRowsClientSide = () => {
     return valid;
 };
 
+// Opens the same server-rendered, branded printable page the Reports
+// page's own Print button uses (ReportsController::print() /
+// resources/views/reports/print.blade.php) — scoped to just this
+// Section via the "Schedule by Section" report type, so it always
+// reflects whatever's actually saved for this section rather than a
+// screenshot of this editing screen.
+const printSectionSchedule = () => {
+    window.open(
+        route('reports.print', {
+            report_type: 'schedule_by_section',
+            section_id: props.section.id,
+            academic_year: props.section.academic_year,
+            semester: props.section.semester,
+        }),
+        '_blank',
+    );
+};
+
 const saveSchedule = async () => {
     if (rows.value.length === 0) {
         return;
@@ -2943,7 +2961,7 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         </ul>
                     </div>
                 </Popover>
-                <div class="flex items-center gap-3 shrink-0">
+                <div class="flex items-center gap-3 shrink-0 section-actions">
                     <span v-if="hasUnsavedChanges" class="text-sm text-amber-600 font-medium whitespace-nowrap">
                         <i class="pi pi-circle-fill text-[6px] align-middle mr-1"></i>Unsaved changes
                     </span>
@@ -2967,6 +2985,14 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
                         :disabled="rows.length === 0 || isSectionFinalized"
                         :title="isSectionFinalized ? 'This section is finalized and locked.' : 'Wipe every subject\'s Faculty, Room, Day, and Time — including already-saved schedules.'"
                         @click="clearWholeSchedule"
+                    />
+                    <Button
+                        label="Print"
+                        icon="pi pi-print"
+                        severity="info"
+                        outlined
+                        title="Print this section's schedule (Schedule by Section report)."
+                        @click="printSectionSchedule"
                     />
                     <Button
                         :label="autoGenerateButtonLabel"
@@ -4466,6 +4492,13 @@ const categorySeverity = (category) => (category === 'Major' ? 'info' : 'seconda
 </template>
 
 <style scoped>
+/* Header action buttons (Discard/Clear/Print/Auto Generate/Save) —
+   fuller pill radius than the site-wide 8px default so this busy
+   button row reads as one cohesive, more modern group. */
+.section-actions :deep(.p-button) {
+    border-radius: 9999px !important;
+}
+
 /* Conflicted rows (red) are click-to-resolve — opens the Smart
    Schedule Recommendation drawer for that row (see openRecommendDrawer). */
 .schedule-table :deep(.conflict-row-clickable) {

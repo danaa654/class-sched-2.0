@@ -96,6 +96,11 @@ const iconFor = (type) => ({
     PASSWORD_CHANGE_REQUIRED: '🔑',
 }[type] ?? '🔔');
 
+// Falls back to initials when the actor has no uploaded photo — same
+// "first + last initial" convention as the sidebar/Manage Account
+// avatars elsewhere in the app.
+const actorInitials = (actor) => `${actor.first_name?.charAt(0) ?? actor.name?.charAt(0) ?? ''}${actor.last_name?.charAt(0) ?? ''}`.toUpperCase();
+
 const PRIORITY_COLORS = {
     INFO: 'bg-slate-400',
     IMPORTANT: 'bg-blue-500',
@@ -183,7 +188,16 @@ onUnmounted(() => {
                     :class="!notification.is_read ? 'neu-item--unread' : ''"
                 >
                     <button type="button" class="flex min-w-0 flex-1 items-start gap-3 text-left" @click="openNotification(notification)">
-                        <span class="neu-icon-chip flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px]">
+                        <img
+                            v-if="notification.actor?.profile_photo_url"
+                            :src="notification.actor.profile_photo_url"
+                            alt=""
+                            class="h-9 w-9 shrink-0 rounded-full object-cover"
+                        />
+                        <span v-else-if="notification.actor" class="neu-icon-chip flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white">
+                            {{ actorInitials(notification.actor) }}
+                        </span>
+                        <span v-else class="neu-icon-chip flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px]">
                             {{ iconFor(notification.type) }}
                         </span>
                         <span class="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -196,6 +210,7 @@ onUnmounted(() => {
                                     :title="notification.priority"
                                 ></span>
                             </span>
+                            <span v-if="notification.actor" class="truncate text-[11px] font-medium text-slate-400">{{ notification.actor.name }}</span>
                             <span class="whitespace-pre-line text-xs leading-snug text-slate-300">{{ notification.message }}</span>
                             <span class="text-[11px] text-slate-500">{{ timeAgo(notification.created_at) }}</span>
                         </span>

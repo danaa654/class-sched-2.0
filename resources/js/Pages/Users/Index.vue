@@ -377,9 +377,32 @@ const accountForm = useForm({
     last_name: page.props.auth?.user?.last_name ?? '',
     suffix: page.props.auth?.user?.suffix ?? '',
     email: page.props.auth?.user?.email ?? '',
+    photo: null,
+    remove_photo: false,
     password: '',
     password_confirmation: '',
 });
+
+// Local preview URL for a newly-picked (not yet saved) photo file —
+// separate from the saved auth.user.profile_photo_url so the avatar
+// updates instantly on selection without waiting on a round trip.
+const photoPreviewUrl = ref(null);
+const photoInput = ref(null);
+const onPhotoSelected = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    accountForm.photo = file;
+    accountForm.remove_photo = false;
+    photoPreviewUrl.value = URL.createObjectURL(file);
+};
+const onRemovePhoto = () => {
+    accountForm.photo = null;
+    accountForm.remove_photo = true;
+    photoPreviewUrl.value = null;
+    if (photoInput.value) photoInput.value.value = '';
+};
+const accountAvatarUrl = computed(() => (accountForm.remove_photo ? null : (photoPreviewUrl.value ?? page.props.auth?.user?.profile_photo_url ?? null)));
+const accountInitials = computed(() => `${accountForm.first_name?.charAt(0) ?? ''}${accountForm.last_name?.charAt(0) ?? ''}`.toUpperCase());
 
 const onUpdateAccount = () => {
     accountForm.transform((data) => ({
@@ -387,9 +410,13 @@ const onUpdateAccount = () => {
         _method: 'put',
     })).post(route('account.update'), {
         preserveScroll: true,
+        forceFormData: true,
         onSuccess: () => {
             accountForm.password = '';
             accountForm.password_confirmation = '';
+            accountForm.photo = null;
+            accountForm.remove_photo = false;
+            photoPreviewUrl.value = null;
         },
         onError: () => {
             toast.add({
@@ -578,6 +605,22 @@ const onUpdateAccount = () => {
                                 </p>
 
                                 <form class="pt-1 neu-form" autocomplete="off" @submit.prevent="onUpdateAccount">
+                                    <div class="flex items-center gap-4 mb-6">
+                                        <div class="relative shrink-0">
+                                            <img v-if="accountAvatarUrl" :src="accountAvatarUrl" class="h-16 w-16 rounded-full object-cover border border-slate-200" alt="Profile photo" />
+                                            <span v-else class="flex h-16 w-16 items-center justify-center rounded-full bg-slate-200 text-lg font-bold text-slate-600">{{ accountInitials }}</span>
+                                        </div>
+                                        <div>
+                                            <input ref="photoInput" type="file" accept="image/*" class="hidden" @change="onPhotoSelected" />
+                                            <div class="flex gap-2">
+                                                <Button type="button" label="Upload Photo" icon="pi pi-camera" size="small" outlined @click="photoInput?.click()" />
+                                                <Button v-if="accountAvatarUrl" type="button" label="Remove" icon="pi pi-trash" size="small" text severity="danger" @click="onRemovePhoto" />
+                                            </div>
+                                            <p class="text-xs mt-1" :class="isDark ? 'text-slate-500' : 'text-slate-400'">JPG or PNG, up to 2MB.</p>
+                                            <small v-if="accountForm.errors.photo" class="text-red-500 block">{{ accountForm.errors.photo }}</small>
+                                        </div>
+                                    </div>
+
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                         <FloatLabel variant="on">
                                             <InputText

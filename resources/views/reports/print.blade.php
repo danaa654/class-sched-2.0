@@ -143,8 +143,67 @@
             margin-top: 20px;
             display: flex;
             justify-content: space-between;
+            align-items: flex-end;
             font-size: 10px;
             color: #94a3b8;
+        }
+
+        .footer-left {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .footer-registrar {
+            color: #64748b;
+            font-weight: 600;
+        }
+
+        /* Faculty schedule sign-off — "Confirmed by" (the faculty
+           member themselves) on the left, "Noted by" (the Dean/OIC of
+           every College the faculty has a subject under) on the right.
+           Only rendered for schedule_by_faculty, both for a single
+           faculty and for each per-faculty page-break block below. */
+        .signoff {
+            margin-top: 48px;
+            display: flex;
+            justify-content: space-between;
+            gap: 32px;
+            page-break-inside: avoid;
+        }
+
+        .signoff-col {
+            flex: 1;
+            font-size: 11px;
+        }
+
+        .signoff-label {
+            color: #94a3b8;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 28px;
+        }
+
+        .signoff-name {
+            border-top: 1px solid #334155;
+            padding-top: 4px;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .signoff-role {
+            font-size: 10px;
+            color: #64748b;
+            margin-top: 1px;
+        }
+
+        .signoff-entry {
+            margin-bottom: 22px;
+        }
+
+        .signoff-entry:last-child {
+            margin-bottom: 0;
         }
 
         @media print {
@@ -324,6 +383,8 @@
                         </tbody>
                     </table>
                 @endif
+
+                @include('reports.partials.faculty-signoff', ['facultyName' => $group['label'], 'deans' => $group['deans'] ?? [], 'approvers' => $group['approvers'] ?? []])
             </div>
         @endforeach
 
@@ -350,10 +411,19 @@
             </tbody>
         </table>
 
+        @if($reportType === 'schedule_by_faculty' && !empty($report['facultyMeta']))
+            @include('reports.partials.faculty-signoff', ['facultyName' => $report['facultyMeta']['full_name'], 'deans' => $report['facultyMeta']['deans'] ?? [], 'approvers' => $report['facultyMeta']['approvers'] ?? []])
+        @endif
+
     @endif
 
     <div class="footer">
-        <span>Classly — Scheduling System</span>
+        <div class="footer-left">
+            <span>Classly — Scheduling System</span>
+            @if($signerName && $signerRole)
+                <span class="footer-registrar">{{ $signerRole }}: {{ $signerName }}</span>
+            @endif
+        </div>
         <span>Generated: {{ $generatedAt->format('F j, Y g:i A') }}</span>
     </div>
 

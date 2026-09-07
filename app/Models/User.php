@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
@@ -27,11 +28,25 @@ class User extends Authenticatable
         'middle_name',
         'last_name',
         'suffix',
+        'profile_photo_path',
         'email',
         'password',
         'status',
         'college_id',
         'department_id',
+    ];
+
+    /**
+     * Appended to every serialized User (including the "auth.user" prop
+     * shared on every Inertia page — see HandleInertiaRequests) so the
+     * frontend never has to build the storage URL itself. Absent/null
+     * whenever no photo has been uploaded — the UI falls back to
+     * showing the user's initials.
+     *
+     * @var list<string>
+     */
+    protected $appends = [
+        'profile_photo_url',
     ];
 
     /**
@@ -43,6 +58,22 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    /**
+     * Public URL for the user's uploaded profile photo, or null if
+     * they haven't uploaded one. Stored on the "public" disk (see
+     * config/filesystems.php) — requires `php artisan storage:link`
+     * to have been run so storage/app/public is reachable at
+     * public/storage.
+     */
+    protected function profilePhotoUrl(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->profile_photo_path
+                ? Storage::disk('public')->url($this->profile_photo_path)
+                : null,
+        );
+    }
 
     /**
      * The college this user (Dean / OIC) is assigned to.

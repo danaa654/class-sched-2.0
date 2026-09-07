@@ -43,12 +43,12 @@ const userManagementItems = [
 // Academic Setup — everything that defines the academic environment
 // (school year/semester/rules, colleges/departments/programs, the
 // curriculum map, and subject records) before scheduling can begin.
-// Academic Calendar/Structure/Curriculum are Admin/Registrar-only
+// Term Setup/Structure/Curriculum are Admin/Registrar-only
 // (spec Section 21); Subjects stays visible to every scheduling role
 // since Assistant Dean/Dean/OIC all need to browse it (write access
 // is enforced per-row by the backend regardless).
 const academicSetupItems = computed(() => [
-    ...(can.value.manageAcademicCalendar ? [{ label: 'Academic Terms', route: 'academic-calendar', icon: 'pi pi-calendar' }] : []),
+    ...(can.value.manageAcademicCalendar ? [{ label: 'Term Setup', route: 'academic-calendar', icon: 'pi pi-calendar' }] : []),
     ...(can.value.manageAcademicStructure ? [{ label: 'Academic Structure', route: 'academic-structure', icon: 'pi pi-sitemap' }] : []),
     ...(can.value.manageCurriculum ? [{ label: 'Curriculum', route: 'curriculums', icon: 'pi pi-book' }] : []),
     { label: 'Subjects', route: 'subjects', icon: 'pi pi-bookmark' },
@@ -270,7 +270,10 @@ const isActive = (routeName) => {
             <!-- User / Logout footer -->
             <div v-if="user" class="w-[200px] shrink-0 px-2 pb-3 pt-2">
                 <div class="neu-navy-inset neu-user-card flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-all duration-200">
-                    <span class="neu-navy-raised flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white">
+                    <span v-if="user.profile_photo_url" class="h-8 w-8 shrink-0 overflow-hidden rounded-full">
+                        <img :src="user.profile_photo_url" alt="Profile photo" class="h-full w-full object-cover" />
+                    </span>
+                    <span v-else class="neu-navy-raised flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white">
                         {{ user.name?.charAt(0)?.toUpperCase() }}
                     </span>
                     <div class="min-w-0 flex-1">

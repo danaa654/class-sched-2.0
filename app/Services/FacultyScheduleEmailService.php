@@ -58,7 +58,7 @@ class FacultyScheduleEmailService
             ->where('faculty_id', $faculty->id)
             ->where('is_merged', false)
             ->whereIn('section_id', $sectionIds)
-            ->with(['section.major', 'subject', 'room'])
+            ->with(['section.major.department.college', 'subject', 'room'])
             ->get();
     }
 

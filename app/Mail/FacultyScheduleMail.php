@@ -3,7 +3,9 @@
 namespace App\Mail;
 
 use App\Models\FacultyScheduleEmail;
+use App\Services\FacultyScheduleEmailService;
 use App\Services\SettingsService;
+use App\Services\SignoffService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -53,6 +55,15 @@ class FacultyScheduleMail extends Mailable
                 'faculty' => $this->record->faculty,
                 'term' => $this->record->academicTerm,
                 'isUpdate' => $this->record->email_type === 'updated',
+                // Sign-off at the bottom of the email body — the actual
+                // person who clicked "Send via Email" (Admin, Registrar,
+                // Dean, or OIC), not a generic "CLASSLY" signature, plus
+                // the school's own name so the email reads as coming
+                // from the institution's scheduling office rather than
+                // from the software itself.
+                'senderName' => $this->record->sentBy?->full_name ?? $this->record->sentBy?->name ?? 'CLASSLY',
+                'schoolName' => app(SettingsService::class)->group('general')['general.school_name']
+                    ?: config('app.name', 'Classly'),
             ],
         );
     }
@@ -62,16 +73,30 @@ class FacultyScheduleMail extends Mailable
         $schoolName = app(SettingsService::class)->group('general')['general.school_name']
             ?: config('app.name', 'Classly');
 
+        $faculty = $this->record->faculty;
+        $term = $this->record->academicTerm;
+
+        // Freshly resolved from the faculty's CURRENT SectionSubject
+        // rows (not the stored schedule_snapshot array, which has no
+        // Section/College relation to walk) — same source ReportsService
+        // uses for the printed report's identical sign-off block, via
+        // the shared SignoffService, so neither document can ever list
+        // a different Dean/Approver set for the same faculty+term.
+        $sectionSubjects = app(FacultyScheduleEmailService::class)->scheduleRows($faculty, $term);
+        $signoff = app(SignoffService::class);
+
         $pdf = Pdf::loadView('pdf.pdf-faculty-schedule', [
             'record' => $this->record,
-            'faculty' => $this->record->faculty,
-            'term' => $this->record->academicTerm,
+            'faculty' => $faculty,
+            'term' => $term,
             'rows' => $this->record->schedule_snapshot ?? [],
             'schoolName' => $schoolName,
             // Always the bundled public/logo.png, embedded as a base64
             // data URI (DomPDF can't reliably fetch a URL, and needs a
             // static asset it can process through GD either way).
             'schoolLogoDataUri' => $this->logoDataUri(),
+            'deans' => $signoff->deansForColleges($sectionSubjects),
+            'approvers' => $signoff->approvers(),
         ])->setPaper('a4', 'portrait');
 
         return [

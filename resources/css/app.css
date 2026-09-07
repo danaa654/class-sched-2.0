@@ -757,7 +757,7 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 
 /* ---- Global button styling: quiet depth, not 3D (site-wide) ---- */
 .p-button:not(.p-button-text):not(.p-button-link) {
-    border-radius: 8px !important;
+    border-radius: 12px !important;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
     transition: box-shadow 0.15s ease, background-color 0.15s ease, border-color 0.15s ease !important;
 }
@@ -790,7 +790,7 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 
 /* Outlined buttons: flat, border does the work */
 .p-button.p-button-outlined {
-    border-radius: 8px !important;
+    border-radius: 12px !important;
     box-shadow: none !important;
     transition: background-color 0.15s ease, border-color 0.15s ease !important;
 }
@@ -806,7 +806,7 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 /* Text/link buttons: keep flat, just round the hit area on hover */
 .p-button.p-button-text,
 .p-button.p-button-link {
-    border-radius: 8px !important;
+    border-radius: 12px !important;
 }
 /* =========================================================================
    Neumorphism (soft UI) utilities

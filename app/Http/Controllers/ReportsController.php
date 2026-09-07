@@ -113,8 +113,19 @@ class ReportsController extends Controller
 
         $general = $this->settings->group('general');
 
+        $report = $reportType !== '' ? $this->reports->generate($reportType, $cleanFilters) : null;
+
+        // "Study Load" is the school's own term for a per-section printout
+        // (what the Reports page still calls "Schedule by Section" in its
+        // filter dropdown and on-screen results) — swapped only on this
+        // printable copy so the change doesn't ripple into the Reports
+        // page's dropdown label, on-screen heading, or CSV export filename.
+        if ($reportType === 'schedule_by_section' && $report) {
+            $report['title'] = 'Study Load';
+        }
+
         return view('reports.print', [
-            'report' => $reportType !== '' ? $this->reports->generate($reportType, $cleanFilters) : null,
+            'report' => $report,
             'reportType' => $reportType,
             'academicYear' => $filters['academic_year'],
             'semester' => $filters['semester'],
@@ -126,6 +137,18 @@ class ReportsController extends Controller
             // never errors or shows a broken image.
             'schoolName' => $general['general.school_name'] ?: config('app.name', 'Classly'),
             'schoolLogoUrl' => $general['general.school_logo_path'] ?: null,
+            // Whoever is actually printing this signs the document under
+            // their own role label (Admin/Registrar/Dean/OIC can all reach
+            // this page) rather than always "Registrar" — falls back to
+            // "Admin" for the Administrator role's shorter on-screen name,
+            // and is blank (never guessed) if somehow unauthenticated or
+            // roleless.
+            'signerRole' => match (true) {
+                ! $request->user() => null,
+                $request->user()->hasRole('Administrator') => 'Admin',
+                default => $request->user()->getRoleNames()->first(),
+            },
+            'signerName' => $request->user()?->name,
         ]);
     }
 

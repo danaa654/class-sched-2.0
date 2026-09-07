@@ -60,6 +60,7 @@ class ReportsService
     public function __construct(
         private readonly ScheduleConflictService $conflicts,
         private readonly FacultyScheduleEmailService $facultyScheduleEmail,
+        private readonly SignoffService $signoff,
     ) {}
 
     /**
@@ -306,7 +307,7 @@ class ReportsService
             // keeps this report's counts consistent with the Workload
             // tab instead of double-listing/double-counting the class.
             ->whereNull('merged_into_section_subject_id')
-            ->with('mergedPlacements.section:id,section_code')
+            ->with(['mergedPlacements.section:id,section_code', 'section.major.department.college'])
             // The College/Program filter on this report means "faculty
             // whose own home college/department is this one" — NOT
             // "sections belonging to this college". Without this, a CCS
@@ -330,7 +331,13 @@ class ReportsService
             $query->whereNotNull('faculty_id');
         }
 
-        $rows = $query->get()->map(function (SectionSubject $ss) {
+        // Captured once so both the printed table rows AND the "Noted
+        // by" Dean signatories (below) are derived from the exact same
+        // matched set — never two separate queries that could drift
+        // apart if run at slightly different times.
+        $sectionSubjects = $query->get();
+
+        $rows = $sectionSubjects->map(function (SectionSubject $ss) {
             $sectionCodes = collect([$ss->section?->section_code])
                 ->merge($ss->mergedPlacements->pluck('section.section_code'))
                 ->filter()
@@ -376,6 +383,17 @@ class ReportsService
                     'college' => $faculty->college?->name,
                     'academic_term_id' => $term?->id,
                     'is_finalized' => $term ? $this->facultyScheduleEmail->isFinalized($faculty, $term) : false,
+                    // "Noted by" signatories for the printed schedule —
+                    // the Dean/OIC of every College this faculty member
+                    // actually has a subject under this term (e.g. a
+                    // CCS-home faculty teaching a GenEd load for CTE
+                    // still gets CTE's Dean listed alongside CCS's).
+                    'deans' => $this->signoff->deansForColleges($sectionSubjects),
+                    // "Approved by" — institution-wide, not College-
+                    // scoped like Dean/OIC above, so this is the same
+                    // list regardless of which College(s) the faculty
+                    // teaches under.
+                    'approvers' => $this->signoff->approvers(),
                 ];
             }
         }
@@ -387,6 +405,7 @@ class ReportsService
         // by Section.
         if (is_array($facultyIds) && count($facultyIds) > 1) {
             $byFaculty = $rows->groupBy('Faculty');
+            $sectionSubjectsByFacultyId = $sectionSubjects->groupBy('faculty_id');
 
             $result['groups'] = collect($facultyIds)
                 ->map(fn ($id) => Faculty::query()->find($id, ['id', 'first_name', 'middle_name', 'last_name', 'suffix']))
@@ -396,6 +415,8 @@ class ReportsService
                     'academic_year' => $filters['academic_year'] ?? null,
                     'semester' => $filters['semester'] ?? null,
                     'rows' => $byFaculty->get($faculty->full_name, collect())->values()->all(),
+                    'deans' => $this->signoff->deansForColleges($sectionSubjectsByFacultyId->get($faculty->id, collect())),
+                    'approvers' => $this->signoff->approvers(),
                 ])
                 ->values()
                 ->all();

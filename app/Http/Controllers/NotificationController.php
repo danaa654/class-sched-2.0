@@ -31,7 +31,7 @@ class NotificationController extends Controller
         $notifications = Notification::query()
             ->where('recipient_user_id', $user->id)
             ->when($request->query('filter') === 'unread', fn ($query) => $query->where('is_read', false))
-            ->with(['actor:id,name,first_name,last_name,middle_name,suffix', 'section:id,section_code'])
+            ->with(['actor:id,name,first_name,last_name,middle_name,suffix,profile_photo_path', 'section:id,section_code'])
             ->latest()
             ->paginate(20)
             ->withQueryString();
@@ -54,7 +54,7 @@ class NotificationController extends Controller
 
         $notifications = Notification::query()
             ->where('recipient_user_id', $user->id)
-            ->with(['actor:id,name,first_name,last_name,middle_name,suffix', 'section:id,section_code'])
+            ->with(['actor:id,name,first_name,last_name,middle_name,suffix,profile_photo_path', 'section:id,section_code'])
             ->latest()
             ->limit(10)
             ->get();

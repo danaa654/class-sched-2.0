@@ -93,24 +93,27 @@ class SectionPolicy
      * SECTION-LEVEL SCHEDULE FINALIZATION.
      *
      * Who may lock a Section's schedule so it can no longer be
-     * edited: Registrar/Admin ONLY (Dani: restricted from
-     * manageScheduling's wider reach — Dean/OIC/Assistant Dean can
-     * schedule but not finalize/unlock). Same reach as
-     * unlockSchedule() below, deliberately — one authority owns both
-     * ends of the lock.
+     * edited: Registrar/Admin (unrestricted), plus a Dean/OIC for
+     * Sections within their own College/Department scope. This is
+     * the asymmetric half of the lock — see unlockSchedule() below,
+     * which deliberately stays Registrar/Admin-only so a Dean/OIC
+     * can't finalize, get pushback, and quietly reopen it themselves
+     * without an audit trail.
      */
     public function finalize(User $user, Section $section): bool
     {
-        return AccessScope::isUnrestricted($user);
+        return AccessScope::isUnrestricted($user)
+            || (AccessScope::isCollegeScoped($user) && AccessScope::canAccessCollege($user, $section->major?->college()?->id));
     }
 
     /**
      * Who may reverse a finalization: Registrar/Admin ONLY — never
-     * the Dean/OIC/Assistant Dean who (or whose college) finalized
-     * it. This asymmetry is deliberate and is the whole point of the
-     * feature (spec: finalization is a commitment device, not a
-     * togglable checkbox) — see the design notes shared alongside
-     * this policy.
+     * the Dean/OIC/Assistant Dean, even for a Section within their
+     * own scope, and even though Dean/OIC can now finalize() it
+     * themselves (see above). This asymmetry is deliberate and is
+     * the whole point of the feature (spec: finalization is a
+     * commitment device, not a togglable checkbox) — see the design
+     * notes shared alongside this policy.
      */
     public function unlockSchedule(User $user, Section $section): bool
     {

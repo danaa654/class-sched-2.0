@@ -72,10 +72,13 @@ const page = usePage();
 // SectionController re-derives and re-checks the College server-side
 // on every create request regardless of what's shown here.
 const scopedCollegeId = computed(() => page.props.auth?.collegeId ?? null);
-// SECTION-LEVEL SCHEDULE FINALIZATION — Registrar/Admin only, both to
-// finalize AND to unlock (SectionPolicy::finalize()/unlockSchedule()).
-// This is UI-visibility only; the Policy re-checks server-side.
-const canManageFinalization = computed(() => !!page.props.auth?.can?.manageFinalization);
+// SECTION-LEVEL SCHEDULE FINALIZATION — now asymmetric
+// (SectionPolicy::finalize()/unlockSchedule()): Finalize is open to
+// Registrar/Admin AND a Dean/OIC over their own College/Department
+// scope; Unlock stays Registrar/Admin only, deliberately. This is
+// UI-visibility only; the Policy re-checks server-side.
+const canFinalizeSchedule = computed(() => !!page.props.auth?.can?.finalizeSchedule);
+const canUnlockSchedule = computed(() => !!page.props.auth?.can?.unlockSchedule);
 // Admin/Registrar only — mirrors SectionPolicy::create(); gates the
 // "Add Section" button here the same way canManageRooms gates "Add
 // Room" on the Rooms page. Server-side enforcement is still the
@@ -1624,7 +1627,7 @@ const onUnlockSection = (section) => {
                                         @click.stop="openEdit(data)"
                                     />
                                     <Button
-                                        v-if="canManageFinalization && !data.is_finalized && data.total_subjects_count > 0 && data.assigned_subjects_count === data.total_subjects_count"
+                                        v-if="canFinalizeSchedule && !data.is_finalized && data.total_subjects_count > 0 && data.assigned_subjects_count === data.total_subjects_count"
                                         icon="pi pi-lock"
                                         text
                                         rounded
@@ -1635,7 +1638,7 @@ const onUnlockSection = (section) => {
                                         @click.stop="onFinalizeSection(data)"
                                     />
                                     <Button
-                                        v-if="canManageFinalization && data.is_finalized"
+                                        v-if="canUnlockSchedule && data.is_finalized"
                                         icon="pi pi-lock-open"
                                         text
                                         rounded

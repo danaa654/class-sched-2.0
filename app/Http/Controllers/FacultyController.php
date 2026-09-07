@@ -10,9 +10,11 @@ use App\Models\FacultyLoadRequest;
 use App\Models\FacultyRequest;
 use App\Models\Subject;
 use App\Services\ActivityLogService;
+use App\Services\FacultyScheduleEmailService;
 use App\Services\FacultyWorkloadService;
 use App\Services\NotificationService;
 use App\Support\AccessScope;
+use App\Support\ViewingTerm;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +27,7 @@ class FacultyController extends Controller
         private readonly FacultyWorkloadService $workloadService,
         private readonly NotificationService $notifications,
         private readonly ActivityLogService $activityLog,
+        private readonly FacultyScheduleEmailService $facultyScheduleEmail,
     ) {
     }
 
@@ -182,7 +185,7 @@ class FacultyController extends Controller
      * Display the Faculty Details page (Information, Teaching
      * Qualifications, and Workload tabs).
      */
-    public function show(Faculty $faculty): Response
+    public function show(Faculty $faculty, Request $request): Response
     {
         $this->authorize('view', $faculty);
 
@@ -198,7 +201,7 @@ class FacultyController extends Controller
         // figure, not just the summary numbers.
         $faculty->setAttribute('workload', $this->workloadService->evaluate($faculty, includePlacements: true));
 
-        $user = request()->user();
+        $user = $request->user();
 
         return Inertia::render('Scheduling/Faculty/Details', [
             'faculty' => $faculty,
@@ -222,6 +225,22 @@ class FacultyController extends Controller
             // the Maximum Teaching Units field the same way instead of
             // leaving it uncapped and editable by every role.
             'hardCapUnits' => FacultyLoadRequest::effectiveCapFor($user),
+            // Powers the Print / Send via Email buttons on the Workload
+            // tab — same underlying data Reports > Schedule by Faculty
+            // uses for its single-faculty flow (see ReportsService::
+            // scheduleByFaculty()), just resolved for whichever term
+            // this user is currently viewing rather than a report filter.
+            'scheduleMeta' => (function () use ($faculty, $request) {
+                $term = ViewingTerm::resolve($request);
+                $term?->loadMissing('schoolYear:id,name');
+
+                return [
+                    'academic_term_id' => $term?->id,
+                    'academic_year' => $term?->schoolYear?->name,
+                    'semester' => $term?->sectionSemesterValue(),
+                    'is_finalized' => $term ? $this->facultyScheduleEmail->isFinalized($faculty, $term) : false,
+                ];
+            })(),
         ]);
     }
 
