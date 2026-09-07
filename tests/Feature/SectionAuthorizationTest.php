@@ -16,14 +16,16 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Covers the Section Creation Role/College Authorization fix — the
- * exact test matrix from the ticket:
+ * Covers the Section Creation Role/College Authorization fix — updated
+ * for the current SectionPolicy::create(), which is Admin/Registrar
+ * ONLY (Dean/OIC/Assistant Dean may schedule and finalize a Section
+ * within their own College/Department scope, but may not create one):
  *
  *  Admin      -> CCS program           -> Create section -> ALLOWED
  *  Registrar  -> any program            -> Create section -> ALLOWED
- *  CCS OIC    -> CCS program            -> Create section -> ALLOWED
+ *  CCS OIC    -> CCS program            -> Create section -> BLOCKED
  *  CCS OIC    -> another college's prog -> Create section -> BLOCKED
- *  CCS Dean   -> CCS program            -> Create section -> ALLOWED
+ *  CCS Dean   -> CCS program            -> Create section -> BLOCKED
  *  CCS Dean   -> another college's prog -> Create section -> BLOCKED
  *  CCS OIC manually modifies program/college id in the request -> BLOCKED
  *  CCS OIC manually changes a section id belonging to another college -> BLOCKED
@@ -153,15 +155,20 @@ class SectionAuthorizationTest extends TestCase
         $this->assertDatabaseCount('sections', 1);
     }
 
-    public function test_ccs_oic_can_create_section_for_ccs_program(): void
+    /**
+     * Section creation is Admin/Registrar only (SectionPolicy::create())
+     * — Dean/OIC/Assistant Dean may schedule and finalize within their
+     * own College/Department scope, but not create new Sections, even
+     * for their own program.
+     */
+    public function test_ccs_oic_is_blocked_from_creating_section_for_ccs_program(): void
     {
         $oic = $this->makeUser('OIC', $this->ccs);
 
         $response = $this->actingAs($oic)->post('/scheduling/sections', $this->sectionPayload($this->ccsMajor, $this->ccsCurriculum));
 
-        $response->assertRedirect();
-        $response->assertSessionHasNoErrors();
-        $this->assertDatabaseCount('sections', 1);
+        $response->assertForbidden();
+        $this->assertDatabaseCount('sections', 0);
     }
 
     public function test_ccs_oic_is_blocked_from_creating_section_for_another_college(): void
@@ -174,15 +181,18 @@ class SectionAuthorizationTest extends TestCase
         $this->assertDatabaseCount('sections', 0);
     }
 
-    public function test_ccs_dean_can_create_section_for_ccs_program(): void
+    /**
+     * Same reasoning as the OIC case above — Dean is blocked from
+     * creating Sections even for their own College/program.
+     */
+    public function test_ccs_dean_is_blocked_from_creating_section_for_ccs_program(): void
     {
         $dean = $this->makeUser('Dean', $this->ccs);
 
         $response = $this->actingAs($dean)->post('/scheduling/sections', $this->sectionPayload($this->ccsMajor, $this->ccsCurriculum));
 
-        $response->assertRedirect();
-        $response->assertSessionHasNoErrors();
-        $this->assertDatabaseCount('sections', 1);
+        $response->assertForbidden();
+        $this->assertDatabaseCount('sections', 0);
     }
 
     public function test_ccs_dean_is_blocked_from_creating_section_for_another_college(): void
